@@ -2,17 +2,86 @@ import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type { ImportedCycle, ImportedProject, LinearCycleSettings } from "./linear";
 
+export type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
+export type ImportResult = {
+  imported: number;
+  crossTeam: number;
+  report: {
+    newProjects: ProjectSyncItem[];
+    updatedProjects: ProjectSyncItem[];
+    newlyMissingProjects: ProjectSyncItem[];
+    unchangedProjects: number;
+    stillMissingProjects: number;
+  };
+};
+
+const sameList = (left: string[], right: string[]) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+const timestamp = (value: Date | string | null) => value ? new Date(value).toISOString() : null;
+
 export async function saveImport(
   client: PoolClient,
   input: { encryptedKey: string; viewer: { id: string; name: string }; team: { id: string; name: string }; projects: ImportedProject[]; cycles?: ImportedCycle[]; cycleSettings?: LinearCycleSettings },
-): Promise<{ imported: number; crossTeam: number }> {
-  const existing = await client.query<{ team_id: string }>("SELECT team_id FROM linear_connection WHERE workspace_id = 1 FOR UPDATE");
-  if (existing.rows[0] && existing.rows[0].team_id !== input.team.id) {
+  seenAt = new Date(),
+): Promise<ImportResult> {
+  await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+  const connection = await client.query<{ team_id: string }>("SELECT team_id FROM linear_connection WHERE workspace_id = 1 FOR UPDATE");
+  if (connection.rows[0] && connection.rows[0].team_id !== input.team.id) {
     throw new Error("This proof workspace is already connected to another team.");
   }
-  const seenAt = new Date();
   const importId = randomUUID();
   const importedIds = new Set(input.projects.map((project) => project.id));
+  const sourceEdges = input.projects.flatMap((project) => (project.dependencies || [])
+    .filter((blockedId) => importedIds.has(blockedId) && blockedId !== project.id)
+    .map((blockedId) => [project.id, blockedId] as const));
+  const [savedProjects, savedIssues, savedEdges] = await Promise.all([
+    client.query<{ linear_id: string; name: string; description: string; status: string; url: string; source_updated_at: Date; cross_team: boolean; external_blockers: string[] | null; needs_review: boolean }>(
+      "SELECT linear_id,name,description,status,url,source_updated_at,cross_team,external_blockers,needs_review FROM linear_project_cache WHERE team_id=$1", [input.team.id],
+    ),
+    client.query<{ linear_id: string; project_id: string; team_id: string; identifier: string; title: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
+      "SELECT linear_id,project_id,team_id,identifier,title,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE project_id IN (SELECT linear_id FROM linear_project_cache WHERE team_id=$1)", [input.team.id],
+    ),
+    client.query<{ predecessor_project_id: string; successor_project_id: string }>(`SELECT predecessor.project_id AS predecessor_project_id,successor.project_id AS successor_project_id
+      FROM package_dependency dependency
+      JOIN work_package predecessor ON predecessor.id=dependency.predecessor_id
+      JOIN work_package successor ON successor.id=dependency.successor_id
+      WHERE dependency.source='linear' AND predecessor.team_id=$1`, [input.team.id]),
+  ]);
+  const projectById = new Map(savedProjects.rows.map((project) => [project.linear_id, project]));
+  const issueSignatures = new Map<string, string[]>();
+  for (const issue of savedIssues.rows) {
+    const signature = JSON.stringify([issue.linear_id, issue.team_id, issue.identifier, issue.title, issue.estimate === null ? null : Number(issue.estimate), issue.state_type,
+      timestamp(issue.completed_at), timestamp(issue.source_updated_at)]);
+    issueSignatures.set(issue.project_id, [...(issueSignatures.get(issue.project_id) || []), signature]);
+  }
+  const dependencyIds = new Map<string, string[]>();
+  for (const edge of savedEdges.rows) dependencyIds.set(edge.predecessor_project_id, [...(dependencyIds.get(edge.predecessor_project_id) || []), edge.successor_project_id]);
+  const report: ImportResult["report"] = { newProjects: [], updatedProjects: [], newlyMissingProjects: [], unchangedProjects: 0, stillMissingProjects: 0 };
+  for (const project of input.projects) {
+    const saved = projectById.get(project.id);
+    if (!saved) {
+      report.newProjects.push({ id: project.id, name: project.name, changes: [] });
+      continue;
+    }
+    const changes: string[] = [];
+    if (saved.name !== project.name) changes.push("name");
+    if (saved.description !== project.description) changes.push("description");
+    if (saved.status !== project.status) changes.push("status");
+    if (saved.url !== project.url) changes.push("URL");
+    if (timestamp(saved.source_updated_at) !== timestamp(project.updatedAt)) changes.push("updated timestamp");
+    if (saved.cross_team !== project.crossTeam) changes.push("cross-team scope");
+    if (!sameList(saved.external_blockers || [], (project.blockedBy || []).filter((id) => !importedIds.has(id)))) changes.push("external blockers");
+    const incomingIssues = project.issues.map((issue) => JSON.stringify([issue.id, issue.teamId, issue.identifier, issue.title, issue.estimate, issue.stateType,
+      timestamp(issue.completedAt), timestamp(issue.updatedAt)]));
+    if (!sameList(issueSignatures.get(project.id) || [], incomingIssues)) changes.push("issues");
+    const incomingDependencies = sourceEdges.filter(([projectId]) => projectId === project.id).map(([, blockedId]) => blockedId);
+    if (!sameList(dependencyIds.get(project.id) || [], incomingDependencies)) changes.push("dependencies");
+    if (changes.length) report.updatedProjects.push({ id: project.id, name: project.name, previousName: saved.name !== project.name ? saved.name : undefined, changes });
+    else report.unchangedProjects += 1;
+  }
+  for (const saved of savedProjects.rows.filter((project) => !importedIds.has(project.linear_id))) {
+    if (saved.needs_review) report.stillMissingProjects += 1;
+    else report.newlyMissingProjects.push({ id: saved.linear_id, name: saved.name, changes: ["missing from Linear"] });
+  }
   for (const project of input.projects) {
     await client.query(`
       INSERT INTO linear_project_cache (linear_id, team_id, name, description, status, url, source_updated_at, last_seen_at, last_seen_import_id, cross_team, external_blockers)
@@ -45,14 +114,11 @@ export async function saveImport(
   }
   // Replace only Linear-sourced edges. Local planning dependencies are independent,
   // and a waiver on an unchanged source edge survives the import.
-  const sourceEdges = input.projects.flatMap((project) => (project.dependencies || [])
-    .filter((blockedId) => importedIds.has(blockedId) && blockedId !== project.id)
-    .map((blockedId) => [`linear:${project.id}`, `linear:${blockedId}`]));
   for (const [predecessor, successor] of sourceEdges) {
-    await client.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES($1,$2,'linear') ON CONFLICT DO NOTHING", [predecessor, successor]);
+    await client.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES($1,$2,'linear') ON CONFLICT DO NOTHING", [`linear:${predecessor}`, `linear:${successor}`]);
   }
   const existingEdges = await client.query<{ predecessor_id: string; successor_id: string }>("SELECT predecessor_id,successor_id FROM package_dependency WHERE source='linear'");
-  const currentEdges = new Set(sourceEdges.map(([a, b]) => `${a}\0${b}`));
+  const currentEdges = new Set(sourceEdges.map(([a, b]) => `linear:${a}\0linear:${b}`));
   for (const edge of existingEdges.rows) if (!currentEdges.has(`${edge.predecessor_id}\0${edge.successor_id}`)) {
     await client.query("DELETE FROM package_dependency WHERE predecessor_id=$1 AND successor_id=$2 AND source='linear'", [edge.predecessor_id, edge.successor_id]);
   }
@@ -71,10 +137,11 @@ export async function saveImport(
       settings?.timezone ?? "America/New_York", settings?.cyclesEnabled ?? false, settings?.cycleDuration ?? null,
       settings?.cycleStartDay ?? null, settings?.cycleCooldownTime ?? null, settings?.upcomingCycleCount ?? null]);
   if (settings?.timezone) await client.query("UPDATE workspace SET timezone=$1 WHERE id=1", [settings.timezone]);
-  return { imported: input.projects.length, crossTeam: input.projects.filter((project) => project.crossTeam).length };
+  return { imported: input.projects.length, crossTeam: input.projects.filter((project) => project.crossTeam).length, report };
 }
 
 export async function saveCycleData(client: PoolClient, teamId: string, cycles: ImportedCycle[], seenAt: Date, importId = randomUUID()): Promise<void> {
+  await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
   for (const cycle of cycles) {
     if (cycle.teamId !== teamId) throw new Error("Cycle belongs to another Linear team.");
     await client.query(`INSERT INTO linear_cycle_cache(linear_id,team_id,number,name,starts_at,ends_at,completed_at,last_seen_import_id,active)

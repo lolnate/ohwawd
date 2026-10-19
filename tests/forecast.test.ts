@@ -178,7 +178,7 @@ test("Linear Cycle 44 is context; moved Cycle 46 and its ID-bound exception driv
   assert.equal(result.cycles[1].start, "2026-10-27");
   assert.equal(result.cycles[1].available, 4);
   assert.equal(result.packages[0].finish, null);
-  assert.match(result.packages[0].reason || "", /Beyond imported Linear calendar after Cycle 46/);
+  assert.match(result.packages[0].reason || "", /Beyond imported Linear calendar after Holiday week/);
 });
 
 test("no upcoming Linear cycle means no fabricated forecast calendar", () => {

@@ -21,6 +21,9 @@ export function ensureSchema(): Promise<void> {
 
 async function createSchema(): Promise<void> {
   await db().query(schemaSql);
+  await db().query("ALTER TABLE scenario_revision DROP CONSTRAINT IF EXISTS scenario_revision_scenario_id_fkey");
+  await db().query(`ALTER TABLE scenario_revision ADD CONSTRAINT scenario_revision_scenario_id_fkey
+    FOREIGN KEY (scenario_id) REFERENCES scenario(id) ON DELETE RESTRICT`);
   await db().query("ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS in_scope boolean NOT NULL DEFAULT true");
   await db().query("ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS external_blockers text[] NOT NULL DEFAULT '{}'");
   await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS selected boolean NOT NULL DEFAULT true");
@@ -198,6 +201,48 @@ export const schemaSql = `
       PRIMARY KEY (predecessor_id,successor_id,source),
       CHECK (predecessor_id <> successor_id)
     );
+    CREATE TABLE IF NOT EXISTS scenario (
+      id uuid PRIMARY KEY,
+      workspace_id integer NOT NULL REFERENCES workspace(id),
+      name text NOT NULL,
+      edit_version bigint NOT NULL DEFAULT 1 CHECK (edit_version > 0),
+      draft_source_at timestamptz NOT NULL,
+      draft_source_snapshot jsonb NOT NULL,
+      draft_snapshot jsonb NOT NULL,
+      archived boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (workspace_id, name)
+    );
+    CREATE TABLE IF NOT EXISTS scenario_revision (
+      id uuid PRIMARY KEY,
+      scenario_id uuid NOT NULL REFERENCES scenario(id) ON DELETE RESTRICT,
+      revision_number integer NOT NULL CHECK (revision_number > 0),
+      draft_edit_version bigint NOT NULL CHECK (draft_edit_version > 0),
+      calculation_version text NOT NULL,
+      source_at timestamptz NOT NULL,
+      source_snapshot jsonb NOT NULL,
+      snapshot jsonb NOT NULL,
+      rationale text NOT NULL CHECK (length(trim(rationale)) > 0),
+      author text NOT NULL CHECK (length(trim(author)) > 0),
+      published_at timestamptz NOT NULL DEFAULT now(),
+      stale_source_confirmed boolean NOT NULL DEFAULT false,
+      UNIQUE (scenario_id, revision_number)
+    );
+    CREATE TABLE IF NOT EXISTS workspace_scenario_state (
+      workspace_id integer PRIMARY KEY REFERENCES workspace(id),
+      active_scenario_id uuid REFERENCES scenario(id)
+    );
+    CREATE TABLE IF NOT EXISTS workspace_baseline (
+      workspace_id integer PRIMARY KEY REFERENCES workspace(id),
+      revision_id uuid NOT NULL UNIQUE REFERENCES scenario_revision(id)
+    );
+    CREATE OR REPLACE FUNCTION reject_scenario_revision_change() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'Published scenario revisions are immutable'; END;
+    $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS immutable_scenario_revision ON scenario_revision;
+    CREATE TRIGGER immutable_scenario_revision BEFORE UPDATE OR DELETE ON scenario_revision
+      FOR EACH ROW EXECUTE FUNCTION reject_scenario_revision_change();
   `;
 
 export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {

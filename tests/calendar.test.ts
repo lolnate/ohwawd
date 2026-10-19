@@ -16,5 +16,5 @@ test("calendar labels a Thanksgiving date with its Linear cycle and selection", 
   assert.match(markup, /2026-11-26, Linear Cycle 47/);
   assert.match(markup, /aria-pressed="true" aria-label="2026-11-26, Linear Cycle 47"/);
   assert.match(markup, /2026-10-15, Linear Cycle 44/);
-  assert.match(markup, /#47/);
+  assert.match(markup, /<small>Cycle 47<\/small>/);
 });

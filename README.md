@@ -4,13 +4,13 @@
 
 Oh, WAWD! is a shared planning space for product and engineering. Linear remains the source of projects, issues, and execution status. Oh, WAWD! connects that work to desired outcomes, delivery targets, dependencies, team capacity, and explicit scope tradeoffs.
 
-The first product surface is the **Sequencing Board**: configurable parallel planning streams (five by default), a separate deferred shelf, a target-aware capacity forecast, and saved planning scenarios. The initial design is in [docs/product-design.md](docs/product-design.md), with exact forecast and scenario rules in [docs/scheduling-contract.md](docs/scheduling-contract.md).
+The first product surface is the **Sequencing Board**: five parallel planning streams, a separate deferred shelf, a target-aware capacity forecast, and saved planning scenarios. The initial design is in [docs/product-design.md](docs/product-design.md), with exact forecast and scenario rules in [docs/scheduling-contract.md](docs/scheduling-contract.md).
 
 The supplied Atlantis HTML planner was reviewed as a reference. It lives outside this repository and is not part of the application or its source data.
 
 ## Run the private proof
 
-This repository contains slices 1 and 2: a private, single-owner React/Next.js app with read-only Linear import for one team, durable PostgreSQL storage, outcomes linked to imported projects, and a five-stream sequencing board. It creates one stable work package per project; linking a project to multiple outcomes does not create duplicate demand.
+This repository contains the three-slice private product proof: a single-owner React/Next.js app with read-only Linear import for one team, durable PostgreSQL storage, outcomes linked to imported projects, a five-stream sequencing board, and versioned decision scenarios. It creates one stable work package per project; linking a project to multiple outcomes does not create duplicate demand.
 
 Requirements: Node.js 20.9 or newer and PostgreSQL 16 (or Docker Compose). The development database can be started with `docker compose up -d db`. Create `.env.local` from `.env.example` and set a random session secret of at least 32 characters and a stable 32-byte encryption key encoded as base64. For example, `openssl rand -base64 32` generates an encryption key. Run `npm run set-owner-password` in a terminal; it prompts for the owner password without echoing it and saves a salted hash in `.env.local`. Any password characters work without quoting or escaping. Restart the server after changing these settings. Keep `.env.local` private and back up the encryption key along with the database; changing it makes the saved Linear key unreadable.
 
@@ -28,6 +28,8 @@ Assign packages, prioritize them, choose optional preferred and hard earliest Li
 
 The key is sent to the Node server over the app connection and stored only as AES-256-GCM ciphertext in PostgreSQL. Use HTTPS if accessing the app outside localhost, and keep the proof behind private network access. The app never writes to Linear. It uses the [Linear TypeScript SDK](https://linear.app/developers/sdk) for paginated reads; the SDK rejects GraphQL responses containing errors, including partial responses. There is one owner password and no invited users or public sharing.
 
-Run `npm test` for import persistence and forecast contract examples, `npm run typecheck` for TypeScript, and `npm run build` for a production build. `npm run start` serves the built app. Database tables are created on first authenticated use.
+Use Decision scenarios to save the current board as a named draft. Draft saves use optimistic versions, source refreshes mark existing drafts stale, and rebasing records the source-driven forecast delta. Load a draft to restore its planning controls, publish a reviewed draft with an author and rationale, designate a published revision as the baseline, and compare drafts or revisions side by side. Published revisions contain frozen source and forecast snapshots and are not changed by later imports.
 
-Slice 3 adds saved scenario drafts, immutable publication and baseline designation, frozen source snapshots with explicit rebase, and side-by-side comparison of scope, allocation, dates, target gaps, and reasons. The current board is one live working plan; a later Linear import updates its source data. Public sharing, configurable stream count, multi-team forecasting, and project decomposition are beyond the private proof.
+Run `npm test` for import persistence, forecast contract, and scenario lifecycle examples; run `npm run typecheck` for TypeScript and `npm run build` for a production build. `npm run start` serves the built app. Database tables are created on first authenticated use.
+
+Public sharing, configurable stream count, multi-team forecasting, and project decomposition remain beyond the private proof.

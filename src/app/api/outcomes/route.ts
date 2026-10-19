@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { db, ensureSchema } from "@/lib/db";
+import { transaction } from "@/lib/db";
 import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib/security";
 
 export async function POST(request: Request): Promise<Response> {
@@ -16,10 +16,12 @@ export async function POST(request: Request): Promise<Response> {
     if (neededBy !== null && (typeof neededBy !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(neededBy) || Number.isNaN(Date.parse(neededBy)))) {
       throw new HttpError(400, "Enter a valid needed-by date.");
     }
-    await ensureSchema();
     const id = randomUUID();
-    await db().query(`INSERT INTO outcome (id,title,description,owner,success_signal,needed_by)
-      VALUES ($1,$2,$3,$4,$5,$6)`, [id, title, description, owner, successSignal, neededBy]);
+    await transaction(async (client) => {
+      await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+      await client.query(`INSERT INTO outcome (id,title,description,owner,success_signal,needed_by)
+        VALUES ($1,$2,$3,$4,$5,$6)`, [id, title, description, owner, successSignal, neededBy]);
+    });
     return Response.json({ id }, { status: 201 });
   } catch (error) { return responseError(error); }
 }

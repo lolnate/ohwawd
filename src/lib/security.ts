@@ -10,6 +10,12 @@ function required(name: string): string {
   return value;
 }
 
+function sessionSecret(): string {
+  const value = required("SESSION_SECRET");
+  if (value.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
+  return value;
+}
+
 function same(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -24,7 +30,7 @@ export function validPassword(value: string): boolean {
 
 export async function signIn(): Promise<void> {
   const expires = String(Date.now() + 12 * 60 * 60 * 1000);
-  const signature = createHmac("sha256", required("SESSION_SECRET")).update(expires).digest("hex");
+  const signature = createHmac("sha256", sessionSecret()).update(expires).digest("hex");
   (await cookies()).set(cookieName, `${expires}.${signature}`, {
     httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 12 * 60 * 60,
   });
@@ -39,7 +45,7 @@ export async function authenticated(): Promise<boolean> {
   if (!token) return false;
   const [expires, signature] = token.split(".");
   if (!expires || !signature || !/^\d+$/.test(expires) || Number(expires) < Date.now()) return false;
-  const expected = createHmac("sha256", required("SESSION_SECRET")).update(expires).digest("hex");
+  const expected = createHmac("sha256", sessionSecret()).update(expires).digest("hex");
   return same(signature, expected);
 }
 
@@ -72,11 +78,11 @@ export function decryptKey(value: string): string {
 }
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public details?: Record<string, unknown>) { super(message); }
 }
 
 export function responseError(error: unknown): Response {
-  if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
+  if (error instanceof HttpError) return Response.json({ error: error.message, ...error.details }, { status: error.status });
   console.error("Request failed", error instanceof Error ? error.name : "Unknown error");
   return Response.json({ error: "The request could not be completed. Check the server configuration or try again." }, { status: 500 });
 }

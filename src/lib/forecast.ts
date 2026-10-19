@@ -1,3 +1,5 @@
+import { linearCycleLabel } from "./cycles";
+
 export type ForecastPackage = {
   id: string; projectId: string; name: string; status: string; streamId: string | null;
   selected: boolean; priority: number; earliest: number | null; preferred: number | null;
@@ -12,12 +14,12 @@ export type LinearForecastCycle = { id: string; number: number; name: string | n
 export type ForecastInput = {
   packages: ForecastPackage[]; streams: ForecastStream[]; dependencies: ForecastDependency[];
   outcomes: ForecastOutcome[]; baseline: number | null; reserve: number; linearCycles: LinearForecastCycle[];
-  horizon: number; sourceAt: string; timezone: string;
+  horizon: number; sourceAt: string; cycleAnchorAt?: string; timezone: string;
   adjustments?: { cycleId: string; availability: number; reserve: number | null }[];
 };
 export type PackageForecast = { id: string; demand: number; provisional: boolean; start: number | null; finish: number | null; reason: string | null; consumed: number[] };
 export type CycleForecast = { id: string; number: number; name: string | null; index: number; start: string; end: string; available: number; streams: { id: string; budget: number; used: number; idle: number; active: string[] }[] };
-export type OutcomeForecast = { id: string; status: "unplanned" | "blocked" | "beyond_horizon" | "provisional" | "forecast"; finish: number | null; endDate: string | null; target: "no_target" | "met" | "missed" | "unknown"; gapCycles: number | null; reasons: string[]; requiredIds: string[] };
+export type OutcomeForecast = { id: string; status: "unplanned" | "setup_required" | "blocked" | "beyond_horizon" | "provisional" | "forecast"; finish: number | null; endDate: string | null; target: "no_target" | "met" | "missed" | "unknown"; gapCycles: number | null; reasons: string[]; requiredIds: string[] };
 export type ForecastResult = { ready: boolean; setup: string[]; cycles: CycleForecast[]; packages: PackageForecast[]; outcomes: OutcomeForecast[]; sourceAt: string; selectedKnown: number; selectedUnknown: number; unallocated: number; errors: string[] };
 
 const milli = (value: number) => Math.round(value * 1000);
@@ -52,7 +54,8 @@ function cycleEdges(edges: ForecastDependency[], ids: Set<string>): string[] {
 export function forecast(input: ForecastInput): ForecastResult {
   const setup: string[] = [];
   if (input.baseline === null || !Number.isFinite(input.baseline) || input.baseline < 0) setup.push("Set a provisional baseline in points per cycle.");
-  const futureCycles = input.linearCycles.filter((cycle) => new Date(cycle.startsAt).getTime() > new Date(input.sourceAt).getTime())
+  const cycleAnchorAt = input.cycleAnchorAt ?? input.sourceAt;
+  const futureCycles = input.linearCycles.filter((cycle) => new Date(cycle.startsAt).getTime() > new Date(cycleAnchorAt).getTime())
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)).slice(0, input.horizon);
   if (!futureCycles.length) setup.push("No upcoming Linear cycles were imported for this team. Configure upcoming cycles in Linear, then import again.");
   const allocated = input.streams.reduce((sum, stream) => sum + stream.allocation, 0);
@@ -134,7 +137,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     const blockers = input.dependencies.filter((edge) => !edge.waived && edge.successorId === id && (packages.get(edge.predecessorId)?.finish ?? null) === null);
     result.reason = blockers.length ? `Waiting for ${blockers.map((edge) => source.get(edge.predecessorId)?.name || edge.predecessorId).join(", ")}.` :
       (item.earliest ?? 1) > futureCycles.length ? "Hard earliest start is beyond imported Linear cycles." :
-        futureCycles.length < input.horizon ? `Beyond imported Linear calendar after Cycle ${futureCycles.at(-1)?.number}; add upcoming cycles in Linear.` :
+        futureCycles.length < input.horizon ? `Beyond imported Linear calendar after ${linearCycleLabel(futureCycles.at(-1)!)}; add upcoming cycles in Linear.` :
           "Beyond horizon at current capacity, allocation, and WIP.";
   }
   const endFor = (cycle: number) => cycle === 0 ? localDate(input.sourceAt, input.timezone) : cycles[cycle - 1]?.end || null;
@@ -149,7 +152,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     const finishes = [...required].map((id) => packages.get(id)?.finish ?? null);
     const finish = reasons.length || finishes.some((value) => value === null) ? null : Math.max(...finishes as number[]);
     const onlyHorizon = reasons.length > 0 && reasons.every((reason) => /Beyond horizon|beyond the horizon|Beyond imported Linear/.test(reason));
-    const status: OutcomeForecast["status"] = !direct ? "unplanned" : !ready || onlyHorizon ? "beyond_horizon" : reasons.length ? "blocked" : finish === null ? "beyond_horizon" : [...required].some((id) => packages.get(id)?.provisional) ? "provisional" : "forecast";
+    const status: OutcomeForecast["status"] = !direct ? "unplanned" : !ready ? "setup_required" : onlyHorizon || finish === null && !reasons.length ? "beyond_horizon" : reasons.length ? "blocked" : [...required].some((id) => packages.get(id)?.provisional) ? "provisional" : "forecast";
     const endDate = finish === null ? null : endFor(finish);
     let target: OutcomeForecast["target"] = !outcome.neededBy ? "no_target" : endDate ? endDate <= outcome.neededBy ? "met" : "missed" : "unknown";
     if (!ready && outcome.neededBy) target = "unknown";

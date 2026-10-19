@@ -20,9 +20,11 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
   const client = db as unknown as PoolClient;
   const initial = project("one", "Original");
   initial.dependencies = ["two"];
-  await saveImport(client, { ...input([initial, project("two", "Second")]), cycles: [{ id: "cycle-1", teamId: "team-a", number: 44, name: null, startsAt: new Date("2026-10-01T00:00:00Z"), endsAt: new Date("2026-10-15T00:00:00Z"), completedAt: new Date("2026-10-15T00:00:00Z"), cycleDays: 14, completedPoints: 21 },
+  const initialResult = await saveImport(client, { ...input([initial, project("two", "Second")]), cycles: [{ id: "cycle-1", teamId: "team-a", number: 44, name: null, startsAt: new Date("2026-10-01T00:00:00Z"), endsAt: new Date("2026-10-15T00:00:00Z"), completedAt: new Date("2026-10-15T00:00:00Z"), cycleDays: 14, completedPoints: 21 },
     { id: "cycle-2", teamId: "team-a", number: 45, name: null, startsAt: new Date("2026-10-19T00:00:00Z"), endsAt: new Date("2026-10-26T00:00:00Z"), completedAt: null, cycleDays: 7, completedPoints: null }],
     cycleSettings: { timezone: "America/New_York", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 2 } });
+  assert.deepEqual(initialResult.report.newProjects.map((item) => [item.id, item.name]), [["one", "Original"], ["two", "Second"]]);
+  assert.equal(initialResult.report.updatedProjects.length, 0);
   const first = await db.query<{ id: string }>("SELECT id FROM work_package");
   assert.deepEqual(first.rows.map((row) => row.id).sort(), ["linear:one", "linear:two"]);
   assert.equal((await db.query("SELECT * FROM package_dependency WHERE predecessor_id='linear:one' AND successor_id='linear:two' AND source='linear'")).rows.length, 1);
@@ -31,10 +33,17 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
 
   await db.query("INSERT INTO outcome(id,title) VALUES ('00000000-0000-4000-8000-000000000001','Outcome A'), ('00000000-0000-4000-8000-000000000002','Outcome B')");
   await db.query("INSERT INTO outcome_project_link(outcome_id,project_id) VALUES ('00000000-0000-4000-8000-000000000001','one'),('00000000-0000-4000-8000-000000000002','one')");
+  await db.query("INSERT INTO stream(id,name,position) VALUES ('stream-a','Stream A',1)");
+  await db.query("UPDATE work_package SET stream_id='stream-a',priority_rank=7 WHERE project_id='one'");
   await db.query("UPDATE linear_project_cache SET in_scope=false WHERE linear_id='one'");
   const changed = project("one", "Renamed");
   changed.issues[0].estimate = 3;
-  await saveImport(client, input([changed]));
+  const changedResult = await saveImport(client, input([changed]));
+  assert.deepEqual(changedResult.report.updatedProjects, [{
+    id: "one", name: "Renamed", previousName: "Original", changes: ["name", "issues", "dependencies"],
+  }]);
+  assert.deepEqual(changedResult.report.newlyMissingProjects, [{ id: "two", name: "Second", changes: ["missing from Linear"] }]);
+  assert.equal(changedResult.report.unchangedProjects, 0);
 
   const projects = await db.query<{ linear_id: string; name: string; needs_review: boolean }>("SELECT linear_id,name,needs_review FROM linear_project_cache ORDER BY linear_id");
   assert.deepEqual(projects.rows, [
@@ -42,10 +51,14 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
     { linear_id: "two", name: "Second", needs_review: true },
   ]);
   assert.equal((await db.query("SELECT id FROM work_package WHERE project_id='one'")).rows.length, 1);
+  assert.deepEqual((await db.query<{ stream_id: string; priority_rank: number }>("SELECT stream_id,priority_rank FROM work_package WHERE project_id='one'")).rows[0], { stream_id: "stream-a", priority_rank: 7 });
   assert.equal((await db.query<{ in_scope: boolean }>("SELECT in_scope FROM linear_project_cache WHERE linear_id='one'")).rows[0].in_scope, false);
   assert.equal((await db.query("SELECT * FROM outcome_project_link WHERE project_id='one'")).rows.length, 2);
   assert.equal((await db.query("SELECT * FROM package_dependency WHERE source='linear'")).rows.length, 0);
   assert.equal((await db.query<{ estimate: string }>("SELECT estimate FROM linear_issue_cache WHERE project_id='one'")).rows[0].estimate, "3");
+  const unchangedResult = await saveImport(client, input([changed]));
+  assert.equal(unchangedResult.report.unchangedProjects, 1);
+  assert.equal(unchangedResult.report.stillMissingProjects, 1);
   await db.close();
 });
 
@@ -56,7 +69,7 @@ test("old relative cycle settings migrate to Linear cycle IDs on import", async 
   const client = db as unknown as PoolClient;
   const project: ImportedProject = { id: "p", teamId: "team-a", name: "Project", description: "", status: "planned", url: "https://linear.app/p/p", updatedAt: new Date("2026-10-15T12:00:00Z"), crossTeam: false, issues: [] };
   const base = { encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" }, team: { id: "team-a", name: "A" }, projects: [project] };
-  await saveImport(client, base);
+  await saveImport(client, base, new Date("2026-10-15T12:00:00Z"));
   await db.query("UPDATE workspace SET timezone='UTC' WHERE id=1");
   await db.query("INSERT INTO capacity_profile(workspace_id,cycle_anchor,cycle_days) VALUES(1,'2026-10-12',7)");
   await db.query("UPDATE work_package SET earliest_cycle=2,preferred_cycle=3 WHERE project_id='p'");
@@ -65,7 +78,7 @@ test("old relative cycle settings migrate to Linear cycle IDs on import", async 
   const future = [45, 46].map((number, index) => ({ id: `cycle-${number}`, teamId: "team-a", number, name: null,
     startsAt: new Date(Date.UTC(2026, 9, 19 + index * 7)), endsAt: new Date(Date.UTC(2026, 9, 26 + index * 7)),
     completedAt: null, cycleDays: 7, completedPoints: null }));
-  await saveImport(client, { ...base, cycles: future, cycleSettings: { timezone: "UTC", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 2 } });
+  await saveImport(client, { ...base, cycles: future, cycleSettings: { timezone: "UTC", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 2 } }, new Date("2026-10-15T18:00:00Z"));
   const saved = await db.query<{ earliest_linear_cycle_id: string; earliest_cycle: number | null; preferred_linear_cycle_id: string | null; preferred_cycle: number | null }>("SELECT earliest_linear_cycle_id,earliest_cycle,preferred_linear_cycle_id,preferred_cycle FROM work_package WHERE project_id='p'");
   assert.deepEqual(saved.rows[0], { earliest_linear_cycle_id: "cycle-46", earliest_cycle: null, preferred_linear_cycle_id: null, preferred_cycle: 3 });
   const adjusted = await db.query<{ linear_cycle_id: string; availability: string }>("SELECT linear_cycle_id,availability FROM linear_cycle_adjustment");

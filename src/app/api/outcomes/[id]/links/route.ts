@@ -20,6 +20,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     }
     await ensureSchema();
     await transaction(async (client) => {
+      await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
       const outcome = await client.query("SELECT id FROM outcome WHERE id=$1 FOR UPDATE", [id]);
       if (!outcome.rowCount) throw new HttpError(404, "Outcome not found.");
       const projects = await client.query<{ linear_id: string }>("SELECT linear_id FROM linear_project_cache WHERE linear_id=ANY($1::text[])", [[...ids]]);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { linearCycleLabel } from "@/lib/cycles";
 
 export type CalendarCycle = { id: string; number: number; name: string | null; startsAt: string; endsAt: string; selectable: boolean; adjusted: boolean };
 
@@ -38,7 +39,7 @@ export default function CycleCalendar({ cycles, timezone, sourceAt, selectedIds,
         const cycle = dated.find((item) => item.start <= day && day <= item.end);
         const inMonth = day.slice(0, 7) === key;
         const className = ["calendar-day", !inMonth && "outside", !cycle && "no-cycle", cycle && !cycle.selectable && "current-cycle", cycle?.adjusted && "adjusted", cycle && selected.has(cycle.id) && "chosen"].filter(Boolean).join(" ");
-        return <button type="button" key={day} className={className} disabled={!inMonth || !cycle?.selectable} aria-pressed={!!cycle && selected.has(cycle.id)} aria-label={`${day}${cycle ? `, Linear Cycle ${cycle.number}${cycle.name ? ` ${cycle.name}` : ""}` : ", no Linear cycle"}`} title={cycle ? `Cycle ${cycle.number}: ${cycle.start} – ${cycle.end}${cycle.adjusted ? " · adjusted" : ""}` : "No Linear cycle"} onClick={() => cycle && onToggle(cycle.id)}><span>{Number(day.slice(8))}</span>{cycle && <small>#{cycle.number}</small>}</button>;
+        return <button type="button" key={day} className={className} disabled={!inMonth || !cycle?.selectable} aria-pressed={!!cycle && selected.has(cycle.id)} aria-label={`${day}${cycle ? `, Linear ${linearCycleLabel(cycle)}` : ", no Linear cycle"}`} title={cycle ? `${linearCycleLabel(cycle)}: ${cycle.start} – ${cycle.end}${cycle.adjusted ? " · adjusted" : ""}` : "No Linear cycle"} onClick={() => cycle && onToggle(cycle.id)}><span>{Number(day.slice(8))}</span>{cycle && <small>{linearCycleLabel(cycle)}</small>}</button>;
       })}</div></div>;
     })}</div>
     <p className="meta">Select any date in an upcoming cycle. Dates without a Linear cycle cannot receive a planning exception; the current partial cycle is shown for context.</p>
