@@ -13,10 +13,11 @@ import { teamLocalDate, millisecondsUntilNextTeamDate, type ExtraScope, type Sco
 import { type WeeklyAvailability, type PlanningWeek } from "@/lib/planning-calendar";
 import StreamTimeline from "./stream-timeline";
 import CalendarAvailability from "./calendar-availability";
+import ProjectDrawer from "./project-drawer";
 
 type Stream = { id: string; name: string; allocation: number; wip_limit: number };
 type LinearCycle = PlanningCycle;
-export type BoardOutcome = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null };
+export type BoardOutcome = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null; stream_id: string | null };
 export type BoardState = {
   connection: { team_name: string; cycles_enabled: boolean; cycle_duration: number | null; cycle_start_day: number | null; cycle_cooldown_time: number | null; upcoming_cycle_count: number | null } | null;
   packages: Package[]; streams: Stream[]; links: { outcome_id: string; project_id: string; requirement: "minimum" | "optional" }[];
@@ -27,7 +28,7 @@ export type BoardState = {
   adjustments: { linear_cycle_id: string; number: number; name: string | null; starts_at: string; ends_at: string; availability: number; reserve: number | null }[];
   legacyAdjustments: { cycle_number: number }[]; dependencies: { predecessor_id: string; successor_id: string; source: "local" | "linear"; waived: boolean; waiver_reason: string }[];
   issues: { linear_id: string; project_id: string; identifier: string; estimate: number | null; state_type: string }[];
-  outcomes: BoardOutcome[]; timezone: string; forecast: ForecastResult; sequencing: QueueState; sequenceToken: string; sequenceConflicts: OrderConflict[];
+  outcomes: BoardOutcome[]; timezone: string; forecast: ForecastResult; sequencing: QueueState; sequenceToken: string; ownershipToken: string; sequenceConflicts: OrderConflict[];
   extraScopes: ExtraScope[]; scoping: ScopeReadiness[]; evaluatedAt: string;
   weeklyAdjustments: WeeklyAvailability[]; holidayWeeks: WeeklyAvailability[];
 };
@@ -45,6 +46,8 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
   const [leadDays, setLeadDays] = useState(14);
   const [dragging, setDragging] = useState<string | null>(null);
   const [editingWeek, setEditingWeek] = useState<PlanningWeek | null>(null);
+  const [drawerProjectId, setDrawerProjectId] = useState<string | null>(null);
+  const [placementFocus, setPlacementFocus] = useState<{ id: string; saved: boolean } | null>(null);
   const [renamingStreamId, setRenamingStreamId] = useState<string | null>(null);
   const [assignmentSearches, setAssignmentSearches] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -52,6 +55,21 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
   const [busy, setBusy] = useState(false);
   const loadGeneration = useRef(0);
   const handledFocusRequest = useRef(0);
+  useEffect(() => {
+    if (!placementFocus || busy || !state) return;
+    // Wait for the saved/reloaded cards to commit and become enabled before restoring focus.
+    if (!drawerProjectId) {
+      const item = state.packages.find((candidate) => candidate.id === placementFocus.id);
+      if (item) {
+        const container = document.getElementById(!item.selected ? "deferred-work" : item.stream_id ? `stream-work-${item.stream_id}` : "unassigned-work");
+        if (container instanceof HTMLDetailsElement) container.open = true;
+        const card = document.getElementById(`board-package-${item.id}`);
+        card?.querySelector<HTMLElement>(".drag-handle")?.focus();
+        if (placementFocus.saved) card?.scrollIntoView({ block: "nearest" });
+      }
+    }
+    setPlacementFocus(null);
+  }, [placementFocus, busy, state, drawerProjectId]);
   useEffect(() => { onStateChange?.(state, state ? "" : error); }, [state, error, onStateChange]);
   useEffect(() => {
     if (!state || !focusProject || handledFocusRequest.current === focusProject.request) return;
@@ -97,7 +115,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
     ++loadGeneration.current;
     setBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch("/api/board", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...change, sequenceToken: state?.sequenceToken }) });
+      const response = await fetch("/api/board", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...change, sequenceToken: state?.sequenceToken, ownershipToken: state?.ownershipToken }) });
       const data = await readApiResponse<BoardState>(response, "Could not save board");
       setState(data); setNotice(message); onChanged?.();
       return true;
@@ -126,15 +144,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
     const destination = !placement.selected ? "Deferred" : placement.streamId ? state!.streams.find((stream) => stream.id === placement.streamId)?.name ?? "stream" : "Needs assignment";
     const saved = await save({ type: "package", id: placement.packageId, streamId: placement.streamId, selected: placement.selected,
       ...(reason !== undefined ? { reason } : {}), ...(placement.beforeId !== undefined ? { beforeId: placement.beforeId } : {}) }, `${item.name} moved to ${destination}${placement.beforeId ? ` before ${state?.packages.find((candidate) => candidate.id === placement.beforeId)?.name ?? "project"}` : placement.beforeId === null ? " at end of stream" : ""}.`);
-    window.requestAnimationFrame(() => {
-      if (saved) {
-        const shelf = document.getElementById(!placement.selected ? "deferred-work" : !placement.streamId ? "unassigned-work" : "");
-        if (shelf instanceof HTMLDetailsElement) shelf.open = true;
-      }
-      const card = document.getElementById(`board-package-${item.id}`);
-      card?.querySelector<HTMLElement>(".drag-handle")?.focus();
-      if (saved) card?.scrollIntoView({ block: "nearest" });
-    });
+    setPlacementFocus({ id: item.id, saved });
   }
   function startDrag(event: DragEvent, id: string) {
     event.dataTransfer.effectAllowed = "move";
@@ -185,13 +195,14 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
     if (/estimate|allowance|scope/i.test(reason)) return { label: "Review extra scope", run: () => revealPackage(item, true) };
     return { label: "Review capacity and WIP", run: () => openPanel("capacity-settings") };
   };
-  const card = (item: Package) => {
+  const card = (item: Package, embedded = false) => {
     const projection = packageForecast.get(item.id) as PackageForecast | undefined;
     const unknown = state.issues.filter((issue) => issue.project_id === item.project_id && issue.estimate === null && !["completed", "canceled"].includes(issue.state_type));
-    return <ProjectPlanCard key={item.id} item={item} streams={state.streams} sequencing={state.sequencing} projection={projection}
+    const resolution = packageResolution(item, projection);
+    return <ProjectPlanCard key={item.id} item={item} embedded={embedded} streams={state.streams} sequencing={state.sequencing} projection={projection}
       extra={state.extraScopes.find((entry) => entry.package_id === item.id)} readiness={state.scoping.find((entry) => entry.packageId === item.id)}
-      unknown={unknown.map((issue) => issue.identifier)} busy={busy} cycleText={cycleText} resolution={packageResolution(item, projection)}
-      onOpenProjects={onOpenProjects} onSave={save} onMove={moveProject} onDragStart={startDrag} onDragEnd={() => setDragging(null)} />;
+      unknown={unknown.map((issue) => issue.identifier)} busy={busy} cycleText={cycleText} resolution={embedded ? { label: resolution.label, run: () => { setDrawerProjectId(null); window.requestAnimationFrame(resolution.run); } } : resolution}
+      onOpenProjects={embedded ? () => { setDrawerProjectId(null); onOpenProjects?.(); } : onOpenProjects} onSave={save} onMove={moveProject} onDragStart={startDrag} onDragEnd={() => setDragging(null)} />;
   };
   const dropTarget = (streamId: string | null, selected: boolean, beforeId: string | null, label: string) => {
     const problem = dragging ? placementError(state.sequencing, { packageId: dragging, streamId, selected, ...(streamId ? { beforeId } : {}) }) : null;
@@ -220,28 +231,29 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
   const streamSection = <div className="stream-list" id="project-streams">{state.streams.map((stream) => {
     const plan = streamDrafts[stream.id] || { name: stream.name, allocation: (stream.allocation * 100).toString(), wip: stream.wip_limit };
     const members = selected.filter((item) => item.stream_id === stream.id).sort((a, b) => (a.sequence_position ?? Infinity) - (b.sequence_position ?? Infinity) || a.id.localeCompare(b.id));
+    const countedMembers = state.packages.filter((item) => item.selected && item.stream_id === stream.id);
     const search = assignmentSearches[stream.id]?.trim().toLocaleLowerCase() || "";
     const matchingPackages = planningPackages.filter((item) => !search || item.name.toLocaleLowerCase().includes(search));
     const locationFor = (item: Package) => !item.selected ? "Deferred" : item.stream_id ? state.streams.find((candidate) => candidate.id === item.stream_id)?.name || "Another stream" : "Needs assignment";
     return <div className="stream-lane" id={`stream-${stream.id}`} key={stream.id}><div className="stream-heading"><div className="stream-title">
-      {renamingStreamId === stream.id ? <div className="stream-title-editor"><label>Stream name<input autoFocus maxLength={80} value={plan.name} onChange={(event) => setStreamDrafts((old) => ({ ...old, [stream.id]: { ...plan, name: event.target.value } }))} /></label><div className="actions"><button className="secondary" disabled={busy || !plan.name.trim()} onClick={() => void save({ type: "stream", id: stream.id, name: plan.name, allocation: Number(plan.allocation) / 100, wip: plan.wip }, `${plan.name.trim()} updated.`).then((saved) => { if (saved) setRenamingStreamId(null); })}>Save name</button><button className="quiet" disabled={busy} onClick={() => { setStreamDrafts((old) => ({ ...old, [stream.id]: { ...plan, name: stream.name } })); setRenamingStreamId(null); }}>Cancel</button></div></div> : <div className="stream-title-row"><h3>{stream.name}</h3><button className="text-button" disabled={busy} onClick={() => setRenamingStreamId(stream.id)}>Rename</button></div>}
-      <p>{members.length} selected · {Math.round(stream.allocation * 100)}% capacity · WIP {stream.wip_limit}</p>
+      {renamingStreamId === stream.id ? <div className="stream-title-editor"><label>Stream name<input autoFocus maxLength={80} value={plan.name} onChange={(event) => setStreamDrafts((old) => ({ ...old, [stream.id]: { ...plan, name: event.target.value } }))} /></label><div className="actions"><button className="secondary" disabled={busy || !plan.name.trim()} onClick={() => void save({ type: "stream", id: stream.id, name: plan.name, allocation: Number(plan.allocation) / 100, wip: plan.wip }, `${plan.name.trim()} updated.`).then((saved) => { if (saved) setRenamingStreamId(null); })}>Save name</button><button className="quiet" disabled={busy} onClick={() => { setStreamDrafts((old) => ({ ...old, [stream.id]: { ...plan, name: stream.name } })); setRenamingStreamId(null); }}>Cancel</button></div></div> : <div className="stream-title-row"><h3 tabIndex={-1}>{stream.name}</h3><button className="text-button" disabled={busy} onClick={() => setRenamingStreamId(stream.id)}>Rename</button></div>}
+      <p>{state.outcomes.filter((outcome) => outcome.stream_id === stream.id).length} outcomes · {countedMembers.length} selected projects · {fmt(result.packages.filter((projection) => countedMembers.some((item) => item.id === projection.id)).reduce((sum, projection) => sum + projection.demand, 0))} pts counted · {Math.round(stream.allocation * 100)}% capacity · WIP {stream.wip_limit}</p>
     </div><details id={`stream-settings-${stream.id}`} className="stream-settings"><summary>Stream settings</summary><div className="stream-controls"><label>Allocation %<input type="number" min="0" max="100" step="0.1" value={plan.allocation} onChange={(event) => setStreamDrafts((old) => ({ ...old, [stream.id]: { ...plan, allocation: event.target.value } }))} /></label><label>WIP<input type="number" min="1" max="50" value={plan.wip} onChange={(event) => setStreamDrafts((old) => ({ ...old, [stream.id]: { ...plan, wip: Number(event.target.value) } }))} /></label><button className="secondary" disabled={busy || !plan.name.trim()} onClick={() => void save({ type: "stream", id: stream.id, name: plan.name, allocation: Number(plan.allocation) / 100, wip: plan.wip }, `${stream.name} settings updated.`)}>Save settings</button></div></details></div>
-    {members.length > 0 && <StreamTimeline name={stream.name} projects={members} forecast={result} cycles={planningCycles} timezone={state.timezone}
+    {(countedMembers.length > 0 || state.outcomes.some((outcome) => outcome.stream_id === stream.id)) && <StreamTimeline name={stream.name} streamId={stream.id} projects={state.packages} outcomes={state.outcomes} links={state.links} streams={state.streams} forecast={result} cycles={planningCycles} timezone={state.timezone}
       anchorDate={teamLocalDate(planningCycles[0]?.startsAt ?? state.evaluatedAt, state.timezone)} weeklyAdjustments={state.weeklyAdjustments ?? []} holidays={state.holidayWeeks ?? []}
       calendarProjection={state.calendarProjection}
       cycleAdjustments={state.adjustments.map((item) => ({ cycleId: item.linear_cycle_id, availability: item.availability }))} sequencing={state.sequencing}
-      onEditWeek={setEditingWeek} onOpenProject={revealPackage} />}
-    <details className="lane-packages" id={`stream-work-${stream.id}`}><summary>Manage work <span>{members.length}</span></summary><div className="stream-assignment"><div className="assignment-intro"><h4>Assign work to {stream.name}</h4><p>Assign every project linked to an outcome, or move one project at a time. A project can belong to only one stream; assigning it here moves it from its current stream.</p></div><div className="assignment-columns"><section><h5>By outcome</h5><div className="assignment-list">{state.outcomes.map((outcome) => {
+      onEditWeek={setEditingWeek} onOpenProject={(project) => setDrawerProjectId(project.id)} />}
+    <details className="lane-packages" id={`stream-work-${stream.id}`} ref={(element) => { if (element && state.sequenceConflicts.some((conflict) => conflict.streamId === stream.id)) element.open = true; }}><summary>Manage work <span>{members.length}</span></summary><div className="stream-assignment"><div className="assignment-intro"><h4>Assign work to {stream.name}</h4><p>Assign outcomes to show their project sequences. Shared projects stay counted under their current owner until you explicitly change ownership in project details. Individual project moves change their capacity stream.</p></div><div className="assignment-columns"><section><h5>By outcome</h5><div className="assignment-list">{state.outcomes.map((outcome) => {
       const outcomeProjectIds = new Set(state.links.filter((link) => link.outcome_id === outcome.id).map((link) => link.project_id));
       const packages = state.packages.filter((item) => outcomeProjectIds.has(item.project_id));
       const hidden = packages.filter((item) => !item.in_scope);
-      const allAssigned = packages.length > 0 && packages.every((item) => item.selected && item.stream_id === stream.id);
-      return <div className="assignment-group" key={outcome.id}><div><strong>{outcome.title}</strong><small>{packages.length ? packages.map((item) => `${item.name} · ${locationFor(item)}${item.in_scope ? "" : " · hidden"}`).join("\n") : "No linked projects"}</small></div><button className={allAssigned ? "quiet" : "secondary"} disabled={busy || !packages.length || allAssigned} onClick={() => { if (hidden.length && !window.confirm(`This outcome includes ${hidden.length} hidden project${hidden.length === 1 ? "" : "s"}. Assign and select all linked projects anyway?`)) return; void save({ type: "assignment", streamId: stream.id, packageIds: packages.map((item) => item.id) }, `${packages.length} project${packages.length === 1 ? "" : "s"} from ${outcome.title} assigned to ${stream.name}.`); }}>{allAssigned ? "Assigned" : `Assign all ${packages.length}`}</button></div>;
+      const allAssigned = outcome.stream_id === stream.id;
+      return <div className="assignment-group" key={outcome.id}><div><strong>{outcome.title}</strong><small>{state.streams.find((candidate) => candidate.id === outcome.stream_id)?.name ?? "Outcome needs assignment"}{hidden.length ? ` · ${hidden.length} hidden projects` : ""}{packages.length ? ` · ${packages.length} linked projects` : " · No linked projects"}</small></div><button className={allAssigned ? "quiet" : "secondary"} disabled={busy || allAssigned} onClick={() => void save({ type: "outcomeAssignment", streamId: stream.id, outcomeId: outcome.id }, `${outcome.title} assigned to ${stream.name}. Shared project owners preserved.`)}>{allAssigned ? "Assigned" : "Assign outcome"}</button>{allAssigned && <button className="text-button" disabled={busy} onClick={() => void save({ type: "outcomeAssignment", streamId: null, outcomeId: outcome.id }, `${outcome.title} moved to Needs assignment. Project stream charges preserved.`)}>Unassign outcome</button>}</div>;
     })}{!state.outcomes.length && <p className="empty">Create an outcome and link projects to assign them together.</p>}</div></section><section><h5>By individual project</h5><label className="assignment-search">Find project<input type="search" value={assignmentSearches[stream.id] || ""} onChange={(event) => setAssignmentSearches((old) => ({ ...old, [stream.id]: event.target.value }))} placeholder="Search project names" /></label><div className="assignment-list project-assignment-list">{matchingPackages.map((item) => {
       const assignedHere = item.selected && item.stream_id === stream.id;
       return <div className="assignment-group" key={item.id}><div><strong>{item.name}</strong><small>{locationFor(item)}</small></div><button className={assignedHere ? "quiet" : "secondary"} disabled={busy || assignedHere} onClick={() => void save({ type: "assignment", streamId: stream.id, packageIds: [item.id] }, `${item.name} assigned to ${stream.name}.`)}>{assignedHere ? "Assigned" : item.stream_id && item.selected ? "Move here" : "Assign"}</button></div>;
-    })}{!matchingPackages.length && <p className="empty">No projects match this search.</p>}</div></section></div></div></details>
+    })}{!matchingPackages.length && <p className="empty">No projects match this search.</p>}</div></section></div></div>
     <div className="assigned-packages"><h4>Project sequence</h4>
       {state.sequenceConflicts.filter((conflict) => conflict.streamId === stream.id).map((conflict) => {
         const placement = { packageId: conflict.predecessorId, streamId: stream.id, selected: true, beforeId: conflict.successorId };
@@ -249,12 +261,13 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
         return <div className="sequence-conflict" key={conflict.key}><p>{conflict.message} Put the blocker first to restore this stream’s forecast.</p>
           <button className="secondary" disabled={busy || !!problem} title={problem || undefined} onClick={() => void moveProject(placement)}>Put blocker first</button></div>;
       })}
-      {queue(members, stream.id, true)}{!members.length && <p className="empty">Drop a project here or assign work to this stream.</p>}</div></div>;
+      {queue(members, stream.id, true)}{!members.length && <p className="empty">Drop a project here or assign work to this stream.</p>}</div></details></div>;
   })}</div>;
   return <section className="panel sequencing-board" id="sequencing-board">
+    {drawerProjectId && state.packages.find((item) => item.id === drawerProjectId) && <ProjectDrawer project={state.packages.find((item) => item.id === drawerProjectId)!} state={state} busy={busy} error={error} notice={notice} onSave={save} onOpenProject={(project) => setDrawerProjectId(project.id)} onClose={() => setDrawerProjectId(null)}>{card(state.packages.find((item) => item.id === drawerProjectId)!, true)}</ProjectDrawer>}
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
     <div className="board-summary"><div><strong>{fmt(result.selectedKnown)} pts</strong><small>selected estimates + extra scope</small></div><div><strong>{result.selectedUnknown}</strong><small>uncovered issues</small></div><div><strong>{Math.round(totalAllocation * 100)}%</strong><small>allocated · {Math.round(result.unallocated * 100)}% headroom</small></div><div><strong>{result.ready ? `${result.cycles.length} cycles` : "Setup needed"}</strong><small>forecast horizon used</small></div></div>
-    <p className="queue-instructions" id="queue-instructions">Drag projects into stream order, or use the arrow buttons and Location / Place before controls. Alt + ↑ / ↓ reorders a focused drag handle. Dependencies still apply; WIP can allow overlapping work.</p>
+    <p className="queue-instructions" id="queue-instructions">Select a project block to inspect its details or change where its points count. Open Manage work to assign outcomes and reorder projects using drag, arrow buttons, or Location / Place before. Alt + ↑ / ↓ reorders a focused drag handle. Dependencies and WIP still apply.</p>
     {state.packages.some((item) => !item.in_scope && item.selected) && <div className="blocker-line"><p className="meta">Hidden selected packages remain included in forecast totals.</p><button className="text-button" onClick={onOpenProjects}>Review hidden projects</button></div>}
     <section className={`action-center${result.ready && !unassigned.length && !blockedOutcomes.length && !scopeAttention.length && !state.sequenceConflicts.length ? " ready" : ""}`} aria-labelledby="next-actions-title"><div className="compact-section-head"><div><p className="eyebrow">Planning attention</p><h3 id="next-actions-title">{unassigned.length ? `Assign ${unassigned.length} selected project${unassigned.length === 1 ? "" : "s"}` : result.setup.length || result.errors.length ? "Finish forecast setup" : state.sequenceConflicts.length ? "Resolve stream order" : blockedOutcomes.length ? `Resolve ${blockedOutcomes.length} blocked outcome${blockedOutcomes.length === 1 ? "" : "s"}` : scopeAttention.length ? "Review upcoming project scope" : "Plan is ready to review"}</h3></div><span>{result.setup.length + result.errors.length + unassigned.length + blockedOutcomes.length + scopeAttention.length + state.sequenceConflicts.length} open</span></div>
       <div className="action-list">
@@ -270,6 +283,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
       </div>
     </section>
     {streamSection}
+    {state.outcomes.some((outcome) => !outcome.stream_id) && <div className="unassigned-outcomes"><h3>Outcomes needing a stream</h3><p>Choose a stream to show the outcome's project sequence. Existing shared capacity owners are preserved.</p>{state.outcomes.filter((outcome) => !outcome.stream_id).map((outcome) => <label key={outcome.id}>{outcome.title}<select disabled={busy} value="" aria-label={`Assign ${outcome.title} to stream`} onChange={(event) => void save({ type: "outcomeAssignment", outcomeId: outcome.id, streamId: event.target.value }, `${outcome.title} assigned to ${state.streams.find((stream) => stream.id === event.target.value)?.name}.`)}><option value="">Choose stream…</option>{state.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select></label>)}</div>}
     <StreamManager refreshKey={refreshKey} onChanged={() => { void load(); onChanged?.(); }} />
     <div className="board-shelves priority-shelf"><div>{dropTarget(null, true, null, "Drop into Needs assignment")}
       <details id="unassigned-work" className="stream-lane lane-packages" open={unassigned.length > 0}><summary>Needs assignment <span className="count">{unassigned.length}</span></summary><p>Selected demand stays visible; a required outcome has no credible date until assigned.</p>{queue(unassigned, null, true)}{!unassigned.length && <p className="empty">No selected work waiting for a stream.</p>}</details></div></div>

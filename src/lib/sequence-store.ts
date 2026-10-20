@@ -43,6 +43,12 @@ export async function placeProjects(client: Client, placements: Placement[], exp
       await client.query("UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4 WHERE id=$1", [item.id, item.streamId, item.selected, item.position]);
     }
   }
+  await clearIncompatibleOutcomeOwners(client);
+}
+
+export async function clearIncompatibleOutcomeOwners(client: Client): Promise<void> {
+  await client.query(`UPDATE work_package w SET capacity_outcome_id=NULL FROM outcome o
+    WHERE w.capacity_outcome_id=o.id AND (NOT w.selected OR w.stream_id IS DISTINCT FROM o.stream_id)`);
 }
 
 export async function rejectNewOrderConflicts(client: Client, before: QueueState): Promise<void> {

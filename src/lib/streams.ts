@@ -125,8 +125,9 @@ async function retirementState(database: StreamClient, id: string, migrationInpu
     : migrationInput, packages, activeIds, id);
   const packageIds = packages.map((item) => item.id);
   const projectIds = packages.map((item) => item.project_id);
-  const outcomes = projectIds.length ? (await database.query<{ id: string; title: string }>(`SELECT DISTINCT outcome.id,outcome.title FROM outcome
-    JOIN outcome_project_link link ON link.outcome_id=outcome.id WHERE link.project_id=ANY($1::text[]) ORDER BY outcome.title`, [projectIds])).rows : [];
+  const outcomes = (await database.query<{ id: string; title: string }>(`SELECT DISTINCT outcome.id,outcome.title FROM outcome
+    LEFT JOIN outcome_project_link link ON link.outcome_id=outcome.id
+    WHERE outcome.stream_id=$1 OR link.project_id=ANY($2::text[]) ORDER BY outcome.title`, [id, projectIds])).rows;
   const dependencies = packageIds.length ? (await database.query<{ predecessor_id: string; successor_id: string; source: string }>(`SELECT predecessor_id,successor_id,source FROM package_dependency
     WHERE predecessor_id=ANY($1::text[]) OR successor_id=ANY($1::text[]) ORDER BY predecessor_id,successor_id`, [packageIds])).rows : [];
   const scenarios = await database.query<{ id: string; name: string; draft_snapshot: { streams?: { id: string }[]; packages?: { stream_id: string | null }[] } }>("SELECT id,name,draft_snapshot FROM scenario ORDER BY name");
@@ -151,6 +152,8 @@ async function applyRetirementRows(database: StreamClient, id: string, migration
   }
   await placeProjects(database, migrations.map((migration) => ({ packageId: migration.packageId, streamId: migration.targetStreamId,
     selected: state.packages.find((item) => item.id === migration.packageId)!.selected })));
+  await database.query("UPDATE work_package SET capacity_outcome_id=NULL WHERE capacity_outcome_id IN (SELECT id FROM outcome WHERE stream_id=$1)", [id]);
+  await database.query("UPDATE outcome SET stream_id=NULL WHERE stream_id=$1", [id]);
   await database.query("UPDATE stream SET active=false,allocation=0,retired_at=now(),retirement_reason=$2 WHERE id=$1 AND active=true", [id, reason]);
   const remaining = await orderedActiveStreams(database);
   await writeOrder(database, remaining.map((item) => item.id));

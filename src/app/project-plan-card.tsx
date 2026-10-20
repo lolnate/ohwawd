@@ -6,10 +6,12 @@ import { linearPriorityLabel, type ExtraScope, type ScopeReadiness } from "@/lib
 import { placementError, type QueueState, type Placement } from "@/lib/sequencing";
 
 export type BoardProject = { id: string; project_id: string; name: string; status: string; url: string; stream_id: string | null;
+  capacity_outcome_id?: string | null; description?: string;
   selected: boolean; sequence_position: number | null; linear_priority: number | null; pause_reason: string;
   cross_team: boolean; needs_review: boolean; in_scope: boolean };
 
 type Props = { item: BoardProject; streams: { id: string; name: string }[]; sequencing: QueueState; projection?: PackageForecast;
+  embedded?: boolean;
   extra?: ExtraScope; readiness?: ScopeReadiness; unknown: string[]; busy: boolean; cycleText: (index: number | null | undefined) => string;
   resolution: { label: string; run: () => void }; onOpenProjects?: () => void;
   onSave: (change: Record<string, unknown>, message: string) => Promise<boolean>;
@@ -17,7 +19,7 @@ type Props = { item: BoardProject; streams: { id: string; name: string }[]; sequ
 
 const fmt = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 
-export default function ProjectPlanCard({ item, streams, sequencing, projection, extra, readiness, unknown, busy, cycleText, resolution,
+export default function ProjectPlanCard({ item, streams, sequencing, projection, extra, readiness, unknown, busy, cycleText, resolution, embedded = false,
   onOpenProjects, onSave, onMove, onDragStart, onDragEnd }: Props) {
   const [location, setLocation] = useState(!item.selected ? "deferred" : item.stream_id || "");
   const [beforeId, setBeforeId] = useState("auto");
@@ -37,17 +39,17 @@ export default function ProjectPlanCard({ item, streams, sequencing, projection,
   const canUp = item.selected && !!item.stream_id && index > 0 && !placementError(sequencing, up);
   const canDown = item.selected && !!item.stream_id && index < lane.length - 1 && !placementError(sequencing, down);
   const dependencies = sequencing.dependencies.filter((edge) => edge.predecessorId === item.id || edge.successorId === item.id);
-  return <article className="board-card project-plan-card" id={`board-package-${item.id}`} data-project-id={item.id}>
+  return <article className="board-card project-plan-card" id={embedded ? undefined : `board-package-${item.id}`} data-project-id={embedded ? undefined : item.id}>
     <div className="project-queue-head">
-      <button className="drag-handle quiet" type="button" draggable={!busy} disabled={busy} aria-label={`Drag ${item.name}`} aria-describedby="queue-instructions"
+      {!embedded && <button className="drag-handle quiet" type="button" draggable={!busy} disabled={busy} aria-label={`Drag ${item.name}`} aria-describedby="queue-instructions"
         onDragStart={(event) => onDragStart(event, item.id)} onDragEnd={onDragEnd}
         onKeyDown={(event) => { if (event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
           event.preventDefault(); if (event.key === "ArrowUp" && canUp) void onMove(up); if (event.key === "ArrowDown" && canDown) void onMove(down);
-        } }}>⠿</button>
+        } }}>⠿</button>}
       <div className="project-queue-title"><div className="card-title"><a href={item.url} target="_blank" rel="noreferrer">{item.name} ↗</a><span className="tag">{item.status}</span></div>
         <p className="meta">Linear priority: {linearPriorityLabel(item.linear_priority)}{item.selected && item.stream_id ? ` · position ${item.sequence_position ?? index + 1}` : ""}</p>
       </div>
-      {item.selected && item.stream_id && <div className="queue-step-controls">
+      {!embedded && item.selected && item.stream_id && <div className="queue-step-controls">
         <button type="button" className="quiet" aria-label={`Move ${item.name} up`} disabled={busy || !canUp} onClick={() => void onMove(up)}>↑</button>
         <button type="button" className="quiet" aria-label={`Move ${item.name} down`} disabled={busy || !canDown} onClick={() => void onMove(down)}>↓</button>
       </div>}
@@ -68,7 +70,7 @@ export default function ProjectPlanCard({ item, streams, sequencing, projection,
       if (detailsRef.current) { detailsRef.current.open = true; detailsRef.current.querySelector<HTMLElement>(".extra-scope-editor input")?.focus(); }
     }}>Review scope</button>}
     {(item.cross_team || item.needs_review) && <div className="blocker-line"><p className="warning">{item.cross_team ? "Cross-team work needs decomposition." : "Missing from latest import."}</p><button className="text-button" onClick={onOpenProjects}>Review source</button></div>}
-    <details className="project-plan-details" ref={detailsRef}><summary>Plan this project</summary>
+    <details className="project-plan-details" ref={detailsRef} open={embedded || undefined}><summary>Plan this project</summary>
       <form onSubmit={(event) => { event.preventDefault(); void onMove(placement, reason); }}>
         <div className="board-fields"><label>Location<select aria-label="Location" value={location} onChange={(event) => { setLocation(event.target.value); setBeforeId("auto"); }}>
           <option value="">Needs assignment</option>{streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}<option value="deferred">Deferred</option>

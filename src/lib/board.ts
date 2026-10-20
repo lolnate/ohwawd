@@ -7,6 +7,7 @@ import { scopeChangeSummary, scopeReadiness, teamLocalDate, type ExtraScope } fr
 import { addCalendarDays, holidayWeeksForRange, mondayOf, type WeeklyAvailability } from "./planning-calendar";
 import { projectCycleCalendar } from "./cycle-projection";
 import type { PlanningCycle } from "./cycles";
+import { ownershipToken } from "./outcome-ownership";
 
 export async function assignPackagesToStream(client: Pick<PoolClient, "query">, streamId: string, packageIds: string[]): Promise<void> {
   await placeProjects(client, packageIds.map((packageId) => ({ packageId, streamId, selected: true })));
@@ -21,11 +22,11 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
   const [workspace, connection, packages, streams, links, outcomes, capacity, adjustments, dependencies, extraScopes, issues, observations, linearCycles, legacyAdjustments, weeklyAdjustments] = await Promise.all([
     database.query("SELECT created_at FROM workspace WHERE id=1"),
     database.query("SELECT last_imported_at,cycles_refreshed_at,GREATEST(last_imported_at,cycles_refreshed_at) AS source_at,team_id,team_name,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count FROM linear_connection WHERE workspace_id=1"),
-    database.query(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.selected,w.sequence_position,w.pause_reason,
-      p.name,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`),
+    database.query(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.capacity_outcome_id,w.selected,w.sequence_position,w.pause_reason,
+      p.name,p.description,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`),
     database.query("SELECT id,name,position,wip_limit,allocation::float FROM stream WHERE active=true ORDER BY position"),
     database.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link"),
-    database.query("SELECT id,title,description,owner,success_signal,needed_by::text FROM outcome ORDER BY created_at DESC"),
+    database.query("SELECT id,title,description,owner,success_signal,needed_by::text,stream_id,created_at FROM outcome ORDER BY created_at DESC,id"),
     database.query("SELECT cycle_anchor::text,cycle_days,baseline::float,baseline_reason,reserve::float,horizon,scoping_lead_days,holidays_enabled FROM capacity_profile WHERE workspace_id=1"),
     database.query("SELECT a.linear_cycle_id,c.number,c.name,c.starts_at,c.ends_at,a.availability::float,a.reserve::float FROM linear_cycle_adjustment a JOIN linear_cycle_cache c ON c.linear_id=a.linear_cycle_id ORDER BY c.starts_at"),
     database.query("SELECT predecessor_id,successor_id,source,waived,waiver_reason FROM package_dependency"),
@@ -99,5 +100,5 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
     currentCycleId: currentCycle?.linear_id ?? null, cycleAnchorAt, futureCycleIds: future.map((row) => row.linear_id),
     adjustments: adjustments.rows, legacyAdjustments: legacyAdjustments.rows,
     dependencies: dependencies.rows, issues: issues.rows, reconciliationWarnings, timezone: input.timezone,
-    sequencing, sequenceToken: sequenceToken(sequencing), sequenceConflicts, forecast: result };
+     sequencing, sequenceToken: sequenceToken(sequencing), ownershipToken: await ownershipToken(database), sequenceConflicts, forecast: result };
 }

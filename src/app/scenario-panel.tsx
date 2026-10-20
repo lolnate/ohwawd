@@ -13,10 +13,10 @@ type Comparison = {
   left?: { label: string }; right?: { label: string }; sourceChanged: boolean;
   calculationVersions: { from: string; to: string };
   capacity: { from: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null; scopingLeadDays: number; holidaysEnabled: boolean }; to: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null; scopingLeadDays: number; holidaysEnabled: boolean } };
-  packages: Change<{ selected: boolean; streamId: string | null; sequence: number | null; pauseReason: string }>[];
+  packages: Change<{ selected: boolean; streamId: string | null; sequence: number | null; pauseReason: string; capacityOutcomeId?: string | null; capacityOutcome?: string | null }>[];
   streams: Change<{ name: string; position: number; allocation: number; wip: number }>[];
   streamLifecycle: Change<{ name: string; position: number; allocation: number; wip: number }>[];
-  outcomes: Change<{ status: string; calendarProjected?: boolean; endDate: string | null; target: string; gapCycles: number | null; reasons: string[]; title: string | null; description: string; owner: string; successSignal: string; neededBy: string | null }>[];
+  outcomes: Change<{ status: string; calendarProjected?: boolean; endDate: string | null; target: string; gapCycles: number | null; reasons: string[]; title: string | null; description: string; owner: string; successSignal: string; neededBy: string | null; streamId?: string | null; streamName?: string | null }>[];
   adjustments: AssumptionChange[]; extraScopes: AssumptionChange[]; priorities: AssumptionChange[]; dependencies: AssumptionChange[]; links: AssumptionChange[];
   linearCycles: AssumptionChange[]; weeklyAvailability: AssumptionChange[];
 };
@@ -133,13 +133,14 @@ export default function ScenarioPanel({ onActivated, onOpenBoard, refreshKey }: 
       <p className="meta">Calculation: {comparison.calculationVersions?.from ?? "v0"} → {comparison.calculationVersions?.to ?? "v0"} · Scope projects {comparison.capacity.from.scopingLeadDays ?? 14} → {comparison.capacity.to.scopingLeadDays ?? 14} days before start</p>
       <p className="meta">Holiday availability preset: {comparison.capacity.from.holidaysEnabled ? "on" : "off"} → {comparison.capacity.to.holidaysEnabled ? "on" : "off"}</p>
       <div className="comparison-grid"><div><h4>Scope and placement</h4>
-        {comparison.packages.map((change) => <p key={change.id}><strong>{change.name}</strong>: {change.from?.selected ? change.from.streamId || "unassigned" : "deferred"} (position {change.from?.sequence ?? "–"}) → {change.to?.selected ? change.to.streamId || "unassigned" : "deferred"} (position {change.to?.sequence ?? "–"})</p>)}
+        {comparison.packages.map((change) => <p key={change.id}><strong>{change.name}</strong>: {change.from?.selected ? change.from.streamId || "unassigned" : "deferred"} (position {change.from?.sequence ?? "–"}) → {change.to?.selected ? change.to.streamId || "unassigned" : "deferred"} (position {change.to?.sequence ?? "–"}){change.from?.capacityOutcomeId !== change.to?.capacityOutcomeId ? ` · Capacity outcome: ${change.from?.capacityOutcome || "Other selected work"} → ${change.to?.capacityOutcome || "Other selected work"}` : ""}</p>)}
         {!comparison.packages.length && <p className="empty">No package changes.</p>}
       </div><div><h4>Streams</h4>
         {comparison.streams.map((change) => <p key={change.id}><strong>{change.from?.name || change.name}</strong>{change.from?.name !== change.to?.name ? ` → ${change.to?.name}` : ""}: {Math.round((change.from?.allocation || 0) * 100)}% / WIP {change.from?.wip ?? "-"} → {Math.round((change.to?.allocation || 0) * 100)}% / WIP {change.to?.wip ?? "-"}</p>)}
         {!comparison.streams.length && <p className="empty">No stream changes.</p>}
       </div><div><h4>Outcome forecast</h4>
         {comparison.outcomes.map((change) => <p key={change.id}><strong>{change.title}</strong>: {change.from?.endDate || change.from?.status || "absent"}{change.from?.calendarProjected ? " · projected cycles" : ""} ({change.from?.target || "-"}{change.from?.gapCycles ? `, ${change.from.gapCycles} cycle gap` : ""}) → {change.to?.endDate || change.to?.status || "absent"}{change.to?.calendarProjected ? " · projected cycles" : ""} ({change.to?.target || "-"}{change.to?.gapCycles ? `, ${change.to.gapCycles} cycle gap` : ""}){change.to?.reasons.length ? ` · ${change.to.reasons.join(" ")}` : ""}</p>)}
+        {comparison.outcomes.filter((change) => change.from?.streamId !== change.to?.streamId).map((change) => <p key={`placement:${change.id}`}><strong>{change.title}</strong> stream: {change.from?.streamName || "Needs assignment"} → {change.to?.streamName || "Needs assignment"}</p>)}
         {!comparison.outcomes.length && <p className="empty">No outcome changes.</p>}
       </div></div>
     </div>}

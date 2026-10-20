@@ -1,6 +1,7 @@
 import { Pool, type PoolClient, type PoolConfig } from "pg";
 import { assignmentSchemaSql, assignmentMigrationSql } from "./assignment-schema";
 import { weeklyCapacitySchemaSql } from "./weekly-capacity-schema";
+import { outcomeOwnershipSchemaSql, outcomeOwnershipMigrationSql } from "./outcome-ownership-schema";
 
 declare global {
   // Reuse the pool across Next.js development reloads.
@@ -257,7 +258,7 @@ export const schemaSql = `
     DROP TRIGGER IF EXISTS immutable_scenario_revision ON scenario_revision;
     CREATE TRIGGER immutable_scenario_revision BEFORE UPDATE OR DELETE ON scenario_revision
       FOR EACH ROW EXECUTE FUNCTION reject_scenario_revision_change();
-  ` + assignmentSchemaSql + weeklyCapacitySchemaSql;
+  ` + assignmentSchemaSql + weeklyCapacitySchemaSql + outcomeOwnershipSchemaSql;
 
 const upgradeSql = `
   ALTER TABLE scenario_revision DROP CONSTRAINT IF EXISTS scenario_revision_scenario_id_fkey;
@@ -302,6 +303,7 @@ export const migrations = [
   { version: 2, name: "upgrade-existing-proof-schema", sql: upgradeSql },
   { version: 3, name: "project-assignment-v1", sql: assignmentMigrationSql },
   { version: 4, name: "weekly-planning-capacity", sql: weeklyCapacitySchemaSql },
+  { version: 5, name: "outcome-capacity-ownership", sql: outcomeOwnershipMigrationSql },
 ] as const;
 
 export const latestMigrationVersion = migrations.at(-1)!.version;

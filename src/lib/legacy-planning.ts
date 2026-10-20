@@ -1,12 +1,19 @@
 import type { getBoard } from "./board";
 import { dependencyOrder, type QueuePackage } from "./sequencing";
 import { issueBaseline, type ExtraScope } from "./project-scope";
+import { inferOutcomePlanning } from "./outcome-planning";
 
 type BoardSnapshot = Awaited<ReturnType<typeof getBoard>>;
 type LegacyAllowance = { package_id: string; kind: string; points: number; issue_ids: string[]; rationale: string };
 
 /** Adapt planning inputs only; never recompute or write a published revision's result. */
 export function adaptLegacyPlanning(original: BoardSnapshot): BoardSnapshot {
+  const snapshot = adaptScopePlanning(original);
+  const inferred = inferOutcomePlanning(snapshot.packages, snapshot.outcomes, snapshot.links, snapshot.streams);
+  return { ...snapshot, ...inferred };
+}
+
+function adaptScopePlanning(original: BoardSnapshot): BoardSnapshot {
   if (original.calculationVersion === "v3" && original.extraScopes) return original;
   const snapshot = structuredClone(original);
   snapshot.weeklyAdjustments ??= [];

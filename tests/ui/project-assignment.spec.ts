@@ -1,10 +1,19 @@
 import { test, expect } from "./assignment-fixture";
+import type { Page } from "@playwright/test";
 
 const project = (id: string) => `[data-project-id="linear:${id}"]`;
+async function openSequences(page: Page) {
+  for (const id of ["core", "delivery"]) {
+    const controls = page.locator(`#stream-work-${id}`);
+    await expect(controls).toBeAttached();
+    if (!await controls.evaluate((element) => (element as HTMLDetailsElement).open)) await controls.locator(":scope > summary").click();
+  }
+}
 
 test("a source dependency conflict explains the blocker and repairs stream order explicitly", async ({ page, assignment }) => {
   await assignment.addSourceConflict();
   await page.goto("/");
+  await openSequences(page);
   await expect(page.locator(project("a")).locator(".dependency-context")).toContainText("blocked by Web experience");
   await expect(page.locator(".sequence-conflict")).toContainText("Web experience must precede API foundation");
   await page.getByRole("button", { name: "Put blocker first", exact: true }).click();
@@ -16,6 +25,7 @@ test("a source dependency conflict explains the blocker and repairs stream order
 
 test("pointer drag saves queue order independently of Linear priority and survives reload", async ({ page, assignment }) => {
   await page.goto("/");
+  await openSequences(page);
   const core = page.getByRole("list", { name: "Core project sequence" });
   await expect(core.locator("article")).toHaveCount(2);
   await expect(core.locator("article").first()).toContainText("API foundation");
@@ -25,12 +35,14 @@ test("pointer drag saves queue order independently of Linear priority and surviv
   await expect(page.getByRole("button", { name: "Drag Web experience", exact: true })).toBeFocused();
   expect((await assignment.board()).packages.find((item) => item.project_id === "b")!.sequence_position).toBe(1);
   await page.reload();
+  await openSequences(page);
   await expect(core.locator("article").first()).toContainText("Web experience");
   await expect(page.locator(project("b"))).toContainText("Linear priority: Urgent");
 });
 
 test("keyboard moves reject dependency reversal and location controls support cross-stream and optional deferral", async ({ page, assignment }) => {
   await page.goto("/");
+  await openSequences(page);
   await page.getByRole("button", { name: "Drag Web experience", exact: true }).focus();
   await page.keyboard.press("Alt+ArrowUp");
   await expect(page.getByRole("list", { name: "Core project sequence" }).locator("article").first()).toContainText("Web experience");
@@ -58,6 +70,7 @@ test("keyboard moves reject dependency reversal and location controls support cr
 
 test("stale drop reloads saved order and retains a usable focused project", async ({ page, assignment }) => {
   await page.goto("/");
+  await openSequences(page);
   await expect(page.locator(project("b"))).toBeVisible();
   assignment.invalidateNextMove();
   const transfer = await page.evaluateHandle(() => { const data = new DataTransfer(); data.setData("text/plain", "linear:a"); return data; });
@@ -71,8 +84,10 @@ test.describe("touch controls", () => {
 test.use({ hasTouch: true });
 test("edit one extra budget and refresh scope attention across midnight", async ({ page, assignment }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.clock.install({ time: new Date("2026-11-05T23:59:59Z") });
+  await page.clock.install({ time: new Date("2026-11-05T23:59:58Z") });
+  await page.clock.pauseAt(new Date("2026-11-05T23:59:59Z"));
   await page.goto("/");
+  await openSequences(page);
   await page.getByRole("button", { name: "Move Web experience up", exact: true }).tap();
   const web = page.locator(project("b"));
   await web.getByText("Plan this project", { exact: true }).tap();
@@ -84,6 +99,7 @@ test("edit one extra budget and refresh scope attention across midnight", async 
   await expect(web.getByLabel("Review date")).toHaveCount(0);
   assignment.time("2026-11-06T00:00:01Z");
   await page.clock.fastForward(2100);
+  await page.clock.resume();
   await expect(web.getByText("Needs scoping", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: /Needs scoping · Web experience/ }).click();
   await expect(web.getByLabel("Extra scope points")).toBeVisible();
@@ -99,6 +115,7 @@ test("edit one extra budget and refresh scope attention across midnight", async 
 
 test("board changes can be saved, compared and published as v3 scenarios", async ({ page, assignment }) => {
   await page.goto("/");
+  await openSequences(page);
   const discovery = page.locator(project("d"));
   await discovery.getByText("Plan this project", { exact: true }).click();
   await discovery.getByLabel("Extra scope points").fill("4");
@@ -114,6 +131,7 @@ test("board changes can be saved, compared and published as v3 scenarios", async
   await page.getByRole("button", { name: "Publish revision" }).click();
   await expect(page.getByRole("status")).toContainText("Immutable revision published");
   await page.getByRole("button", { name: /^Board/ }).click();
+  await openSequences(page);
   await page.getByRole("button", { name: "Move Web experience up", exact: true }).click();
   await page.getByRole("button", { name: /^Scenarios/ }).click();
   await page.getByRole("button", { name: "Save board", exact: true }).click();

@@ -18,11 +18,11 @@ Stream schedules SHALL use month-grouped headers subdivided into Monday-start ca
 - **THEN** the shared week displays C46 / C47 rather than C26 / C27
 
 ### Requirement: Compact horizontal navigation
-The desktop timeline SHALL fit approximately two to three months at a typical board width, retain sticky project labels during horizontal scrolling, and expose further weeks in the same scrollable region. The region SHALL support keyboard scrolling and stay contained on small screens.
+The desktop timeline SHALL fit approximately two to three months at a typical board width, retain sticky outcome labels during horizontal scrolling, and expose further weeks in the same scrollable region. The primary label column SHALL be titled Outcome. Unowned selected projects SHALL be grouped under Other selected work. The region SHALL support keyboard scrolling and stay contained on small screens.
 
 #### Scenario: View later months
 - **WHEN** the planner scrolls horizontally to later weeks
-- **THEN** the project names remain visible and aligned with their schedule rows
+- **THEN** outcome names remain visible and aligned with their project-block rows
 - **AND** later month/week headers and capacity bands remain aligned
 
 ### Requirement: Honest date and dependency presentation

@@ -4,6 +4,8 @@ import { getBoard } from "./board";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./security";
 import { adaptLegacyPlanning } from "./legacy-planning";
+import { replaceOutcomeLinks } from "./outcome-ownership";
+import { clearIncompatibleOutcomeOwners } from "./sequence-store";
 
 export const calculationVersion = "v3";
 
@@ -89,13 +91,13 @@ function planningState(original: BoardSnapshot, reference?: BoardSnapshot) {
     .map((edge) => `${edge.predecessor_id}\0${edge.successor_id}`)) : null;
   return {
     packages: board.packages.filter((item) => !packageIds || packageIds.has(item.id)).map((item) => ({ id: item.id, streamId: item.stream_id, selected: item.selected,
-      sequence: item.sequence_position ?? null, reason: item.pause_reason })).sort((a, b) => a.id.localeCompare(b.id)),
+      sequence: item.sequence_position ?? null, reason: item.pause_reason, capacityOutcomeId: item.capacity_outcome_id ?? null })).sort((a, b) => a.id.localeCompare(b.id)),
     streams: board.streams.map((item) => ({ id: item.id, name: item.name, position: item.position,
       wip: item.wip_limit, allocation: item.allocation })).sort((a, b) => a.id.localeCompare(b.id)),
     links: board.links.map((item) => ({ outcomeId: item.outcome_id, projectId: item.project_id, requirement: item.requirement }))
       .sort((a, b) => `${a.outcomeId}\0${a.projectId}`.localeCompare(`${b.outcomeId}\0${b.projectId}`)),
     outcomes: board.outcomes.map((item) => ({ id: item.id, title: item.title, description: item.description,
-      owner: item.owner, successSignal: item.success_signal, neededBy: item.needed_by })).sort((a, b) => a.id.localeCompare(b.id)),
+      owner: item.owner, successSignal: item.success_signal, neededBy: item.needed_by, streamId: item.stream_id ?? null })).sort((a, b) => a.id.localeCompare(b.id)),
     capacity: board.capacity,
     adjustments: board.adjustments.map((item) => ({ cycleId: item.linear_cycle_id, availability: item.availability, reserve: item.reserve }))
       .sort((a, b) => a.cycleId.localeCompare(b.cycleId)),
@@ -129,6 +131,7 @@ function streamConflicts(snapshot: BoardSnapshot, registry: StreamRegistry) {
   const references = new Set<string>();
   for (const stream of snapshot.streams ?? []) references.add(stream.id);
   for (const item of snapshot.packages ?? []) if (item.stream_id) references.add(item.stream_id);
+  for (const outcome of snapshot.outcomes ?? []) if (outcome.stream_id) references.add(outcome.stream_id);
   return [...references].filter((id) => !registry.get(id)?.active).sort()
     .map((id) => ({ id, name: registry.get(id)?.name ?? snapshot.streams?.find((item) => item.id === id)?.name ?? id }));
 }
@@ -329,7 +332,7 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   });
 
   for (const item of snapshot.packages) {
-    await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4,pause_reason=$5 WHERE id=$1`,
+    await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4,pause_reason=$5,capacity_outcome_id=NULL WHERE id=$1`,
     [item.id, item.stream_id, item.selected, item.sequence_position ?? null, item.pause_reason]);
   }
   await database.query(`UPDATE work_package w SET sequence_position=ordered.position FROM
@@ -391,17 +394,21 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   }
 
   for (const outcome of snapshot.outcomes) {
-    await database.query(`INSERT INTO outcome(id,title,description,owner,success_signal,needed_by)
-      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6,updated_at=now()`,
-    [outcome.id, outcome.title, outcome.description ?? "", outcome.owner ?? "", outcome.success_signal ?? "", outcome.needed_by]);
+    await database.query(`INSERT INTO outcome(id,title,description,owner,success_signal,needed_by,stream_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6,stream_id=$7,updated_at=now()`,
+    [outcome.id, outcome.title, outcome.description ?? "", outcome.owner ?? "", outcome.success_signal ?? "", outcome.needed_by, outcome.stream_id ?? null]);
   }
-  const outcomeIds = snapshot.outcomes.map((outcome) => outcome.id);
-  await database.query("DELETE FROM outcome_project_link WHERE outcome_id=ANY($1::uuid[])", [outcomeIds]);
-  for (const link of snapshot.links) {
-    await database.query(`INSERT INTO outcome_project_link(outcome_id,project_id,requirement)
-      SELECT $1,$2,$3 WHERE EXISTS(SELECT 1 FROM outcome WHERE id=$1) AND EXISTS(SELECT 1 FROM linear_project_cache WHERE linear_id=$2)`,
-    [link.outcome_id, link.project_id, link.requirement]);
+  for (const outcome of snapshot.outcomes) {
+    const available = await database.query<{ linear_id: string }>("SELECT linear_id FROM linear_project_cache WHERE linear_id=ANY($1::text[])", [snapshot.links.filter((link) => link.outcome_id === outcome.id).map((link) => link.project_id)]);
+    await replaceOutcomeLinks(database, outcome.id, snapshot.links.filter((link) => link.outcome_id === outcome.id && available.rows.some((project) => project.linear_id === link.project_id)).map((link) => ({ projectId: link.project_id, requirement: link.requirement })));
   }
+  for (const item of snapshot.packages) {
+    await database.query(`UPDATE work_package w SET capacity_outcome_id=$2 WHERE w.id=$1 AND w.selected
+      AND EXISTS(SELECT 1 FROM outcome o JOIN outcome_project_link l ON l.outcome_id=o.id
+        WHERE o.id=$2 AND l.project_id=w.project_id AND o.stream_id=w.stream_id)`, [item.id, item.capacity_outcome_id ?? null]);
+  }
+  // Later-imported packages retain their placement, but cannot keep an owner whose stream moved.
+  await clearIncompatibleOutcomeOwners(database);
   await database.query(`INSERT INTO workspace_scenario_state(workspace_id,active_scenario_id) VALUES(1,$1)
     ON CONFLICT(workspace_id) DO UPDATE SET active_scenario_id=EXCLUDED.active_scenario_id`, [id]);
   return summaryFor(database, id);
@@ -496,9 +503,11 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     const before = leftPackages.get(id);
     const after = rightPackages.get(id);
     const from = before ? { selected: before.selected, streamId: before.stream_id ? leftStreamNames.get(before.stream_id) ?? "Retired stream" : null,
-      sequence: before.sequence_position ?? null, pauseReason: before.pause_reason } : null;
+      sequence: before.sequence_position ?? null, pauseReason: before.pause_reason, capacityOutcomeId: before.capacity_outcome_id ?? null,
+      capacityOutcome: left.outcomes.find((outcome) => outcome.id === before.capacity_outcome_id)?.title ?? null } : null;
     const to = after ? { selected: after.selected, streamId: after.stream_id ? rightStreamNames.get(after.stream_id) ?? "Retired stream" : null,
-      sequence: after.sequence_position ?? null, pauseReason: after.pause_reason } : null;
+      sequence: after.sequence_position ?? null, pauseReason: after.pause_reason, capacityOutcomeId: after.capacity_outcome_id ?? null,
+      capacityOutcome: right.outcomes.find((outcome) => outcome.id === after.capacity_outcome_id)?.title ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: after?.name ?? before?.name ?? id, from, to }];
   });
   const leftOutcomes = new Map(left.forecast.outcomes.map((item) => [item.id, item]));
@@ -512,10 +521,12 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     const afterDefinition = right.outcomes.find((item) => item.id === id);
     const from = before ? { status: before.status, calendarProjected: before.calendarProjected ?? false, endDate: before.endDate, target: before.target, gapCycles: before.gapCycles, reasons: before.reasons,
       title: beforeDefinition?.title ?? null, description: beforeDefinition?.description ?? "", owner: beforeDefinition?.owner ?? "",
-      successSignal: beforeDefinition?.success_signal ?? "", neededBy: beforeDefinition?.needed_by ?? null } : null;
+      successSignal: beforeDefinition?.success_signal ?? "", neededBy: beforeDefinition?.needed_by ?? null, streamId: beforeDefinition?.stream_id ?? null,
+      streamName: leftStreamNames.get(beforeDefinition?.stream_id ?? "") ?? null } : null;
     const to = after ? { status: after.status, calendarProjected: after.calendarProjected ?? false, endDate: after.endDate, target: after.target, gapCycles: after.gapCycles, reasons: after.reasons,
       title: afterDefinition?.title ?? null, description: afterDefinition?.description ?? "", owner: afterDefinition?.owner ?? "",
-      successSignal: afterDefinition?.success_signal ?? "", neededBy: afterDefinition?.needed_by ?? null } : null;
+      successSignal: afterDefinition?.success_signal ?? "", neededBy: afterDefinition?.needed_by ?? null, streamId: afterDefinition?.stream_id ?? null,
+      streamName: rightStreamNames.get(afterDefinition?.stream_id ?? "") ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, title: outcomeNames.get(id) ?? id, from, to }];
   });
   const leftStreams = new Map(left.streams.map((item) => [item.id, item]));

@@ -1,5 +1,6 @@
 import { db, ensureSchema, transaction } from "@/lib/db";
 import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib/security";
+import { replaceOutcomeLinks } from "@/lib/outcome-ownership";
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   try {
@@ -25,10 +26,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       if (!outcome.rowCount) throw new HttpError(404, "Outcome not found.");
       const projects = await client.query<{ linear_id: string }>("SELECT linear_id FROM linear_project_cache WHERE linear_id=ANY($1::text[])", [[...ids]]);
       if (projects.rowCount !== ids.size) throw new HttpError(400, "A selected project is not imported.");
-      await client.query("DELETE FROM outcome_project_link WHERE outcome_id=$1", [id]);
-      for (const link of links) {
-        await client.query("INSERT INTO outcome_project_link (outcome_id,project_id,requirement) VALUES ($1,$2,$3)", [id, link.projectId, link.requirement]);
-      }
+      await replaceOutcomeLinks(client, id, links);
     });
     return Response.json({ saved: true });
   } catch (error) { return responseError(error); }

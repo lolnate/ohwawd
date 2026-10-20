@@ -10,10 +10,12 @@ import { createScenario, listScenarios, saveScenario, activateScenario, publishS
 import { HttpError } from "../../src/lib/security";
 import { saveHolidayPreset, saveWeeklyAvailability } from "../../src/lib/weekly-capacity-store";
 import { addStream, listStreams } from "../../src/lib/streams";
+import { assignOutcomeToStream, replaceOutcomeLinks, transferProjectOwnership } from "../../src/lib/outcome-ownership";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
   setDemand: (projectId: string, points: number | null) => Promise<void>; requireProject: (projectId: string) => Promise<void>; pauseUnassigned: () => Promise<void>;
-  configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void> };
+  configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void>;
+  shareProjects: () => Promise<void>; changeOwner: (outcomeId: string) => Promise<void> };
 export const test = base.extend<{ assignment: Controls }>({
   assignment: async ({ page }, use) => {
     const browserErrors: string[] = [];
@@ -42,8 +44,9 @@ export const test = base.extend<{ assignment: Controls }>({
       }, seenAt);
       await database.query("INSERT INTO capacity_profile(workspace_id,baseline,baseline_reason) VALUES(1,20,'Fixture delivery')");
       await placeProjects(client, [{ packageId: "linear:a", streamId: "core", selected: true }, { packageId: "linear:b", streamId: "core", selected: true }, { packageId: "linear:c", streamId: "delivery", selected: true }]);
-      await database.query("INSERT INTO outcome(id,title,needed_by) VALUES('00000000-0000-4000-8000-000000000001','Launch','2027-01-31')");
+      await database.query("INSERT INTO outcome(id,title,needed_by,stream_id) VALUES('00000000-0000-4000-8000-000000000001','Launch','2027-01-31','delivery')");
       await database.query("INSERT INTO outcome_project_link(outcome_id,project_id) VALUES('00000000-0000-4000-8000-000000000001','c')");
+      await database.query("UPDATE work_package SET capacity_outcome_id='00000000-0000-4000-8000-000000000001' WHERE project_id='c'");
       await page.route("**/api/**", async (route) => {
         const request = route.request();
         const url = new URL(request.url());
@@ -60,6 +63,8 @@ export const test = base.extend<{ assignment: Controls }>({
                 await placeProjects(client, [{ packageId: body.id, streamId: body.streamId, selected: body.selected, beforeId: body.beforeId }]);
                 if (body.reason !== undefined) await database.query("UPDATE work_package SET pause_reason=$2 WHERE id=$1", [body.id, body.reason]);
               } else if (body.type === "extraScope") await saveExtraScope(client, body);
+              else if (body.type === "ownership") await transferProjectOwnership(client, body);
+              else if (body.type === "outcomeAssignment") await assignOutcomeToStream(client, body);
               else if (body.type === "scoping") await saveScopingWindow(client, body.leadDays);
               else if (body.type === "weeklyAvailability") await saveWeeklyAvailability(client, body);
               else if (body.type === "holidayPreset") await saveHolidayPreset(client, body.enabled);
@@ -75,8 +80,7 @@ export const test = base.extend<{ assignment: Controls }>({
           else if (path.startsWith("/api/outcomes/")) {
             const id = path.split("/")[3];
             if (path.endsWith("/links") && request.method() === "PUT") {
-              await database.query("DELETE FROM outcome_project_link WHERE outcome_id=$1", [id]);
-              for (const link of body.links) await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES($1,$2,$3)", [id, link.projectId, link.requirement]);
+              await replaceOutcomeLinks(client, id, body.links);
             } else if (request.method() === "PUT") {
               await database.query("UPDATE outcome SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6 WHERE id=$1",
                 [id, body.title, body.description, body.owner, body.successSignal, body.neededBy || null]);
@@ -108,6 +112,16 @@ export const test = base.extend<{ assignment: Controls }>({
           await database.query("INSERT INTO outcome_project_link(outcome_id,project_id) VALUES('00000000-0000-4000-8000-000000000001',$1)", [projectId]);
         },
         pauseUnassigned: () => placeProjects(client, [{ packageId: "linear:d", streamId: null, selected: false }]),
+        changeOwner: async (outcomeId) => { const current = await board(); await transferProjectOwnership(client, { packageId: "linear:a", outcomeId, sequenceToken: current.sequenceToken, ownershipToken: current.ownershipToken }); },
+        shareProjects: async () => {
+          await database.query("UPDATE stream SET wip_limit=2 WHERE id='core'");
+          await database.query("INSERT INTO outcome(id,title,stream_id) VALUES('00000000-0000-4000-8000-000000000002','Foundation','core'),('00000000-0000-4000-8000-000000000003','Retention','core'),('00000000-0000-4000-8000-000000000004','Empty outcome','delivery')");
+          await replaceOutcomeLinks(client, '00000000-0000-4000-8000-000000000002', [{ projectId: 'a', requirement: 'minimum' }, { projectId: 'b', requirement: 'optional' }]);
+          await replaceOutcomeLinks(client, '00000000-0000-4000-8000-000000000003', [{ projectId: 'a', requirement: 'minimum' }]);
+          await replaceOutcomeLinks(client, '00000000-0000-4000-8000-000000000001', [{ projectId: 'a', requirement: 'minimum' }, { projectId: 'c', requirement: 'minimum' }]);
+          await database.query("UPDATE work_package SET capacity_outcome_id='00000000-0000-4000-8000-000000000002' WHERE project_id IN ('a','b')");
+          await database.query("UPDATE linear_project_cache SET description='The API foundation scope imported from Linear.' WHERE linear_id='a'");
+        },
         configureCycles: async (options) => {
           if (options.visibleOffset !== undefined) await database.query("UPDATE linear_cycle_cache SET name='Cycle ' || (number+$1)::text", [options.visibleOffset]);
           if (options.importedCount !== undefined) await database.query("UPDATE linear_cycle_cache SET active=(number<=$1)", [options.importedCount]);

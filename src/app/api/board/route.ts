@@ -4,6 +4,7 @@ import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib
 import { placeProjects, requireSequenceToken, rejectNewOrderConflicts } from "@/lib/sequence-store";
 import { saveExtraScope, saveScopingWindow } from "@/lib/scope-store";
 import { saveHolidayPreset, saveWeeklyAvailability } from "@/lib/weekly-capacity-store";
+import { assignOutcomeToStream, transferProjectOwnership } from "@/lib/outcome-ownership";
 
 const finite = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
@@ -36,6 +37,10 @@ export async function PUT(request: Request): Promise<Response> {
         if (body.beforeId !== undefined && body.beforeId !== null && typeof body.beforeId !== "string") throw new HttpError(400, "Choose an insertion project or end of stream.");
         await placeProjects(client, [{ packageId: body.id, selected, streamId, beforeId: body.beforeId }]);
         await client.query("UPDATE work_package SET pause_reason=$2 WHERE id=$1", [body.id, reason.trim()]);
+      } else if (body.type === "outcomeAssignment") {
+        await assignOutcomeToStream(client, body);
+      } else if (body.type === "ownership") {
+        await transferProjectOwnership(client, body);
       } else if (body.type === "stream") {
         const name = typeof body.name === "string" ? body.name.trim() : "";
         if (typeof body.id !== "string" || !name || name.length > 80 || !finite(body.allocation, 0, 1) || !Number.isInteger(body.wip) || !finite(body.wip, 1, 50)) throw new HttpError(400, "Enter a stream name, a 0–100% allocation, and a positive WIP limit.");
