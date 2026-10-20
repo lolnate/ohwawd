@@ -6,8 +6,6 @@ Oh, WAWD! is a shared planning space for product and engineering. Linear remains
 
 The first product surface is the **Sequencing Board**: five parallel planning streams, a separate deferred shelf, a target-aware capacity forecast, and saved planning scenarios. The initial design is in [docs/product-design.md](docs/product-design.md), with exact forecast and scenario rules in [docs/scheduling-contract.md](docs/scheduling-contract.md).
 
-The supplied Atlantis HTML planner was reviewed as a reference. It lives outside this repository and is not part of the application or its source data.
-
 ## Run the private proof
 
 This repository contains the three-slice private product proof: a single-owner React/Next.js app with read-only Linear import for one team, durable PostgreSQL storage, outcomes linked to imported projects, a five-stream sequencing board, and versioned decision scenarios. It creates one stable work package per project; linking a project to multiple outcomes does not create duplicate demand.

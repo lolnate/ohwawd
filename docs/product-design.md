@@ -14,9 +14,7 @@ Linear is the system of record for execution. Oh, WAWD! owns the planning layer:
 
 Linear already supports project timelines and end-to-start project dependencies, and it estimates upcoming cycle capacity from recent velocity. Oh, WAWD! should build on those facts. Its distinctive job is to connect product outcomes to a conserved capacity model and compare explicit portfolio tradeoffs across saved scenarios. [Linear timeline](https://linear.app/docs/timeline), [Linear cycles](https://linear.app/docs/use-cycles).
 
-## What the reference planner teaches us
-
-The supplied `atlantis-roadmap-planner-v4.html` is a useful interaction prototype. Its Sequencing Board demonstrates:
+## Impactful design elements worth keeping in mind
 
 - A five-row timeline that groups related work into outcome-level execution projects.
 - A target line, capacity summary, and immediate recalculation when scope or the weekly rate changes.
