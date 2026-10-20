@@ -15,7 +15,7 @@
 .action-item b { flex: 0 0 auto; color: #21645a; font-size: .7rem; }
 .action-item.error-action b { color: #a74748; }
 .action-ready { margin: 0; background: #fff; padding: 13px; color: #397163; font-size: .8rem; }
-.priority-shelf { margin-bottom: 14px; }
+.priority-shelf { grid-template-columns: minmax(0, 1fr); margin-bottom: 14px; }
 .priority-shelf .stream-lane { border-color: #7fb4a5; background: #f2f8f4; }
 .blocker-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .blocker-line p { margin-bottom: 6px; }

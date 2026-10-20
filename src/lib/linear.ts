@@ -7,12 +7,27 @@ export type ImportedIssue = {
 };
 export type ImportedProject = {
   id: string; teamId: string; name: string; description: string; status: string; url: string;
-  updatedAt: Date; crossTeam: boolean; issues: ImportedIssue[]; dependencies?: string[]; blockedBy?: string[];
+  updatedAt: Date; crossTeam: boolean; priority?: number | null; issues: ImportedIssue[]; dependencies?: string[]; blockedBy?: string[];
 };
 export type ImportedCycle = { id: string; teamId: string; number: number; name: string | null; startsAt: Date; endsAt: Date; completedAt: Date | null; cycleDays: number; completedPoints: number | null };
 export type LinearCycleSettings = { timezone: string; cyclesEnabled: boolean; cycleDuration: number; cycleStartDay: number; cycleCooldownTime: number; upcomingCycleCount: number };
 export type LinearTeam = { id: string; name: string; key: string };
 export type ProjectPreview = { id: string; name: string; status: string };
+
+type ProjectRelation = { type: string; anchorType?: string; relatedAnchorType?: string; projectId?: string; relatedProjectId?: string; archivedAt?: Date | null };
+
+/** Linear project dependencies use end/start anchors, unlike issue "blocks" relations. */
+export function linearProjectDependencies(relations: ProjectRelation[]): { predecessorId: string; successorId: string }[] {
+  const edges = new Map<string, { predecessorId: string; successorId: string }>();
+  for (const relation of relations) {
+    if (relation.archivedAt || !relation.projectId || !relation.relatedProjectId || relation.projectId === relation.relatedProjectId) continue;
+    const finishToStart = relation.type === "dependency" && relation.anchorType === "end" && relation.relatedAnchorType === "start";
+    if (!finishToStart && relation.type !== "blocks") continue;
+    const edge = { predecessorId: relation.projectId, successorId: relation.relatedProjectId };
+    edges.set(`${edge.predecessorId}:${edge.successorId}`, edge);
+  }
+  return [...edges.values()];
+}
 
 type ProjectDetailsResponse = {
   project: {
@@ -134,14 +149,13 @@ export function createLinearSource(apiKey: string) {
         const [relations, inverseRelations] = includeIssues ? await Promise.all([
           all(await project.relations({ first: 50 })), all(await project.inverseRelations({ first: 50 })),
         ]) : [[], []];
+        const dependencyEdges = linearProjectDependencies([...relations, ...inverseRelations]);
         return {
           id: project.id, teamId, name: project.name, description: project.description || "",
-          status: project.state || "unknown", url: project.url, updatedAt: project.updatedAt,
+          status: project.state || "unknown", url: project.url, updatedAt: project.updatedAt, priority: project.priority,
           crossTeam: extraTeams || projectTeams.length > 1 || issues.some((issue) => issue.teamId !== teamId), issues,
-          dependencies: relations.filter((relation) => relation.type === "blocks" && relation.projectId === project.id && !relation.archivedAt)
-            .map((relation) => relation.relatedProjectId).filter((id): id is string => !!id),
-          blockedBy: inverseRelations.filter((relation) => relation.type === "blocks" && relation.relatedProjectId === project.id && !relation.archivedAt)
-            .map((relation) => relation.projectId).filter((id): id is string => !!id),
+          dependencies: dependencyEdges.filter((edge) => edge.predecessorId === project.id).map((edge) => edge.successorId),
+          blockedBy: dependencyEdges.filter((edge) => edge.successorId === project.id).map((edge) => edge.predecessorId),
         } satisfies ImportedProject;
         }));
         result.push(...page.filter((project): project is NonNullable<typeof project> => project !== null));

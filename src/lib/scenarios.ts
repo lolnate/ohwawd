@@ -3,8 +3,9 @@ import type { PoolClient } from "pg";
 import { getBoard } from "./board";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./security";
+import { adaptLegacyPlanning } from "./legacy-planning";
 
-export const calculationVersion = "v0";
+export const calculationVersion = "v2";
 
 type ScenarioClient = Pick<PoolClient, "query">;
 type BoardSnapshot = Awaited<ReturnType<typeof getBoard>>;
@@ -81,14 +82,14 @@ function sourceSnapshot(board: BoardSnapshot) {
   };
 }
 
-function planningState(board: BoardSnapshot, reference?: BoardSnapshot) {
+function planningState(original: BoardSnapshot, reference?: BoardSnapshot) {
+  const board = adaptLegacyPlanning(original);
   const packageIds = reference ? new Set(reference.packages.map((item) => item.id)) : null;
   const linearEdges = reference ? new Set(reference.dependencies.filter((edge) => edge.source === "linear")
     .map((edge) => `${edge.predecessor_id}\0${edge.successor_id}`)) : null;
   return {
     packages: board.packages.filter((item) => !packageIds || packageIds.has(item.id)).map((item) => ({ id: item.id, streamId: item.stream_id, selected: item.selected,
-      mustInclude: item.must_include, priority: item.priority_rank, earliest: item.earliest_linear_cycle_id,
-      preferred: item.preferred_linear_cycle_id, reason: item.pause_reason })).sort((a, b) => a.id.localeCompare(b.id)),
+      sequence: item.sequence_position ?? null, reason: item.pause_reason })).sort((a, b) => a.id.localeCompare(b.id)),
     streams: board.streams.map((item) => ({ id: item.id, name: item.name, position: item.position,
       wip: item.wip_limit, allocation: item.allocation })).sort((a, b) => a.id.localeCompare(b.id)),
     links: board.links.map((item) => ({ outcomeId: item.outcome_id, projectId: item.project_id, requirement: item.requirement }))
@@ -98,12 +99,13 @@ function planningState(board: BoardSnapshot, reference?: BoardSnapshot) {
     capacity: board.capacity,
     adjustments: board.adjustments.map((item) => ({ cycleId: item.linear_cycle_id, availability: item.availability, reserve: item.reserve }))
       .sort((a, b) => a.cycleId.localeCompare(b.cycleId)),
+    weeklyAdjustments: [...board.weeklyAdjustments].sort((a, b) => a.weekStart.localeCompare(b.weekStart)),
     dependencies: board.dependencies.filter((edge) => edge.source === "local" || !linearEdges || linearEdges.has(`${edge.predecessor_id}\0${edge.successor_id}`))
       .map((edge) => ({ predecessorId: edge.predecessor_id, successorId: edge.successor_id, source: edge.source,
         waived: edge.waived, reason: edge.waiver_reason })).sort((a, b) => `${a.source}\0${a.predecessorId}\0${a.successorId}`.localeCompare(`${b.source}\0${b.predecessorId}\0${b.successorId}`)),
-    allowances: board.allowances.filter((item) => !packageIds || packageIds.has(item.package_id))
-      .map((item) => ({ packageId: item.package_id, kind: item.kind, points: item.points, issueIds: item.issue_ids,
-        owner: item.owner, reviewDate: item.review_date, rationale: item.rationale })).sort((a, b) => `${a.packageId}\0${a.kind}`.localeCompare(`${b.packageId}\0${b.kind}`)),
+    extraScopes: board.extraScopes.filter((item) => !packageIds || packageIds.has(item.package_id))
+      .map((item) => ({ packageId: item.package_id, points: item.points, notes: item.notes, issueIds: [...item.issue_ids].sort(),
+        issueBaseline: item.issue_baseline, legacyReview: item.legacy_review })).sort((a, b) => a.packageId.localeCompare(b.packageId)),
   };
 }
 
@@ -116,6 +118,11 @@ function fingerprint(value: unknown): string {
     return item;
   };
   return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+}
+
+export function stablePreviewBoard(board: BoardSnapshot) {
+  const { evaluatedAt: _clock, scoping: _readiness, ...stable } = board;
+  return stable;
 }
 
 function streamConflicts(snapshot: BoardSnapshot, registry: StreamRegistry) {
@@ -142,6 +149,9 @@ function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: R
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     streamConflicts: streamConflicts(row.draft_snapshot, registry),
+    conversionNotice: row.draft_snapshot.calculationVersion === "v2" ? null : row.draft_snapshot.calculationVersion === "v1"
+      ? "This draft predates weekly availability. Loading preserves its capacity with holiday defaults disabled; save the board to store the v2 plan."
+      : "This legacy draft uses numeric ranks and retired start/must-include controls. Loading adapts its sequence and Extra scope with holiday defaults disabled; save the board to store the v2 plan.",
     revisions,
   };
 }
@@ -275,7 +285,7 @@ export async function previewScenarioRebase(id: string, input: { expectedVersion
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
   await requireActiveScenario(database, id);
   const board = await getBoard(database);
-  return { scenario: await summaryFor(database, id), comparison: compareSnapshots(existing.draft_snapshot, board), previewToken: fingerprint(board) };
+  return { scenario: await summaryFor(database, id), comparison: compareSnapshots(existing.draft_snapshot, board), previewToken: fingerprint(stablePreviewBoard(board)) };
 }
 
 export async function rebaseScenario(id: string, input: { expectedVersion: number; confirm?: boolean; previewToken?: string }, client?: ScenarioClient) {
@@ -288,7 +298,7 @@ export async function rebaseScenario(id: string, input: { expectedVersion: numbe
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
   await requireActiveScenario(database, id);
   const board = await getBoard(database);
-  if (typeof input.previewToken !== "string" || input.previewToken !== fingerprint(board)) {
+  if (typeof input.previewToken !== "string" || input.previewToken !== fingerprint(stablePreviewBoard(board))) {
     throw new HttpError(409, "The board changed after the rebase preview. Preview it again before accepting.", { code: "REBASE_PREVIEW_STALE" });
   }
   const updated = await database.query(`UPDATE scenario SET draft_source_at=$3,draft_source_snapshot=$4::jsonb,
@@ -310,18 +320,19 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   const scenario = await loadScenario(database, id, true);
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
-  const snapshot = scenario.draft_snapshot;
+  const snapshot = adaptLegacyPlanning(scenario.draft_snapshot);
   const conflicts = streamConflicts(snapshot, await currentStreamRegistry(database));
   if (conflicts.length) throw new HttpError(409, "This draft references retired streams. Restore those streams or create a reconciled draft from the current board.", {
     code: "STREAM_RECONCILIATION_REQUIRED", streamConflicts: conflicts,
   });
 
   for (const item of snapshot.packages) {
-    await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,must_include=$4,priority_rank=$5,
-      earliest_cycle=$6,preferred_cycle=$7,earliest_linear_cycle_id=$8,preferred_linear_cycle_id=$9,pause_reason=$10 WHERE id=$1`,
-    [item.id, item.stream_id, item.selected, item.must_include, item.priority_rank, item.earliest_cycle, item.preferred_cycle,
-      item.earliest_linear_cycle_id, item.preferred_linear_cycle_id, item.pause_reason]);
+    await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4,pause_reason=$5 WHERE id=$1`,
+    [item.id, item.stream_id, item.selected, item.sequence_position ?? null, item.pause_reason]);
   }
+  await database.query(`UPDATE work_package w SET sequence_position=ordered.position FROM
+    (SELECT id,row_number() OVER(PARTITION BY stream_id ORDER BY sequence_position NULLS LAST,id)::integer AS position
+      FROM work_package WHERE selected AND stream_id IS NOT NULL) ordered WHERE w.id=ordered.id`);
   const snapshotStreamIds = snapshot.streams.map((stream) => stream.id);
   const extraStreams = await database.query<{ id: string; name: string }>("SELECT id,name FROM stream WHERE active=true AND NOT(id=ANY($1::text[])) ORDER BY position,name,id", [snapshotStreamIds]);
   const desiredNames = [...snapshot.streams.map((stream) => stream.name), ...extraStreams.rows.map((stream) => stream.name)];
@@ -340,10 +351,14 @@ export async function activateScenario(id: string, input: { expectedVersion: num
     await database.query("UPDATE stream SET position=$2,allocation=0 WHERE id=$1", [extraStreams.rows[index].id, snapshot.streams.length + index + 1]);
   }
   const capacity = snapshot.capacity;
-  await database.query(`INSERT INTO capacity_profile(workspace_id,cycle_anchor,cycle_days,baseline,baseline_reason,reserve,horizon)
-    VALUES(1,$1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id) DO UPDATE SET cycle_anchor=$1,cycle_days=$2,
-    baseline=$3,baseline_reason=$4,reserve=$5,horizon=$6`,
-  [capacity.cycle_anchor, capacity.cycle_days, capacity.baseline, capacity.baseline_reason, capacity.reserve, capacity.horizon]);
+  await database.query(`INSERT INTO capacity_profile(workspace_id,cycle_anchor,cycle_days,baseline,baseline_reason,reserve,horizon,scoping_lead_days,holidays_enabled)
+    VALUES(1,$1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(workspace_id) DO UPDATE SET cycle_anchor=$1,cycle_days=$2,
+    baseline=$3,baseline_reason=$4,reserve=$5,horizon=$6,scoping_lead_days=$7,holidays_enabled=$8`,
+  [capacity.cycle_anchor, capacity.cycle_days, capacity.baseline, capacity.baseline_reason, capacity.reserve, capacity.horizon, capacity.scoping_lead_days ?? 14, capacity.holidays_enabled]);
+  await database.query("DELETE FROM weekly_capacity_adjustment");
+  for (const week of snapshot.weeklyAdjustments) {
+    await database.query("INSERT INTO weekly_capacity_adjustment(week_start,availability,label) VALUES($1::date,$2,$3)", [week.weekStart, week.availability, week.label]);
+  }
 
   await database.query("DELETE FROM linear_cycle_adjustment");
   for (const adjustment of snapshot.adjustments) {
@@ -352,11 +367,11 @@ export async function activateScenario(id: string, input: { expectedVersion: num
     [adjustment.linear_cycle_id, adjustment.availability, adjustment.reserve]);
   }
   const packageIds = snapshot.packages.map((item) => item.id);
-  await database.query("DELETE FROM package_allowance WHERE package_id=ANY($1::text[])", [packageIds]);
-  for (const allowance of snapshot.allowances) {
-    await database.query(`INSERT INTO package_allowance(package_id,kind,points,issue_ids,owner,review_date,rationale)
-      SELECT $1,$2,$3,$4,$5,$6,$7 WHERE EXISTS(SELECT 1 FROM work_package WHERE id=$1)`,
-    [allowance.package_id, allowance.kind, allowance.points, allowance.issue_ids, allowance.owner, allowance.review_date, allowance.rationale]);
+  await database.query("DELETE FROM package_extra_scope WHERE package_id=ANY($1::text[])", [packageIds]);
+  for (const extra of snapshot.extraScopes) {
+    await database.query(`INSERT INTO package_extra_scope(package_id,points,notes,issue_ids,issue_baseline,legacy_review)
+      SELECT $1,$2,$3,$4,$5::jsonb,$6 WHERE EXISTS(SELECT 1 FROM work_package WHERE id=$1)`,
+    [extra.package_id, extra.points, extra.notes, extra.issue_ids, JSON.stringify(extra.issue_baseline), extra.legacy_review]);
   }
   await database.query(`DELETE FROM package_dependency WHERE source='local'
     AND predecessor_id=ANY($1::text[]) AND successor_id=ANY($1::text[])`, [packageIds]);
@@ -399,6 +414,7 @@ export async function publishScenario(id: string, input: {
   const scenario = await loadScenario(database, id, true);
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
+  if (scenario.draft_snapshot.calculationVersion !== "v2") throw new HttpError(409, "Load and save this older draft to capture weekly availability assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
   const rationale = typeof input.rationale === "string" ? input.rationale.trim() : "";
   const author = typeof input.author === "string" ? input.author.trim() : "";
   if (!rationale || rationale.length > 4000) throw new HttpError(400, "Publishing requires a rationale of at most 4000 characters.");
@@ -466,25 +482,21 @@ async function resolveSnapshot(database: ScenarioClient, reference: ScenarioRefe
   return { label: `${row.name} r${row.revision_number}`, kind: reference.kind, id: row.id, sourceAt: iso(row.source_at), snapshot: row.snapshot };
 }
 
-export function compareSnapshots(left: BoardSnapshot, right: BoardSnapshot) {
+export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: BoardSnapshot) {
+  const left = adaptLegacyPlanning(originalLeft);
+  const right = adaptLegacyPlanning(originalRight);
   const leftPackages = new Map(left.packages.map((item) => [item.id, item]));
   const rightPackages = new Map(right.packages.map((item) => [item.id, item]));
   const leftStreamNames = new Map(left.streams.map((item) => [item.id, item.name]));
   const rightStreamNames = new Map(right.streams.map((item) => [item.id, item.name]));
-  const leftCycleNames = new Map(left.linearCycles.map((item) => [item.id, item.name || `Cycle ${item.number}`]));
-  const rightCycleNames = new Map(right.linearCycles.map((item) => [item.id, item.name || `Cycle ${item.number}`]));
   const packageIds = [...new Set([...leftPackages.keys(), ...rightPackages.keys()])].sort();
   const packages = packageIds.flatMap((id) => {
     const before = leftPackages.get(id);
     const after = rightPackages.get(id);
-    const from = before ? { selected: before.selected, streamId: before.stream_id ? leftStreamNames.get(before.stream_id) ?? "Retired stream" : null, priority: before.priority_rank,
-      mustInclude: before.must_include, earliestCycleId: before.earliest_linear_cycle_id ? leftCycleNames.get(before.earliest_linear_cycle_id) ?? "Unavailable cycle" : null,
-      preferredCycleId: before.preferred_linear_cycle_id ? leftCycleNames.get(before.preferred_linear_cycle_id) ?? "Unavailable cycle" : null,
-      legacyEarliest: before.earliest_cycle, legacyPreferred: before.preferred_cycle, pauseReason: before.pause_reason } : null;
-    const to = after ? { selected: after.selected, streamId: after.stream_id ? rightStreamNames.get(after.stream_id) ?? "Retired stream" : null, priority: after.priority_rank,
-      mustInclude: after.must_include, earliestCycleId: after.earliest_linear_cycle_id ? rightCycleNames.get(after.earliest_linear_cycle_id) ?? "Unavailable cycle" : null,
-      preferredCycleId: after.preferred_linear_cycle_id ? rightCycleNames.get(after.preferred_linear_cycle_id) ?? "Unavailable cycle" : null,
-      legacyEarliest: after.earliest_cycle, legacyPreferred: after.preferred_cycle, pauseReason: after.pause_reason } : null;
+    const from = before ? { selected: before.selected, streamId: before.stream_id ? leftStreamNames.get(before.stream_id) ?? "Retired stream" : null,
+      sequence: before.sequence_position ?? null, pauseReason: before.pause_reason } : null;
+    const to = after ? { selected: after.selected, streamId: after.stream_id ? rightStreamNames.get(after.stream_id) ?? "Retired stream" : null,
+      sequence: after.sequence_position ?? null, pauseReason: after.pause_reason } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: after?.name ?? before?.name ?? id, from, to }];
   });
   const leftOutcomes = new Map(left.forecast.outcomes.map((item) => [item.id, item]));
@@ -525,9 +537,8 @@ export function compareSnapshots(left: BoardSnapshot, right: BoardSnapshot) {
   };
   const leftIssueNames = new Map(left.issues.map((item) => [item.linear_id, item.identifier]));
   const rightIssueNames = new Map(right.issues.map((item) => [item.linear_id, item.identifier]));
-  const allowanceValue = (item: BoardSnapshot["allowances"][number], issueNames: Map<string, string>) => ({ packageId: item.package_id, kind: item.kind,
-    points: item.points, issues: [...item.issue_ids].map((id) => issueNames.get(id) ?? "Unavailable issue").sort(), owner: item.owner,
-    reviewDate: item.review_date, rationale: item.rationale });
+  const scopeValue = (item: BoardSnapshot["extraScopes"][number], issueNames: Map<string, string>) => ({ packageId: item.package_id,
+    points: item.points, issues: [...item.issue_ids].map((id) => issueNames.get(id) ?? "Unavailable issue").sort(), notes: item.notes });
   const adjustmentValue = (item: BoardSnapshot["adjustments"][number]) => ({ cycleId: item.linear_cycle_id,
     availability: item.availability, reserve: item.reserve });
   const dependencyValue = (item: BoardSnapshot["dependencies"][number]) => ({ predecessorId: item.predecessor_id,
@@ -540,8 +551,11 @@ export function compareSnapshots(left: BoardSnapshot, right: BoardSnapshot) {
   const cycleNames = new Map([...left.linearCycles, ...right.linearCycles].map((item) => [item.id, item.name || `Cycle ${item.number}`]));
   const adjustments = namedChanges(left.adjustments.map(adjustmentValue), right.adjustments.map(adjustmentValue), (item) => item.cycleId as string)
     .map((change) => ({ ...change, name: cycleNames.get(change.id) ?? "Removed cycle" }));
-  const allowances = namedChanges(left.allowances.map((item) => allowanceValue(item, leftIssueNames)), right.allowances.map((item) => allowanceValue(item, rightIssueNames)), (item) => `${item.packageId}:${item.kind}`)
+  const extraScopes = namedChanges(left.extraScopes.map((item) => scopeValue(item, leftIssueNames)), right.extraScopes.map((item) => scopeValue(item, rightIssueNames)), (item) => item.packageId)
     .map((change) => ({ ...change, name: packageNames.get((change.to ?? change.from)!.packageId as string) ?? "Removed package" }));
+  const priorityValue = (item: BoardSnapshot["packages"][number]) => ({ packageId: item.id as string, priority: (item.linear_priority ?? null) as number | null });
+  const priorities = namedChanges(left.packages.map(priorityValue), right.packages.map(priorityValue), (item) => item.packageId)
+    .map((change) => ({ ...change, name: packageNames.get(change.id) ?? change.id }));
   const dependencies = namedChanges(left.dependencies.map(dependencyValue), right.dependencies.map(dependencyValue),
     (item) => `${item.predecessorId}:${item.successorId}:${item.source}`).map((change) => {
       const value = (change.to ?? change.from)!;
@@ -552,23 +566,28 @@ export function compareSnapshots(left: BoardSnapshot, right: BoardSnapshot) {
       name: `${outcomeTitles.get(value.outcomeId as string) ?? "Removed outcome"} / ${packageNames.get(`linear:${value.projectId as string}`) ?? "Removed project"}` }; });
   const linearCycles = namedChanges(left.linearCycles.map(linearCycleValue), right.linearCycles.map(linearCycleValue), (item) => item.id as string)
     .map((change) => ({ ...change, name: cycleNames.get(change.id) ?? "Removed cycle" }));
+  const weeklyAvailability = namedChanges(left.weeklyAdjustments.map((week) => ({ ...week })), right.weeklyAdjustments.map((week) => ({ ...week })), (week) => week.weekStart)
+    .map((change) => ({ ...change, name: `Week of ${change.id}` }));
   return {
+    calculationVersions: { from: originalLeft.calculationVersion ?? "v0", to: originalRight.calculationVersion ?? "v0" },
     sourceChanged: left.forecast.sourceAt !== right.forecast.sourceAt,
     capacity: {
       from: { baseline: left.effectiveBaseline, configuredBaseline: left.capacity.baseline, reserve: left.capacity.reserve, horizon: left.capacity.horizon, baselineReason: left.capacity.baseline_reason,
-        cycleAnchor: left.capacity.cycle_anchor, cycleDays: left.capacity.cycle_days },
+        cycleAnchor: left.capacity.cycle_anchor, cycleDays: left.capacity.cycle_days, scopingLeadDays: left.capacity.scoping_lead_days ?? 14, holidaysEnabled: left.capacity.holidays_enabled },
       to: { baseline: right.effectiveBaseline, configuredBaseline: right.capacity.baseline, reserve: right.capacity.reserve, horizon: right.capacity.horizon, baselineReason: right.capacity.baseline_reason,
-        cycleAnchor: right.capacity.cycle_anchor, cycleDays: right.capacity.cycle_days },
+        cycleAnchor: right.capacity.cycle_anchor, cycleDays: right.capacity.cycle_days, scopingLeadDays: right.capacity.scoping_lead_days ?? 14, holidaysEnabled: right.capacity.holidays_enabled },
     },
     packages,
     streams: streamChanges.filter((change) => change.from && change.to),
     streamLifecycle: streamChanges.filter((change) => !change.from || !change.to),
     outcomes,
     adjustments,
-    allowances,
+    extraScopes,
+    priorities,
     dependencies,
     links,
     linearCycles,
+    weeklyAvailability,
   };
 }
 

@@ -7,8 +7,7 @@ const projects = [
 
 const packages = projects.map((project, index) => ({
   id: project.package_id, project_id: project.id, name: project.name, status: project.status, url: project.url,
-  stream_id: project.stream_id, selected: true, must_include: false, priority_rank: index, earliest_cycle: null,
-  preferred_cycle: null, earliest_linear_cycle_id: null, preferred_linear_cycle_id: null, pause_reason: "",
+  stream_id: project.stream_id, selected: true, sequence_position: index + 1, linear_priority: index + 1, pause_reason: "",
   cross_team: false, needs_review: false, in_scope: true,
 }));
 
@@ -27,9 +26,10 @@ async function mockWorkspace(page: Page, scenarioReady = true) {
       connection: { team_name: "Product", cycles_enabled: true, cycle_duration: 1, cycle_start_day: 1, cycle_cooldown_time: 0, upcoming_cycle_count: 8 },
       packages, streams: [{ id: "stream-1", name: "Core", allocation: 1, wip_limit: 2 }],
       links: [{ outcome_id: "outcome-1", project_id: "project-unassigned", requirement: "minimum" }],
-      capacity: { baseline: 10, baseline_reason: "Recent delivery", reserve: 1, horizon: 8 }, observations: [], observedBaseline: null, effectiveBaseline: 10,
+      capacity: { baseline: 10, baseline_reason: "Recent delivery", reserve: 1, horizon: 8, scoping_lead_days: 14 }, observations: [], observedBaseline: null, effectiveBaseline: 10,
       linearCycles: Array.from({ length: 8 }, (_, index) => ({ id: `cycle-${index + 1}`, number: index + 1, name: `Cycle ${index + 1}`, startsAt: new Date(Date.UTC(2026, 10, 2 + index * 7)).toISOString(), endsAt: new Date(Date.UTC(2026, 10, 9 + index * 7)).toISOString() })),
-      currentCycleId: null, cycleAnchorAt: "2026-10-20T10:00:00Z", futureCycleIds: Array.from({ length: 8 }, (_, index) => `cycle-${index + 1}`), adjustments: [], legacyAdjustments: [], dependencies: [], allowances: [],
+      currentCycleId: null, cycleAnchorAt: "2026-10-20T10:00:00Z", futureCycleIds: Array.from({ length: 8 }, (_, index) => `cycle-${index + 1}`), adjustments: [], legacyAdjustments: [], dependencies: [], extraScopes: [], scoping: [], evaluatedAt: "2026-10-20T10:00:00Z",
+      sequencing: { packages: packages.map((item) => ({ id: item.id, name: item.name, streamId: item.stream_id, selected: true, position: item.sequence_position, complete: false })), dependencies: [], streamIds: ["stream-1"] }, sequenceToken: "fixture", sequenceConflicts: [],
       issues: [{ linear_id: "issue-1", project_id: "project-unassigned", identifier: "ID-1", estimate: null, state_type: "started" }],
       outcomes: [{ id: "outcome-1", title: "Customers migrate identity", description: "", owner: "Owner", success_signal: "Migration completes", needed_by: "2026-11-30" }], timezone: "UTC", reconciliationWarnings: [],
       forecast: { ready: true, setup: [], errors: [], sourceAt: "2026-10-20T10:00:00Z", selectedKnown: 13, selectedUnknown: 1, unallocated: 0,
@@ -67,6 +67,13 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 412, height: 915 }
     }
 
     await page.getByRole("button", { name: /^Board/ }).click();
+    if (viewport.width === 1440) {
+      const shelf = await page.locator(".priority-shelf").boundingBox();
+      const lane = await page.locator("#unassigned-work").boundingBox();
+      expect(shelf).not.toBeNull();
+      expect(lane).not.toBeNull();
+      expect(Math.abs(shelf!.width - lane!.width)).toBeLessThan(1);
+    }
     const timeline = page.getByRole("region", { name: /forecast timeline/ });
     await expect(timeline).toBeVisible();
     if (viewport.width < 1000) expect(await timeline.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);

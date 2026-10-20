@@ -1,11 +1,12 @@
 import { linearCycleLabel } from "./cycles";
+import { orderConflicts } from "./sequencing";
+import { cycleAvailability, holidayWeeksForRange, cycleLocalDates, type WeeklyAvailability } from "./planning-calendar";
 
 export type ForecastPackage = {
   id: string; projectId: string; name: string; status: string; streamId: string | null;
-  selected: boolean; priority: number; earliest: number | null; preferred: number | null;
-  known: number; openIssueCount: number; unknownIssueIds: string[]; crossTeam: boolean; needsReview: boolean; allowanceReview?: string | null; calendarReview?: string | null; externalBlockers?: string[];
-  unestimatedAllowance?: { points: number; issueIds: string[] };
-  discoveryAllowance?: { points: number };
+  selected: boolean; sequence?: number | null;
+  known: number; openIssueCount: number; unknownIssueIds: string[]; crossTeam: boolean; needsReview: boolean; orderReview?: string | null; externalBlockers?: string[];
+  extraScope?: { points: number; issueIds: string[] };
 };
 export type ForecastStream = { id: string; name: string; allocation: number; wip: number };
 export type ForecastDependency = { predecessorId: string; successorId: string; source: "local" | "linear"; waived?: boolean };
@@ -16,9 +17,10 @@ export type ForecastInput = {
   outcomes: ForecastOutcome[]; baseline: number | null; reserve: number; linearCycles: LinearForecastCycle[];
   horizon: number; sourceAt: string; cycleAnchorAt?: string; timezone: string;
   adjustments?: { cycleId: string; availability: number; reserve: number | null }[];
+  weeklyAdjustments?: WeeklyAvailability[]; holidaysEnabled?: boolean; holidayWeeks?: WeeklyAvailability[];
 };
 export type PackageForecast = { id: string; demand: number; provisional: boolean; start: number | null; finish: number | null; reason: string | null; consumed: number[] };
-export type CycleForecast = { id: string; number: number; name: string | null; index: number; start: string; end: string; available: number; streams: { id: string; budget: number; used: number; idle: number; active: string[] }[] };
+export type CycleForecast = { id: string; number: number; name: string | null; index: number; start: string; end: string; available: number; availability?: number; streams: { id: string; budget: number; used: number; idle: number; active: string[] }[] };
 export type OutcomeForecast = { id: string; status: "unplanned" | "setup_required" | "blocked" | "beyond_horizon" | "provisional" | "forecast"; finish: number | null; endDate: string | null; target: "no_target" | "met" | "missed" | "unknown"; gapCycles: number | null; reasons: string[]; requiredIds: string[] };
 export type ForecastResult = { ready: boolean; setup: string[]; cycles: CycleForecast[]; packages: PackageForecast[]; outcomes: OutcomeForecast[]; sourceAt: string; selectedKnown: number; selectedUnknown: number; unallocated: number; errors: string[] };
 
@@ -69,46 +71,51 @@ export function forecast(input: ForecastInput): ForecastResult {
   const source = new Map(input.packages.map((item) => [item.id, item]));
   const streamIds = new Set(input.streams.map((item) => item.id));
   const remaining = new Map<string, number>();
+  const sequenceConflicts = orderConflicts({ streamIds: input.streams.map((stream) => stream.id), dependencies: input.dependencies,
+    packages: input.packages.map((item) => ({ id: item.id, name: item.name, selected: item.selected, streamId: item.streamId, position: item.sequence ?? null,
+      complete: /completed/i.test(item.status) && !item.openIssueCount && !item.extraScope && !item.needsReview && !item.crossTeam && !item.externalBlockers?.length })) });
   let selectedKnown = 0;
   let selectedUnknown = 0;
   for (const item of input.packages) {
-    const covered = new Set(item.unestimatedAllowance?.issueIds || []);
+    const covered = new Set(item.extraScope?.issueIds || []);
     const uncovered = item.unknownIssueIds.filter((id) => !covered.has(id));
-    const demand = item.known + (item.unestimatedAllowance?.points || 0) + (item.discoveryAllowance?.points || 0);
-    const complete = /completed/i.test(item.status) && item.openIssueCount === 0 && !item.unestimatedAllowance && !item.discoveryAllowance;
+    const demand = item.known + (item.extraScope?.points || 0);
+    const complete = /completed/i.test(item.status) && item.openIssueCount === 0 && !item.extraScope && !item.needsReview && !item.crossTeam && !item.externalBlockers?.length;
     let reason: string | null = null;
     if (complete) reason = null;
     else if (!item.selected) reason = "Deferred; future demand is excluded. Pause execution in Linear separately if work is in progress.";
     else if (item.crossTeam) reason = "Cross-team project needs package decomposition.";
     else if (item.externalBlockers?.length) reason = `Blocked by ${item.externalBlockers.length} project${item.externalBlockers.length === 1 ? "" : "s"} outside the imported team.`;
     else if (item.needsReview) reason = "Missing from the latest Linear import; review source scope.";
-    else if (item.calendarReview) reason = item.calendarReview;
-    else if (item.allowanceReview) reason = item.allowanceReview;
-    else if (/completed/i.test(item.status) && (item.openIssueCount > 0 || item.unestimatedAllowance || item.discoveryAllowance)) reason = "Linear marks this complete but open issues or allowances remain; reconcile scope.";
-    else if (uncovered.length) reason = `${uncovered.length} open issue${uncovered.length === 1 ? " has" : "s have"} no estimate or allowance.`;
+    else if (item.orderReview || sequenceConflicts.some((conflict) => conflict.streamId === item.streamId)) reason = `Resolve stream sequence: ${item.orderReview ?? sequenceConflicts.find((conflict) => conflict.streamId === item.streamId)!.message}`;
+    else if (/completed/i.test(item.status) && (item.openIssueCount > 0 || item.extraScope)) reason = "Linear marks this complete but open issues or extra scope remain; reconcile scope.";
+    else if (uncovered.length) reason = `${uncovered.length} open issue${uncovered.length === 1 ? " has" : "s have"} no estimate or Extra scope coverage.`;
     else if (!item.streamId || !streamIds.has(item.streamId)) reason = "Needs assignment to an active stream.";
-    else if (!item.openIssueCount && !item.discoveryAllowance && !item.unestimatedAllowance) reason = "No issue estimate or planning allowance.";
-    const result: PackageForecast = { id: item.id, demand, provisional: !!(item.unestimatedAllowance || item.discoveryAllowance), start: null, finish: null, reason, consumed: [] };
+    else if (!item.openIssueCount && !item.extraScope) reason = "No issue estimate or Extra scope.";
+    const result: PackageForecast = { id: item.id, demand, provisional: !!item.extraScope, start: null, finish: null, reason, consumed: [] };
     if (item.selected) { selectedKnown += demand; selectedUnknown += uncovered.length; }
     if (complete) result.finish = 0;
     else if (!reason) remaining.set(item.id, milli(demand));
     packages.set(item.id, result);
   }
   const cycles: CycleForecast[] = [];
+  const holidayWeeks = input.holidaysEnabled ? input.holidayWeeks ?? (futureCycles.length ? holidayWeeksForRange(cycleLocalDates(futureCycles[0], input.timezone).start,
+    cycleLocalDates(futureCycles.at(-1)!, input.timezone).end) : []) : [];
   if (ready) for (let cycle = 1; cycle <= futureCycles.length; cycle++) {
     const linearCycle = futureCycles[cycle - 1];
     const adjustment = input.adjustments?.find((item) => item.cycleId === linearCycle.id);
-    const available = Math.max(0, milli((input.baseline || 0) * (adjustment?.availability ?? 1) - (adjustment?.reserve ?? input.reserve)));
+    const availability = cycleAvailability(linearCycle, input.timezone, adjustment?.availability ?? 1, input.weeklyAdjustments ?? [], holidayWeeks);
+    const available = Math.max(0, milli((input.baseline || 0) * availability - (adjustment?.reserve ?? input.reserve)));
     const row: CycleForecast = { id: linearCycle.id, number: linearCycle.number, name: linearCycle.name, index: cycle,
       start: localDate(linearCycle.startsAt, input.timezone), end: localDate(new Date(Date.parse(linearCycle.endsAt) - 1).toISOString(), input.timezone),
-      available: points(available), streams: [] };
+      available: points(available), availability, streams: [] };
     for (const stream of [...input.streams].sort((a, b) => a.id.localeCompare(b.id))) {
       const budget = Math.floor(available * stream.allocation + 1e-9);
       const carried = input.packages.filter((item) => item.streamId === stream.id && remaining.has(item.id) && packages.get(item.id)!.start !== null);
       const slots = Math.max(0, stream.wip - carried.length);
-      const eligible = input.packages.filter((item) => item.streamId === stream.id && remaining.has(item.id) && packages.get(item.id)!.start === null && (item.earliest ?? 1) <= cycle &&
+      const eligible = input.packages.filter((item) => item.streamId === stream.id && remaining.has(item.id) && packages.get(item.id)!.start === null &&
         input.dependencies.filter((edge) => !edge.waived && edge.successorId === item.id).every((edge) => { const prior = packages.get(edge.predecessorId); return prior && prior.finish !== null && prior.finish < cycle; }));
-      eligible.sort((a, b) => Number((b.preferred ?? 1) <= cycle) - Number((a.preferred ?? 1) <= cycle) || a.priority - b.priority || (a.preferred ?? 1) - (b.preferred ?? 1) || a.id.localeCompare(b.id));
+      eligible.sort((a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
       const active = [...carried, ...eligible.slice(0, slots)];
       for (const item of active) if (packages.get(item.id)!.start === null) packages.get(item.id)!.start = cycle;
       let left = budget;
@@ -133,10 +140,9 @@ export function forecast(input: ForecastInput): ForecastResult {
     if (remaining.size === 0) break;
   }
   for (const [id, result] of packages) if (remaining.has(id)) {
-    const item = source.get(id)!;
     const blockers = input.dependencies.filter((edge) => !edge.waived && edge.successorId === id && (packages.get(edge.predecessorId)?.finish ?? null) === null);
     result.reason = blockers.length ? `Waiting for ${blockers.map((edge) => source.get(edge.predecessorId)?.name || edge.predecessorId).join(", ")}.` :
-      (item.earliest ?? 1) > futureCycles.length ? "Hard earliest start is beyond imported Linear cycles." :
+      !futureCycles.length ? "No upcoming Linear cycles were imported for this team." :
         futureCycles.length < input.horizon ? `Beyond imported Linear calendar after ${linearCycleLabel(futureCycles.at(-1)!)}; add upcoming cycles in Linear.` :
           "Beyond horizon at current capacity, allocation, and WIP.";
   }

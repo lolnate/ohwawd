@@ -4,7 +4,7 @@ import { forecast, historicalBaseline, type ForecastInput, type ForecastPackage 
 
 const pkg = (id: string, streamId: string | null, known: number): ForecastPackage => ({
   id, projectId: id, name: id, status: "planned", streamId, selected: true,
-  priority: 1, earliest: null, preferred: null, known, openIssueCount: 1,
+  known, openIssueCount: 1,
   unknownIssueIds: [], crossTeam: false, needsReview: false,
 });
 const base = (packages: ForecastPackage[]): ForecastInput => ({
@@ -38,17 +38,34 @@ test("contract example: equal WIP split, redistribution, dependency unlock next 
   assert.equal(result.outcomes[0].target, "met");
 });
 
-test("WIP one, priority and soft start order are deterministic", () => {
+test("WIP one follows queue order independently of source priority and retired start fields", () => {
   const a = pkg("a", "stream-a", 6);
   const b = pkg("b", "stream-a", 6);
-  b.preferred = 4;
-  b.priority = 0;
+  Object.assign(b, { preferred: 4, earliest: 8, priority: 0 });
+  a.sequence = 1;
+  b.sequence = 2;
   const result = forecast(base([b, a]));
   assert.equal(result.packages.find((item) => item.id === "a")?.start, 1);
   const one = base([b, a]); one.streams[0].wip = 1;
   const serial = forecast(one);
   assert.equal(serial.packages.find((item) => item.id === "a")?.finish, 1);
   assert.equal(serial.packages.find((item) => item.id === "b")?.start, 2);
+});
+
+test("blocked queue head is skipped and an invalid lane does not stop valid independent streams", () => {
+  const head = pkg("head", "stream-a", 6); head.sequence = 1;
+  const independent = pkg("independent", "stream-a", 6); independent.sequence = 2;
+  const predecessor = pkg("prior", "stream-b", 8);
+  const input = base([head, independent, predecessor]);
+  input.streams[0].wip = 1;
+  input.dependencies = [{ predecessorId: "prior", successorId: "head", source: "linear" }];
+  let result = forecast(input);
+  assert.equal(result.packages.find((item) => item.id === "independent")!.start, 1);
+  assert.equal(result.packages.find((item) => item.id === "head")!.start, 3);
+  head.orderReview = independent.orderReview = "Head must precede independent";
+  result = forecast(input);
+  assert.equal(result.packages.find((item) => item.id === "head")!.start, null);
+  assert.equal(result.packages.find((item) => item.id === "prior")!.finish, 2);
 });
 
 test("unknown, unassigned, paused, and optional work explain minimum outcome", () => {
@@ -71,7 +88,7 @@ test("unknown, unassigned, paused, and optional work explain minimum outcome", (
   result = forecast(input);
   assert.equal(result.outcomes[0].status, "blocked");
   assert.equal(result.outcomes[0].requiredIds.includes(optional.id), true);
-  optional.unestimatedAllowance = { points: 2, issueIds: ["missing"] };
+  optional.extraScope = { points: 2, issueIds: ["missing"] };
   result = forecast(input);
   assert.equal(result.outcomes[0].status, "provisional");
   optional.selected = false;

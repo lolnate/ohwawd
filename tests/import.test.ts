@@ -5,6 +5,7 @@ import { schemaSql } from "../src/lib/db";
 import { saveCycleData, saveImport } from "../src/lib/import";
 import type { ImportedProject } from "../src/lib/linear";
 import type { PoolClient } from "pg";
+import { linearProjectDependencies } from "../src/lib/linear";
 
 test("repeat import upserts by Linear ID and preserves shared outcome links", async () => {
   const db = new PGlite();
@@ -60,6 +61,40 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
   assert.equal(unchangedResult.report.unchangedProjects, 1);
   assert.equal(unchangedResult.report.stillMissingProjects, 1);
   await db.close();
+});
+
+test("priority-only sync is reported and preserves manual stream sequence", async () => {
+  const database = new PGlite();
+  try {
+    await database.exec(schemaSql);
+    await database.query("INSERT INTO workspace(id) VALUES(1)");
+    const project: ImportedProject = { id: "p", teamId: "team", name: "Project", description: "", status: "planned", priority: 0,
+      url: "https://linear.app/p/p", updatedAt: new Date("2026-10-15T12:00:00Z"), crossTeam: false, issues: [] };
+    const input = { encryptedKey: "ciphertext", viewer: { id: "v", name: "Owner" }, team: { id: "team", name: "Team" }, projects: [project] };
+    const client = database as unknown as PoolClient;
+    await saveImport(client, input);
+    await database.query("UPDATE work_package SET stream_id='stream-a',sequence_position=7 WHERE project_id='p'");
+    project.priority = 1;
+    const result = await saveImport(client, input);
+    assert.deepEqual(result.report.updatedProjects[0].changes, ["priority"]);
+    assert.deepEqual((await database.query("SELECT stream_id,sequence_position FROM work_package")).rows[0], { stream_id: "stream-a", sequence_position: 7 });
+    assert.equal((await database.query<{ priority: number }>("SELECT priority FROM linear_project_cache")).rows[0].priority, 1);
+  } finally { await database.close(); }
+});
+
+test("an inverse-only Linear end-to-start relation imports an internal dependency rather than dropping it", async () => {
+  const database = new PGlite();
+  try {
+    await database.exec(schemaSql);
+    await database.query("INSERT INTO workspace(id) VALUES(1)");
+    const edge = linearProjectDependencies([{ type: "dependency", anchorType: "end", relatedAnchorType: "start", projectId: "identity", relatedProjectId: "self-service" }])[0];
+    const projects = ["identity", "self-service"].map((id): ImportedProject => ({ id, teamId: "team", name: id, description: "", status: "planned", url: `https://linear.app/${id}`,
+      crossTeam: false, updatedAt: new Date("2026-10-20T12:00:00Z"), issues: [], blockedBy: id === "self-service" ? [edge.predecessorId] : [] }));
+    await saveImport(database as unknown as PoolClient, { encryptedKey: "test", viewer: { id: "v", name: "Owner" }, team: { id: "team", name: "Team" }, projects });
+    assert.deepEqual((await database.query("SELECT predecessor_id,successor_id,source FROM package_dependency")).rows,
+      [{ predecessor_id: "linear:identity", successor_id: "linear:self-service", source: "linear" }]);
+    assert.deepEqual((await database.query<{ external_blockers: string[] }>("SELECT external_blockers FROM linear_project_cache WHERE linear_id='self-service'")).rows[0].external_blockers, []);
+  } finally { await database.close(); }
 });
 
 test("old relative cycle settings migrate to Linear cycle IDs on import", async () => {

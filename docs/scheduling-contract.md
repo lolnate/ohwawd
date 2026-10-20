@@ -1,4 +1,56 @@
-# Scheduling and scenario contract (proposed v0)
+# Scheduling and scenario contract
+
+## Current calculation: v2
+
+The calendar requirements are maintained in [planning timeline](../openspec/specs/planning-timeline/spec.md) and [weekly capacity](../openspec/specs/weekly-capacity/spec.md). Design and acceptance evidence are in the [archived calendar change](../openspec/changes/archive/2026-10-20-month-week-planning-timeline/).
+
+Stream timelines are month-first and subdivided into Monday-start calendar weeks, with compact scrolling and sticky project labels. Imported Linear cycles remain the scheduling buckets and secondary timeline context. A wider display calendar does not supply forecast capacity: dates outside imported cycles are shaded, blocked projects explain their predecessors, and unfinished projects get continuing bars without asserted completion dates.
+
+V2 adds weekly availability. The live-board default is a labeled 50% planning preset for US Thanksgiving week, Christmas week and the following week. It can be disabled, and explicit date-based week overrides (0–100%) take precedence. Week assumptions are evaluated in the team's timezone and apply across cycle boundaries.
+
+For each Monday–Friday date belonging to an imported cycle, use explicit weekly availability first, then an enabled holiday preset, then cycle availability (default 100%). Average those values. For a cycle with no weekdays, use its calendar dates instead. Multiply baseline by that effective availability, subtract reserve once, then apply the existing stream allocation and WIP rules. Overlapping 50% week/cycle assumptions yield 50%, not 25%; a fortnight with one full week and one half week yields 75%.
+
+V2 snapshots capture weekly overrides, enabled state and resolved holiday dates. Comparisons identify the changed assumptions and calculation versions. Published v0/v1 results remain frozen. Loading pre-weekly editable drafts defaults to no weekly overrides and disabled holiday presets, preserving former capacity assumptions until deliberately changed.
+
+## Assignment and sequencing rules introduced in v1, retained in v2
+
+The maintained requirements are the OpenSpec capabilities for [project assignment](../openspec/specs/project-assignment/spec.md), [stream sequencing](../openspec/specs/stream-sequencing/spec.md), and [project scope readiness](../openspec/specs/project-scope-readiness/spec.md). The design and verification evidence are in the [archived change](../openspec/changes/archive/2026-10-20-simplify-project-assignment/). V1 replaces local priority ranks, preferred/hard start dates, must-include, and categorized allowances. The historical v0 contract below explains frozen legacy results; it does not govern new edits.
+
+### Source priority and stream sequence
+
+Linear owns project priority. The board displays it read-only, including No priority and Unknown for legacy data. Sync reports priority changes but never rearranges an existing queue.
+
+Each stream has a saved ordered project queue. Dragging or equivalent keyboard/touch Move controls changes that order or moves work between streams and shelves. Assignment without an explicit insertion target uses the last dependency-valid position. Bulk assignment inserts incoming work in stable topological order and leaves existing members in place. Mutations are atomic, and a stale sequencing token requires refreshing instead of overwriting another edit.
+
+Effective dependencies remain `(Linear edges − explicit waivers) ∪ local edges`. An unfinished predecessor must precede its successor in the same stream, including transitive paths through other streams. Cross-stream successors still wait until the cycle after predecessor completion. A move cannot waive a dependency. Local edges or waiver restoration that contradict a valid queue are rejected with the required precedence.
+
+Source changes can introduce order conflicts. They preserve user order and identify the dependency path. Affected lanes have no unfinished-work forecast until repaired; unrelated valid lanes continue normally. Repair moves may reduce existing violations incrementally without introducing new ones. Dependency cycles remain invalid for forecasting.
+
+At each cycle, carry unfinished projects started in prior forecast cycles, then fill remaining WIP slots from the earliest eligible projects in queue order. Skip blocked heads for later independent work. Queue adjacency is not a dependency: WIP greater than one permits overlap and equal budget sharing. Capacity is conserved, unused budgets are not borrowed across streams, and new WIP slots open only in the next cycle. Editing the queue recalculates the run from the beginning.
+
+Moving to Needs assignment preserves selected demand without a stream. Deferred work consumes no future capacity and has no active queue position. Pause rationale is optional even for in-progress work; deferral does not change execution in Linear.
+
+### Extra scope and scoping readiness
+
+One Extra scope value is the remaining generic budget beyond estimated open Linear issues. It covers acknowledged unestimated issues and work not yet represented in Linear. Saving positive points captures current unknown issue IDs and an issue-scope baseline; no category, owner, review date, or rationale is required. Blank/zero removes the budget. Newly appearing unknown issues remain uncovered until a positive budget is saved against the changed issue set. Missing estimates without coverage still prevent a finite completion forecast.
+
+Demand is `estimated open issue points + remaining Extra scope points`. Any Extra scope makes dates provisional. New issue estimates never automatically consume this budget: scope membership, estimate, or completion changes show Review extra scope. The planner adjusts or re-saves the remaining points to acknowledge the current source. This reminder is advisory and does not prevent publishing or covered-demand forecasts.
+
+The board-wide scoping lead time defaults to 14 calendar days and accepts whole numbers from 0 through 365. A selected generic project's due date is its forecast-start local date minus lead days in the team's timezone. Needs scoping begins inclusively on that local date. In-progress selected projects need scoping immediately; deferred and reconciled-complete work has no active reminder. An undated selected generic project shows Scoping date unavailable with its existing blocker.
+
+Readiness is derived after forecasting and never feeds back into demand or eligibility. It recalculates on planning changes, fetch, and local-date rollover without requiring a Linear sync. Moving work farther out can clear Needs scoping, but not an independent Review extra scope reminder. Saved scenarios capture the setting, evaluation time, and reminder output; published reminders do not age when read later.
+
+### Scenario compatibility
+
+V1 and later snapshots retain queue positions, source priority, one Extra scope budget and its coverage baseline, the scoping window, evaluation time, and calculated reminders. Dirty detection tracks planning inputs rather than the changing evaluation clock. Comparisons separate local placement from Linear priority and identify calculation versions.
+
+Legacy editable drafts are adapted when loaded and converted when saved. Queue seeding uses old rank then immutable ID as the stable topological preference. Preferred/hard starts and must-include no longer affect new forecasts. Extra scope is the effective residual unestimated allowance plus discovery, with former rationales retained as optional notes. Existing unknown coverage is preserved rather than expanded. Published v0 revisions retain stored inputs, outputs, and version, including legacy fields; reading/comparing them never recalculates their historical forecast.
+
+## Historical calculation: v0
+
+The following contract is retained to explain published v0 snapshots. New snapshots use v2 and comparisons identify differing calculation versions. Published historical inputs and outputs remain immutable.
+
+### Original v0 contract
 
 This is the normative contract for the first product proof. The forecast is a cycle-level planning heuristic, not a promise of a day of delivery. All calculations use the frozen inputs identified by a scenario revision. Rules for multiple capacity-owning teams and split Linear projects are described as extensions below; those forecasts require a later calculation version.
 

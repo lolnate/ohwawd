@@ -1,78 +1,65 @@
 import type { PoolClient } from "pg";
 import { readTransaction } from "./db";
 import { forecast, historicalBaseline, type ForecastInput } from "./forecast";
+import { placeProjects, sequencingState, sequenceToken } from "./sequence-store";
+import { orderConflicts } from "./sequencing";
+import { scopeChangeSummary, scopeReadiness, teamLocalDate, type ExtraScope } from "./project-scope";
+import { addCalendarDays, holidayWeeksForRange, mondayOf, type WeeklyAvailability } from "./planning-calendar";
 
 export async function assignPackagesToStream(client: Pick<PoolClient, "query">, streamId: string, packageIds: string[]): Promise<void> {
-  await client.query("UPDATE work_package SET stream_id=$1,selected=true WHERE id=ANY($2::text[])", [streamId, packageIds]);
+  await placeProjects(client, packageIds.map((packageId) => ({ packageId, streamId, selected: true })));
 }
 
-export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?: Date) {
-  if (!client) return readTransaction((database) => loadBoard(database, cycleAnchor));
-  return loadBoard(client, cycleAnchor);
+export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?: Date, evaluatedAt = new Date()) {
+  if (!client) return readTransaction((database) => loadBoard(database, cycleAnchor, evaluatedAt));
+  return loadBoard(client, cycleAnchor, evaluatedAt);
 }
 
-async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor?: Date) {
-  const [workspace, connection, packages, streams, links, outcomes, capacity, adjustments, dependencies, allowances, issues, observations, linearCycles, legacyAdjustments] = await Promise.all([
+async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date | undefined, evaluationTime: Date) {
+  const [workspace, connection, packages, streams, links, outcomes, capacity, adjustments, dependencies, extraScopes, issues, observations, linearCycles, legacyAdjustments, weeklyAdjustments] = await Promise.all([
     database.query("SELECT created_at FROM workspace WHERE id=1"),
     database.query("SELECT last_imported_at,cycles_refreshed_at,GREATEST(last_imported_at,cycles_refreshed_at) AS source_at,team_id,team_name,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count FROM linear_connection WHERE workspace_id=1"),
-    database.query(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.selected,w.must_include,w.priority_rank,w.earliest_cycle,w.preferred_cycle,
-      w.earliest_linear_cycle_id,w.preferred_linear_cycle_id,w.pause_reason,
-      p.name,p.status,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY p.name`),
+    database.query(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.selected,w.sequence_position,w.pause_reason,
+      p.name,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`),
     database.query("SELECT id,name,position,wip_limit,allocation::float FROM stream WHERE active=true ORDER BY position"),
     database.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link"),
     database.query("SELECT id,title,description,owner,success_signal,needed_by::text FROM outcome ORDER BY created_at DESC"),
-    database.query("SELECT cycle_anchor::text,cycle_days,baseline::float,baseline_reason,reserve::float,horizon FROM capacity_profile WHERE workspace_id=1"),
+    database.query("SELECT cycle_anchor::text,cycle_days,baseline::float,baseline_reason,reserve::float,horizon,scoping_lead_days,holidays_enabled FROM capacity_profile WHERE workspace_id=1"),
     database.query("SELECT a.linear_cycle_id,c.number,c.name,c.starts_at,c.ends_at,a.availability::float,a.reserve::float FROM linear_cycle_adjustment a JOIN linear_cycle_cache c ON c.linear_id=a.linear_cycle_id ORDER BY c.starts_at"),
     database.query("SELECT predecessor_id,successor_id,source,waived,waiver_reason FROM package_dependency"),
-    database.query("SELECT package_id,kind,points::float,issue_ids,owner,review_date::text,rationale FROM package_allowance"),
+    database.query<ExtraScope>("SELECT package_id,points::float,notes,issue_ids,issue_baseline,legacy_review FROM package_extra_scope ORDER BY package_id"),
     database.query("SELECT linear_id,project_id,identifier,estimate::float,state_type FROM linear_issue_cache"),
     database.query("SELECT linear_id,starts_at,ends_at,completed_at,cycle_days,completed_points::float FROM cycle_observation ORDER BY completed_at DESC"),
     database.query("SELECT linear_id,number,name,starts_at,ends_at,completed_at FROM linear_cycle_cache WHERE active=true ORDER BY starts_at"),
     database.query("SELECT cycle_number,availability::float,reserve::float FROM cycle_adjustment ORDER BY cycle_number"),
+    database.query<WeeklyAvailability>('SELECT week_start::text AS "weekStart",availability::float,label FROM weekly_capacity_adjustment ORDER BY week_start'),
   ]);
   const sourceAt = (connection.rows[0]?.source_at ?? workspace.rows[0].created_at).toISOString();
   const cycleAnchorAt = cycleAnchor?.toISOString() ?? sourceAt;
   const cycleAnchorTime = Date.parse(cycleAnchorAt);
   const currentCycle = linearCycles.rows.find((item) => item.starts_at.getTime() <= cycleAnchorTime && item.ends_at.getTime() > cycleAnchorTime && !item.completed_at);
   const future = linearCycles.rows.filter((item) => item.starts_at.getTime() > cycleAnchorTime && !item.completed_at);
-  const cycleIndex = (id: string | null, legacy: number | null) => {
-    if (legacy && !id) return { index: null, review: "A previous relative start cycle needs a Linear cycle selection." };
-    if (!id) return { index: null, review: null };
-    const index = future.findIndex((item) => item.linear_id === id);
-    if (index >= 0) return { index: index + 1, review: null };
-    const old = linearCycles.rows.find((item) => item.linear_id === id);
-    if (old && old.starts_at.getTime() <= cycleAnchorTime) return { index: 1, review: null };
-    return { index: null, review: "Selected start cycle is no longer available in Linear; choose another." };
-  };
   const comparableDays = connection.rows[0]?.cycle_duration ? connection.rows[0].cycle_duration * 7 : null;
   const comparable = comparableDays ? observations.rows.filter((item) => item.cycle_days === comparableDays).slice(0, 6) : [];
   const observedBaseline = historicalBaseline(comparable.map((item) => item.completed_points));
   const reconciliationWarnings: { packageId: string; message: string }[] = [];
+  const sequencing = await sequencingState(database);
+  const sequenceConflicts = orderConflicts(sequencing);
+  const timezone = connection.rows[0]?.team_timezone ?? "America/New_York";
+  const calendarStart = mondayOf(teamLocalDate(future[0]?.starts_at ?? evaluationTime, timezone));
+  const calendarEnd = [addCalendarDays(calendarStart, 26 * 7), teamLocalDate(future.at(-1)?.ends_at ?? evaluationTime, timezone)].sort().at(-1)!;
+  const holidaysEnabled = capacity.rows[0]?.holidays_enabled ?? true;
+  const holidayWeeks = holidaysEnabled ? holidayWeeksForRange(calendarStart, calendarEnd) : [];
   const input: ForecastInput = {
     packages: packages.rows.map((row) => {
       const open = issues.rows.filter((issue) => issue.project_id === row.project_id && !["completed", "canceled"].includes(issue.state_type));
-      const unestimated = allowances.rows.find((item) => item.package_id === row.id && item.kind === "unestimated");
-      const discovery = allowances.rows.find((item) => item.package_id === row.id && item.kind === "discovery");
-      const claimed = unestimated?.issue_ids as string[] | undefined;
-      const claimedIssues = claimed?.map((id) => issues.rows.find((issue) => issue.linear_id === id && issue.project_id === row.project_id));
-      const unestimatedReview = claimedIssues?.some((issue) => !issue || (["completed", "canceled"].includes(issue.state_type) && issue.estimate === null))
-        ? "Allowance issue set changed or closed without an estimate; reconcile it." : null;
-      const discoveryBaseline = new Set(discovery?.issue_ids as string[] | undefined);
-      const newDiscoveryIssues = discovery ? open.filter((issue) => !discoveryBaseline.has(issue.linear_id)) : [];
-      const discoveryReview = newDiscoveryIssues.length
-        ? `${newDiscoveryIssues.length} Linear issue${newDiscoveryIssues.length === 1 ? " was" : "s were"} added after the discovery allowance; reconcile possible double counting.` : null;
-      const allowanceReview = unestimatedReview ?? discoveryReview;
-      if (allowanceReview) reconciliationWarnings.push({ packageId: row.id, message: allowanceReview });
-      const residual = unestimated ? Math.max(0, unestimated.points - (claimedIssues || []).reduce((sum, issue) => sum + (issue?.estimate ?? 0), 0)) : 0;
-      const earliest = cycleIndex(row.earliest_linear_cycle_id, row.earliest_cycle);
-      const preferred = cycleIndex(row.preferred_linear_cycle_id, row.preferred_cycle);
+      const extra = extraScopes.rows.find((item) => item.package_id === row.id);
       return { id: row.id, projectId: row.project_id, name: row.name, status: row.status, streamId: row.stream_id,
-        selected: row.selected, priority: row.priority_rank, earliest: earliest.index, preferred: preferred.index,
+        selected: row.selected, sequence: row.sequence_position,
         known: open.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0), openIssueCount: open.length,
         unknownIssueIds: open.filter((issue) => issue.estimate === null).map((issue) => issue.linear_id),
-        crossTeam: row.cross_team, needsReview: row.needs_review, allowanceReview, calendarReview: earliest.review || preferred.review, externalBlockers: row.external_blockers,
-        unestimatedAllowance: unestimated ? { points: residual, issueIds: unestimated.issue_ids } : undefined,
-        discoveryAllowance: discovery ? { points: discovery.points } : undefined };
+         crossTeam: row.cross_team, needsReview: row.needs_review, orderReview: sequenceConflicts.find((conflict) => conflict.streamId === row.stream_id)?.message, externalBlockers: row.external_blockers,
+         extraScope: extra ? { points: extra.points, issueIds: extra.issue_ids } : undefined };
     }),
     streams: streams.rows.map((row) => ({ id: row.id, name: row.name, allocation: row.allocation, wip: row.wip_limit })),
     dependencies: dependencies.rows.map((row) => ({ predecessorId: row.predecessor_id, successorId: row.successor_id, source: row.source, waived: row.waived })),
@@ -81,14 +68,27 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor?: Date
     linearCycles: linearCycles.rows.map((row) => ({ id: row.linear_id, number: row.number, name: row.name,
       startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString() })),
     horizon: capacity.rows[0]?.horizon ?? 26, sourceAt, cycleAnchorAt,
-    timezone: connection.rows[0]?.team_timezone ?? "America/New_York",
+    timezone,
     adjustments: adjustments.rows.map((row) => ({ cycleId: row.linear_cycle_id, availability: row.availability, reserve: row.reserve })),
+    weeklyAdjustments: weeklyAdjustments.rows, holidaysEnabled, holidayWeeks,
   };
-  return { connection: connection.rows[0] ?? null, packages: packages.rows, streams: streams.rows, links: links.rows, outcomes: outcomes.rows,
-    capacity: capacity.rows[0] ?? { cycle_anchor: null, cycle_days: 14, baseline: null, baseline_reason: "", reserve: 0, horizon: 26 },
+  const result = forecast(input);
+  const evaluatedAt = evaluationTime.toISOString();
+  const leadDays = capacity.rows[0]?.scoping_lead_days ?? 14;
+  const scoping = packages.rows.map((row) => {
+    const extra = extraScopes.rows.find((item) => item.package_id === row.id);
+    const projection = result.packages.find((item) => item.id === row.id)!;
+    const startDate = projection.start ? result.cycles[projection.start - 1]?.start ?? null : null;
+    return scopeReadiness({ packageId: row.id, selected: row.selected, complete: projection.finish === 0, status: row.status,
+      extra: !!extra, startDate, leadDays, evaluatedAt, timezone: input.timezone,
+      review: extra ? scopeChangeSummary(extra, issues.rows.filter((issue) => issue.project_id === row.project_id)) : null });
+  });
+  return { calculationVersion: "v2", evaluatedAt, scoping, extraScopes: extraScopes.rows, weeklyAdjustments: weeklyAdjustments.rows, holidayWeeks,
+    connection: connection.rows[0] ?? null, packages: packages.rows, streams: streams.rows, links: links.rows, outcomes: outcomes.rows,
+    capacity: capacity.rows[0] ?? { cycle_anchor: null, cycle_days: 14, baseline: null, baseline_reason: "", reserve: 0, horizon: 26, scoping_lead_days: 14, holidays_enabled: true },
     observations: comparable, observedBaseline, effectiveBaseline: input.baseline,
     linearCycles: input.linearCycles, currentCycleId: currentCycle?.linear_id ?? null, cycleAnchorAt, futureCycleIds: future.map((row) => row.linear_id),
     adjustments: adjustments.rows, legacyAdjustments: legacyAdjustments.rows,
-    dependencies: dependencies.rows, allowances: allowances.rows, issues: issues.rows, reconciliationWarnings, timezone: input.timezone,
-    forecast: forecast(input) };
+    dependencies: dependencies.rows, issues: issues.rows, reconciliationWarnings, timezone: input.timezone,
+    sequencing, sequenceToken: sequenceToken(sequencing), sequenceConflicts, forecast: result };
 }

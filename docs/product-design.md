@@ -1,8 +1,26 @@
 # Oh, WAWD! — initial product and technical design
 
-Status: proposed design, 15 October 2026. Initial scope: the Sequencing Board.
+Status: Sequencing Board assignment and month/week timeline revised through calculation v2, 20 October 2026.
 
 The exact first-proof calculation and state rules are in [scheduling-contract.md](scheduling-contract.md). This document describes the product direction and staged delivery; the contract governs behavior when the two differ.
+
+## Current month/week timeline (v2)
+
+Each stream's schedule uses month headers, compact Monday-start weeks, sticky project names, and secondary Linear cycle labels. A desktop can view roughly a quarter at once and scroll farther ahead. Project bars use imported cycle boundaries; unfinished work indicates continuation, blockers are named in the row label, and dates beyond available Linear cycles are visibly unsupported rather than invented.
+
+Yellow week bands show actual reduced availability. The default US holiday preset uses 50% for Thanksgiving week, Christmas week and the following week. Calendar availability controls allow disabling the preset or adding/removing a week-specific override; selecting a week header opens its editor. A 100% override restores an individual holiday week. Weekly availability replaces cycle availability on overlapping working dates, avoiding double reductions, and all assumptions are saved with v2 scenarios.
+
+## Current assignment and scope workflow (introduced in v1)
+
+The board shows an ordered project queue directly in each stream. Drag a project to an insertion target, another stream, Needs assignment, or Deferred. Arrow buttons, Alt + arrow keys on a focused drag handle, and Location / Place before controls provide equivalent keyboard and touch workflows. Linear priority is read-only context; saved stream order controls scheduling. Dependencies constrain valid placement and forecast starts. WIP can allow overlap, and blocked queue heads can be skipped for independent eligible work.
+
+Project controls contain location and an optional pause note when deferred. Numeric priority rank, Preferred start, Hard not-before, and Must include are retired. Deferral excludes future demand without changing Linear execution status.
+
+Extra scope is one remaining points budget with optional notes, covering current unestimated issues and work not yet represented in Linear. It has no category, owner, or manual review date. Changes to Linear issue scope prompt Review extra scope while keeping the budget unchanged; the planner manually edits/re-saves its remaining points. Newly appearing unknown issues need acknowledged coverage before receiving dates.
+
+The Scope readiness setting defaults to 14 calendar days before forecast start. Generic scope within that window is marked Needs scoping, surfaced on cards and in Planning attention, and linked to the scope editor. The window is configurable and saved with scenarios. These reminders preserve provisional forecasts and do not add publication approvals. Published snapshots retain their historical calculation version and frozen reminder evaluation.
+
+The following initial design sections retain the broader product direction and historical proof assumptions. Where they describe removed assignment controls, the current workflow above and the v1 scheduling contract supersede them.
 
 Confirmed proof boundaries: an in-progress Linear package may be paused in a scenario from the next full cycle, and the proof uses the default five streams with no stream-count editor. Stream add/retire remains in the first usable release.
 

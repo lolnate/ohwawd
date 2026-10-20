@@ -2,8 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getBoard } from "./board";
 import { ensureSchema, db } from "./db";
-import { compareSnapshots } from "./scenarios";
+import { compareSnapshots, stablePreviewBoard } from "./scenarios";
 import { HttpError } from "./security";
+import { placeProjects, sequencingState } from "./sequence-store";
 
 type StreamClient = Pick<PoolClient, "query">;
 type StreamRow = {
@@ -137,17 +138,19 @@ async function retirementState(database: StreamClient, id: string, migrationInpu
   const draftReferences = scenarios.rows.filter((item) => references(item.draft_snapshot)).map((item) => ({ id: item.id, name: item.name, active: item.id === draft?.id }));
   const revisionReferences = revisions.rows.filter((item) => references(item.snapshot)).map((item) => ({ id: item.id, name: item.scenario_name, revisionNumber: item.revision_number }));
   const beforeBoard = await getBoard(database);
-  const tokenState = { board: beforeBoard, migrations, draftReferences, revisionReferences,
+  const tokenState = { board: stablePreviewBoard(beforeBoard), migrations, draftReferences, revisionReferences,
     activeDraft: draft && { id: draft.id, editVersion: Number(draft.edit_version) } };
   return { retiring, activeStreams, packages, migrations, outcomes, dependencies, draftReferences, revisionReferences,
     previewToken: canonicalFingerprint(tokenState), beforeBoard };
 }
 
 async function applyRetirementRows(database: StreamClient, id: string, migrations: Migration[], reason: string): Promise<void> {
+  const state = await sequencingState(database);
   for (const migration of migrations) {
-    const updated = await database.query("UPDATE work_package SET stream_id=$2 WHERE id=$1 AND stream_id=$3", [migration.packageId, migration.targetStreamId, id]);
-    if (!updated.rowCount) throw new HttpError(409, "A package assignment changed after the preview. Preview retirement again.", { code: "STREAM_PREVIEW_STALE" });
+    if (state.packages.find((item) => item.id === migration.packageId)?.streamId !== id) throw new HttpError(409, "A package assignment changed after the preview. Preview retirement again.", { code: "STREAM_PREVIEW_STALE" });
   }
+  await placeProjects(database, migrations.map((migration) => ({ packageId: migration.packageId, streamId: migration.targetStreamId,
+    selected: state.packages.find((item) => item.id === migration.packageId)!.selected })));
   await database.query("UPDATE stream SET active=false,allocation=0,retired_at=now(),retirement_reason=$2 WHERE id=$1 AND active=true", [id, reason]);
   const remaining = await orderedActiveStreams(database);
   await writeOrder(database, remaining.map((item) => item.id));

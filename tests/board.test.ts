@@ -5,6 +5,8 @@ import type { PoolClient } from "pg";
 import { assignPackagesToStream, getBoard } from "../src/lib/board";
 import { schemaSql } from "../src/lib/db";
 import { saveImport } from "../src/lib/import";
+import { saveExtraScope } from "../src/lib/scope-store";
+import { placeProjects } from "../src/lib/sequence-store";
 
 test("board reads the connected team's Linear cycles and ID-bound exception", async () => {
   const pg = new PGlite();
@@ -50,7 +52,7 @@ test("board reads the connected team's Linear cycles and ID-bound exception", as
   }
 });
 
-test("discovery allowance requires reconciliation when new issues appear", async () => {
+test("extra scope is unchanged and advisory when newly estimated work appears", async () => {
   const pg = new PGlite();
   await pg.exec(schemaSql);
   await pg.query("INSERT INTO workspace(id) VALUES(1)");
@@ -65,14 +67,49 @@ test("discovery allowance requires reconciliation when new issues appear", async
   const source = { encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" }, team: { id: "team", name: "Team" }, projects: [project] };
   await saveImport(client, source, new Date("2026-10-15T12:00:00Z"));
   await pg.query("UPDATE work_package SET stream_id='stream-1' WHERE project_id='p'");
-  await pg.query("INSERT INTO package_allowance(package_id,kind,points,issue_ids,owner,review_date,rationale) VALUES('linear:p','discovery',2,ARRAY['known'],'Owner','2026-10-31','Discovery')");
+  await saveExtraScope(client, { packageId: "linear:p", points: 2 });
   assert.equal((await getBoard(client)).reconciliationWarnings.length, 0);
 
   project.issues.push({ id: "new", projectId: "p", teamId: "team", identifier: "T-2", title: "New", estimate: 2,
     stateType: "started", completedAt: null, updatedAt: new Date("2026-10-16T12:00:00Z") });
   await saveImport(client, source, new Date("2026-10-16T12:00:00Z"));
   const board = await getBoard(client);
-  assert.equal(board.reconciliationWarnings.length, 1);
-  assert.match(board.forecast.packages[0].reason || "", /possible double counting/);
+  assert.equal(board.reconciliationWarnings.length, 0);
+  assert.match(board.scoping[0].review || "", /1 added/);
+  assert.equal(board.forecast.packages[0].demand, 7);
+  assert.equal(board.extraScopes[0].points, 2);
   await pg.close();
+});
+
+test("new Linear dependencies preserve user order and only withhold affected lane dates until repair", async () => {
+  const database = new PGlite();
+  try {
+    await database.exec(schemaSql);
+    await database.query("INSERT INTO workspace(id) VALUES(1)");
+    await database.query("INSERT INTO stream(id,name,position,allocation) VALUES('core','Core',1,0.5),('other','Other',2,0.5)");
+    await database.query("INSERT INTO capacity_profile(workspace_id,baseline,baseline_reason) VALUES(1,20,'Test')");
+    const at = new Date("2026-10-15T12:00:00Z");
+    const projects = ["a", "b", "c"].map((id) => ({ id, teamId: "team", name: id.toUpperCase(), description: "", status: "planned", url: `https://linear.app/${id}`,
+      updatedAt: at, crossTeam: false, dependencies: [] as string[], issues: [{ id: `issue-${id}`, projectId: id, teamId: "team", identifier: id, title: id,
+        estimate: 3, stateType: "started", completedAt: null, updatedAt: at }] }));
+    const input = { encryptedKey: "test", viewer: { id: "v", name: "Owner" }, team: { id: "team", name: "Team" }, projects,
+      cycles: Array.from({ length: 3 }, (_, index) => ({ id: `cycle-${index}`, teamId: "team", number: index + 1, name: null,
+        startsAt: new Date(Date.UTC(2026, 10, 20 + index * 7)), endsAt: new Date(Date.UTC(2026, 10, 27 + index * 7)), cycleDays: 7, completedAt: null, completedPoints: null })) };
+    const client = database as unknown as PoolClient;
+    await saveImport(client, input, at);
+    await placeProjects(client, [{ packageId: "linear:b", streamId: "core", selected: true }, { packageId: "linear:a", streamId: "core", selected: true }, { packageId: "linear:c", streamId: "other", selected: true }]);
+    await placeProjects(client, [{ packageId: "linear:b", streamId: "core", selected: true, beforeId: "linear:a" }]);
+    projects[0].dependencies = ["b"];
+    await saveImport(client, input, new Date("2026-10-16T12:00:00Z"));
+    let board = await getBoard(client);
+    assert.deepEqual(board.packages.filter((item) => item.stream_id === "core").map((item) => item.project_id), ["b", "a"]);
+    assert.equal(board.sequenceConflicts.length, 1);
+    assert.equal(board.forecast.packages.find((item) => item.id === "linear:a")!.finish, null);
+    assert.equal(board.forecast.packages.find((item) => item.id === "linear:b")!.finish, null);
+    assert.equal(board.forecast.packages.find((item) => item.id === "linear:c")!.finish, 1);
+    await placeProjects(client, [{ packageId: "linear:a", streamId: "core", selected: true, beforeId: "linear:b" }], board.sequenceToken);
+    board = await getBoard(client);
+    assert.equal(board.sequenceConflicts.length, 0);
+    assert.equal(board.forecast.packages.find((item) => item.id === "linear:b")!.start, 2);
+  } finally { await database.close(); }
 });

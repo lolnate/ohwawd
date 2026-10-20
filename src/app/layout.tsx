@@ -11,6 +11,8 @@ import "./scenario.css";
 import "./workspace-shell.css";
 import "./view-state.css";
 import "./responsive.css";
+import "./project-sequencing.css";
+import "./planning-timeline.css";
 
 export const metadata: Metadata = { title: "Oh, WAWD!", description: "Outcomes and Linear work, connected." };
 

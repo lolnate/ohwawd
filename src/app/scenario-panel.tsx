@@ -2,21 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "./client-api";
+import { linearPriorityLabel } from "@/lib/project-scope";
 
 type Revision = { id: string; scenarioId: string; revisionNumber: number; sourceAt: string; rationale: string; author: string; publishedAt: string; staleSourceConfirmed: boolean };
-type Scenario = { id: string; name: string; editVersion: number; sourceAt: string; stale: boolean; archived: boolean; updatedAt: string; streamConflicts: { id: string; name: string }[]; revisions: Revision[] };
+type Scenario = { id: string; name: string; editVersion: number; sourceAt: string; stale: boolean; archived: boolean; updatedAt: string; conversionNotice: string | null; streamConflicts: { id: string; name: string }[]; revisions: Revision[] };
 type ScenarioList = { baselineRevisionId: string | null; activeScenarioId: string | null; activeDraftDirty: boolean; currentSourceAt: string; creationReadiness: { ready: boolean; blockers: string[]; warnings: string[] }; scenarios: Scenario[] };
 type Change<T> = { id: string; name?: string; title?: string; from: T | null; to: T | null };
 type AssumptionChange = { id: string; name: string; from: Record<string, unknown> | null; to: Record<string, unknown> | null };
 type Comparison = {
   left?: { label: string }; right?: { label: string }; sourceChanged: boolean;
-  capacity: { from: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null }; to: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null } };
-  packages: Change<{ selected: boolean; streamId: string | null; priority: number; mustInclude: boolean; earliestCycleId: string | null; preferredCycleId: string | null; legacyEarliest: number | null; legacyPreferred: number | null; pauseReason: string }>[];
+  calculationVersions: { from: string; to: string };
+  capacity: { from: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null; scopingLeadDays: number; holidaysEnabled: boolean }; to: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null; scopingLeadDays: number; holidaysEnabled: boolean } };
+  packages: Change<{ selected: boolean; streamId: string | null; sequence: number | null; pauseReason: string }>[];
   streams: Change<{ name: string; position: number; allocation: number; wip: number }>[];
   streamLifecycle: Change<{ name: string; position: number; allocation: number; wip: number }>[];
   outcomes: Change<{ status: string; endDate: string | null; target: string; gapCycles: number | null; reasons: string[]; title: string | null; description: string; owner: string; successSignal: string; neededBy: string | null }>[];
-  adjustments: AssumptionChange[]; allowances: AssumptionChange[]; dependencies: AssumptionChange[]; links: AssumptionChange[];
-  linearCycles: AssumptionChange[];
+  adjustments: AssumptionChange[]; extraScopes: AssumptionChange[]; priorities: AssumptionChange[]; dependencies: AssumptionChange[]; links: AssumptionChange[];
+  linearCycles: AssumptionChange[]; weeklyAvailability: AssumptionChange[];
 };
 
 async function request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
@@ -26,7 +28,9 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
 function assumptionSummary(kind: string, value: Record<string, unknown> | null): string {
   if (!value) return "absent";
   if (kind === "Cycle exceptions") return `${Math.round(Number(value.availability) * 100)}% availability, reserve ${value.reserve ?? "base"}`;
-  if (kind === "Allowances") return `${value.kind}, ${value.points} points, issues ${Array.isArray(value.issues) && value.issues.length ? value.issues.join(", ") : "none"}, owner ${value.owner || "none"}, review ${value.reviewDate || "unset"}, rationale ${value.rationale || "none"}`;
+  if (kind === "Weekly availability") return `${Math.round(Number(value.availability) * 100)}%${value.label ? ` · ${value.label}` : ""}`;
+  if (kind === "Extra scope") return `${value.points} points${value.notes ? ` · ${value.notes}` : ""}`;
+  if (kind === "Linear priority") return linearPriorityLabel(value.priority as number | null);
   if (kind === "Dependencies and waivers") return `${value.source} dependency, ${value.waived ? `waived: ${value.waiverReason || "no reason"}` : "active"}`;
   if (kind === "Outcome links") return String(value.requirement || "absent");
   return "changed";
@@ -106,10 +110,15 @@ export default function ScenarioPanel({ onActivated, onOpenBoard, refreshKey }: 
       <form onSubmit={create}><label>Scenario name<input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} placeholder="e.g. January launch option" required /><small>Enter a name for this option; example text is not a saved value.</small></label><button disabled={busy || !newName.trim() || !readiness?.ready}>Create from board</button></form>
     </div>
     {selected && <div className="scenario-draft">
+      {selected.conversionNotice && <p className="notice">{selected.conversionNotice}</p>}
       <div><h3>{selected.name}</h3><p className="meta">Draft v{selected.editVersion} · source {new Date(selected.sourceAt).toLocaleString()}{selected.stale ? " · newer Linear source available" : " · current source"}{active ? " · loaded on board" : " · not loaded"}</p></div>
       {!!selected.streamConflicts.length && <p className="warning">Stream reconciliation required: {selected.streamConflicts.map((stream) => stream.name).join(", ")} {selected.streamConflicts.length === 1 ? "is" : "are"} retired. Restore the stream or create a reconciled draft from the current board before loading or publishing this draft.</p>}
       <div className="actions">
-        {!active && <button className="secondary" disabled={busy} onClick={() => { if (window.confirm("Replace package choices, capacity, allowances, dependencies, this draft’s outcome links, and matching outcome titles, owners, success signals, notes, and targets on the live board? Save the current board to its active draft first if you need to keep unsaved changes. Linear source data and newer unrelated outcomes will not be deleted.")) void run(async () => { await request(`/api/scenarios/${selected.id}/activate`, "POST", { expectedVersion: selected.editVersion, confirmReplace: true }); setComparison(null); setPendingRebase(null); await load(); await onActivated(); }, "Draft loaded onto the board."); }}>Load draft</button>}
+        {!active && <button className="secondary" disabled={busy} onClick={() => {
+          if (window.confirm("Load this draft’s project choices and sequence, extra scope, capacity, dependencies, and outcome settings onto the live board? Save the current board to its active draft first if you need to keep unsaved changes. Linear source data and newer unrelated outcomes will not be deleted.")) {
+            void run(async () => { await request(`/api/scenarios/${selected.id}/activate`, "POST", { expectedVersion: selected.editVersion, confirmReplace: true }); setComparison(null); setPendingRebase(null); await load(); await onActivated(); }, "Draft loaded onto the board.");
+          }
+        }}>Load draft</button>}
         <button disabled={busy || selected.stale || !active} title={!active ? "Load this draft before saving board changes." : undefined} onClick={() => void run(async () => { await request(`/api/scenarios/${selected.id}`, "PUT", { expectedVersion: selected.editVersion }); setComparison(null); setPendingRebase(null); await load(); }, "Current board saved to the active draft.")}>Save board</button>
         {selected.stale && active && <button className="secondary" disabled={busy} onClick={() => void run(async () => { const result = await request<{ comparison: Comparison; previewToken: string }>(`/api/scenarios/${selected.id}/rebase`, "POST", { expectedVersion: selected.editVersion, preview: true }); setComparison(result.comparison); setPendingRebase({ id: selected.id, version: selected.editVersion, token: result.previewToken }); }, "Rebase preview loaded. Review it below, then accept or cancel.")}>Preview rebase</button>}
         {selected.stale && !active && <span className="meta">Load this draft before rebasing it.</span>}
@@ -118,22 +127,38 @@ export default function ScenarioPanel({ onActivated, onOpenBoard, refreshKey }: 
       {!!selected.revisions.length && <div className="revision-list"><h4>Published revisions</h4>{selected.revisions.map((revision) => <div key={revision.id}><span><strong>r{revision.revisionNumber}</strong> · {revision.rationale} · {revision.author} · {new Date(revision.publishedAt).toLocaleString()}{revision.staleSourceConfirmed ? " · older source confirmed" : ""}</span>{data?.baselineRevisionId === revision.id ? <span className="tag">Baseline</span> : <button className="text-button" disabled={busy} onClick={() => void run(async () => { await request("/api/scenarios/baseline", "PUT", { revisionId: revision.id }); await load(); }, "Comparison baseline updated.")}>Set baseline</button>}</div>)}</div>}
     </div>}
     {references.length >= 2 && <div className="scenario-compare"><h3>Compare decisions</h3><div className="scenario-fields"><label>From<select value={left} onChange={(event) => setLeft(event.target.value)}><option value="">Choose draft or revision</option>{references.map((item) => <option key={`left:${item.value}`} value={item.value}>{item.label}</option>)}</select></label><label>To<select value={right} onChange={(event) => setRight(event.target.value)}><option value="">Choose draft or revision</option>{references.map((item) => <option key={`right:${item.value}`} value={item.value}>{item.label}</option>)}</select></label></div><button className="secondary" disabled={busy || !left || !right || left === right} onClick={() => void run(async () => setComparison(await request<Comparison>(`/api/scenarios/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`)), "Comparison loaded.")}>Compare</button></div>}
-    {comparison && <div className="comparison"><h3>{comparison.left ? `${comparison.left.label} → ${comparison.right?.label}` : "Rebase preview"}</h3><p className="meta">Capacity: {comparison.capacity.from.baseline ?? "unset"} → {comparison.capacity.to.baseline ?? "unset"} pts/cycle · reserve {comparison.capacity.from.reserve} → {comparison.capacity.to.reserve} · horizon {comparison.capacity.from.horizon} → {comparison.capacity.to.horizon}{comparison.sourceChanged ? " · source snapshot changed" : ""}</p><div className="comparison-grid"><div><h4>Scope and placement</h4>{comparison.packages.map((change) => <p key={change.id}><strong>{change.name}</strong>: {change.from?.selected ? change.from.streamId || "unassigned" : "deferred"} (priority {change.from?.priority ?? "-"}) → {change.to?.selected ? change.to.streamId || "unassigned" : "deferred"} (priority {change.to?.priority ?? "-"})</p>)}{!comparison.packages.length && <p className="empty">No package changes.</p>}</div><div><h4>Streams</h4>{comparison.streams.map((change) => <p key={change.id}><strong>{change.from?.name || change.name}</strong>{change.from?.name !== change.to?.name ? ` → ${change.to?.name}` : ""}: {Math.round((change.from?.allocation || 0) * 100)}% / WIP {change.from?.wip ?? "-"} → {Math.round((change.to?.allocation || 0) * 100)}% / WIP {change.to?.wip ?? "-"}</p>)}{!comparison.streams.length && <p className="empty">No stream changes.</p>}</div><div><h4>Outcome forecast</h4>{comparison.outcomes.map((change) => <p key={change.id}><strong>{change.title}</strong>: {change.from?.endDate || change.from?.status || "absent"} ({change.from?.target || "-"}{change.from?.gapCycles ? `, ${change.from.gapCycles} cycle gap` : ""}) → {change.to?.endDate || change.to?.status || "absent"} ({change.to?.target || "-"}{change.to?.gapCycles ? `, ${change.to.gapCycles} cycle gap` : ""}){change.to?.reasons.length ? ` · ${change.to.reasons.join(" ")}` : ""}</p>)}{!comparison.outcomes.length && <p className="empty">No outcome changes.</p>}</div></div>{pendingRebase && <div className="actions"><button disabled={busy} onClick={() => void run(async () => { await request(`/api/scenarios/${pendingRebase.id}/rebase`, "POST", { expectedVersion: pendingRebase.version, confirm: true, previewToken: pendingRebase.token }); setPendingRebase(null); setComparison(null); await load(); await onActivated(); }, "Rebase accepted and draft version advanced.")}>Accept rebase</button><button className="quiet" disabled={busy} onClick={() => { setPendingRebase(null); setComparison(null); }}>Cancel</button></div>}</div>}
+    {comparison && <div className="comparison">
+      <h3>{comparison.left ? `${comparison.left.label} → ${comparison.right?.label}` : "Rebase preview"}</h3>
+      <p className="meta">Capacity: {comparison.capacity.from.baseline ?? "unset"} → {comparison.capacity.to.baseline ?? "unset"} pts/cycle · reserve {comparison.capacity.from.reserve} → {comparison.capacity.to.reserve} · horizon {comparison.capacity.from.horizon} → {comparison.capacity.to.horizon}{comparison.sourceChanged ? " · source snapshot changed" : ""}</p>
+      <p className="meta">Calculation: {comparison.calculationVersions?.from ?? "v0"} → {comparison.calculationVersions?.to ?? "v0"} · Scope projects {comparison.capacity.from.scopingLeadDays ?? 14} → {comparison.capacity.to.scopingLeadDays ?? 14} days before start</p>
+      <p className="meta">Holiday availability preset: {comparison.capacity.from.holidaysEnabled ? "on" : "off"} → {comparison.capacity.to.holidaysEnabled ? "on" : "off"}</p>
+      <div className="comparison-grid"><div><h4>Scope and placement</h4>
+        {comparison.packages.map((change) => <p key={change.id}><strong>{change.name}</strong>: {change.from?.selected ? change.from.streamId || "unassigned" : "deferred"} (position {change.from?.sequence ?? "–"}) → {change.to?.selected ? change.to.streamId || "unassigned" : "deferred"} (position {change.to?.sequence ?? "–"})</p>)}
+        {!comparison.packages.length && <p className="empty">No package changes.</p>}
+      </div><div><h4>Streams</h4>
+        {comparison.streams.map((change) => <p key={change.id}><strong>{change.from?.name || change.name}</strong>{change.from?.name !== change.to?.name ? ` → ${change.to?.name}` : ""}: {Math.round((change.from?.allocation || 0) * 100)}% / WIP {change.from?.wip ?? "-"} → {Math.round((change.to?.allocation || 0) * 100)}% / WIP {change.to?.wip ?? "-"}</p>)}
+        {!comparison.streams.length && <p className="empty">No stream changes.</p>}
+      </div><div><h4>Outcome forecast</h4>
+        {comparison.outcomes.map((change) => <p key={change.id}><strong>{change.title}</strong>: {change.from?.endDate || change.from?.status || "absent"} ({change.from?.target || "-"}{change.from?.gapCycles ? `, ${change.from.gapCycles} cycle gap` : ""}) → {change.to?.endDate || change.to?.status || "absent"} ({change.to?.target || "-"}{change.to?.gapCycles ? `, ${change.to.gapCycles} cycle gap` : ""}){change.to?.reasons.length ? ` · ${change.to.reasons.join(" ")}` : ""}</p>)}
+        {!comparison.outcomes.length && <p className="empty">No outcome changes.</p>}
+      </div></div>
+    </div>}
     {pendingRebase && <div className="comparison actions"><button disabled={busy} onClick={() => void run(async () => {
       await request(`/api/scenarios/${pendingRebase.id}/rebase`, "POST", { expectedVersion: pendingRebase.version, confirm: true, previewToken: pendingRebase.token });
       setPendingRebase(null); setComparison(null); await load(); await onActivated();
     }, "Scenario rebased onto the current Linear source.")}>Accept rebase</button><button className="quiet" disabled={busy} onClick={() => { setPendingRebase(null); setComparison(null); setNotice("Rebase preview cancelled."); }}>Cancel rebase</button></div>}
     {comparison && <div className="comparison"><h4>Other forecast inputs</h4>{([
-      ["Cycle exceptions", comparison.adjustments], ["Allowances", comparison.allowances],
+      ["Cycle exceptions", comparison.adjustments], ["Extra scope", comparison.extraScopes ?? []], ["Linear priority", comparison.priorities ?? []],
+      ["Weekly availability", comparison.weeklyAvailability ?? []],
       ["Dependencies and waivers", comparison.dependencies], ["Outcome links", comparison.links],
     ] as const).map(([label, changes]) => <div key={label}><strong>{label}</strong>{changes.length
       ? <ul>{changes.map((change) => <li key={change.id}><strong>{change.name}</strong>: {assumptionSummary(label, change.from)} → {assumptionSummary(label, change.to)}</li>)}</ul>
       : <p className="empty">No changes.</p>}</div>)}</div>}
     {comparison && <div className="comparison"><h4>Decision detail</h4>
-      {comparison.packages.some((change) => change.from?.mustInclude !== change.to?.mustInclude || change.from?.earliestCycleId !== change.to?.earliestCycleId || change.from?.preferredCycleId !== change.to?.preferredCycleId || change.from?.legacyEarliest !== change.to?.legacyEarliest || change.from?.legacyPreferred !== change.to?.legacyPreferred || change.from?.pauseReason !== change.to?.pauseReason)
-        ? <ul>{comparison.packages.filter((change) => change.from?.mustInclude !== change.to?.mustInclude || change.from?.earliestCycleId !== change.to?.earliestCycleId || change.from?.preferredCycleId !== change.to?.preferredCycleId || change.from?.legacyEarliest !== change.to?.legacyEarliest || change.from?.legacyPreferred !== change.to?.legacyPreferred || change.from?.pauseReason !== change.to?.pauseReason)
-          .map((change) => <li key={change.id}><strong>{change.name}</strong>: must include {String(change.from?.mustInclude ?? false)} → {String(change.to?.mustInclude ?? false)}; earliest {change.from?.earliestCycleId || change.from?.legacyEarliest || "any"} → {change.to?.earliestCycleId || change.to?.legacyEarliest || "any"}; preferred {change.from?.preferredCycleId || change.from?.legacyPreferred || "any"} → {change.to?.preferredCycleId || change.to?.legacyPreferred || "any"}; rationale {change.from?.pauseReason || "none"} → {change.to?.pauseReason || "none"}</li>)}</ul>
-        : <p className="empty">No package constraint changes.</p>}
+      {comparison.packages.some((change) => change.from?.pauseReason !== change.to?.pauseReason)
+        ? <ul>{comparison.packages.filter((change) => change.from?.pauseReason !== change.to?.pauseReason)
+          .map((change) => <li key={change.id}><strong>{change.name}</strong>: pause note {change.from?.pauseReason || "none"} → {change.to?.pauseReason || "none"}</li>)}</ul>
+        : <p className="empty">No pause note changes.</p>}
       {!!comparison.streamLifecycle.length && <ul>{comparison.streamLifecycle.map((change) => <li key={change.id}><strong>{change.name}</strong>: {!change.from ? "added" : "removed"}</li>)}</ul>}
       {comparison.outcomes.some((change) => change.from?.title !== change.to?.title || change.from?.owner !== change.to?.owner || change.from?.neededBy !== change.to?.neededBy || change.from?.successSignal !== change.to?.successSignal || change.from?.description !== change.to?.description) &&
         <ul>{comparison.outcomes.filter((change) => change.from?.title !== change.to?.title || change.from?.owner !== change.to?.owner || change.from?.neededBy !== change.to?.neededBy || change.from?.successSignal !== change.to?.successSignal || change.from?.description !== change.to?.description)
