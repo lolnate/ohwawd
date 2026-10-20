@@ -1,6 +1,4 @@
 .stream-title { min-width: 260px; }
-.forecast-pill.unknown + small { font-size: 0; }
-.forecast-pill.unknown + small::after { content: "Cannot assess target"; font-size: .75rem; }
 .stream-title-row { display: flex; align-items: center; gap: 7px; }
 .stream-title-row h3 { margin: 0; }
 .stream-title-row .text-button { min-height: 30px; padding: 4px 7px; font-size: .72rem; }

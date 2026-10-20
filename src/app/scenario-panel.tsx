@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "./client-api";
-import "./scenario.css";
 
 type Revision = { id: string; scenarioId: string; revisionNumber: number; sourceAt: string; rationale: string; author: string; publishedAt: string; staleSourceConfirmed: boolean };
 type Scenario = { id: string; name: string; editVersion: number; sourceAt: string; stale: boolean; archived: boolean; updatedAt: string; streamConflicts: { id: string; name: string }[]; revisions: Revision[] };
-type ScenarioList = { baselineRevisionId: string | null; activeScenarioId: string | null; activeDraftDirty: boolean; currentSourceAt: string; scenarios: Scenario[] };
+type ScenarioList = { baselineRevisionId: string | null; activeScenarioId: string | null; activeDraftDirty: boolean; currentSourceAt: string; creationReadiness: { ready: boolean; blockers: string[]; warnings: string[] }; scenarios: Scenario[] };
 type Change<T> = { id: string; name?: string; title?: string; from: T | null; to: T | null };
 type AssumptionChange = { id: string; name: string; from: Record<string, unknown> | null; to: Record<string, unknown> | null };
 type Comparison = {
@@ -33,7 +32,7 @@ function assumptionSummary(kind: string, value: Record<string, unknown> | null):
   return "changed";
 }
 
-export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated: () => Promise<void>; refreshKey: number }) {
+export default function ScenarioPanel({ onActivated, onOpenBoard, refreshKey }: { onActivated: () => Promise<void>; onOpenBoard: () => void; refreshKey: number }) {
   const [data, setData] = useState<ScenarioList | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [newName, setNewName] = useState("");
@@ -97,12 +96,14 @@ export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated
     }, "Scenario draft created from the current board.");
   }
 
+  const readiness = data?.creationReadiness;
   return <section className="panel scenario-panel">
-    <div className="section-head"><div><h2>Decision scenarios</h2><p>Save board assumptions as drafts, publish reviewed decisions, and compare what moved the forecast.</p></div><span className="tag">Slice 3</span></div>
+    <div className="scenario-intro"><div><p className="eyebrow">Decision workflow · product proof slice 3</p><p>This third proof slice turns the live sequencing board into named decision options. A draft captures current scope and placement, stream settings, capacity, cycle exceptions, dependencies, outcome links, and the current Linear source snapshot.</p></div><button className="secondary" onClick={onOpenBoard}>Open board</button></div>
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
+    <section className={`scenario-readiness${readiness?.ready ? " ready" : ""}`} aria-labelledby="scenario-readiness-title"><div><strong id="scenario-readiness-title">{readiness?.ready ? "Board ready to capture" : "Board setup required"}</strong><p>{readiness?.ready ? "The forecast prerequisites are complete. Name this option to create a draft snapshot." : "Resolve these prerequisites before creating a decision option."}</p></div>{!!readiness?.blockers.length && <ul>{readiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}{!!readiness?.warnings.length && <details><summary>{readiness.warnings.length} item{readiness.warnings.length === 1 ? "" : "s"} will require review before publication</summary><ul>{readiness.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}{!readiness?.ready && <button className="secondary" onClick={onOpenBoard}>Configure board</button>}</section>
     <div className="scenario-toolbar">
-      <label>Selected draft<select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setComparison(null); setPendingRebase(null); setConfirmStale(false); }}><option value="">Choose a scenario</option>{data?.scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.name}{scenario.id === data.activeScenarioId ? " · on board" : ""}{scenario.stale ? " · source changed" : ""}{scenario.archived ? " · archived" : ""}</option>)}</select></label>
-      <form onSubmit={create}><label>New scenario<input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} placeholder="January plan" required /></label><button disabled={busy}>Create from board</button></form>
+      <label>Selected draft<select value={selectedId} disabled={!data?.scenarios.length} onChange={(event) => { setSelectedId(event.target.value); setComparison(null); setPendingRebase(null); setConfirmStale(false); }}><option value="">{data?.scenarios.length ? "Choose a scenario" : "No scenarios yet"}</option>{data?.scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.name}{scenario.id === data.activeScenarioId ? " · on board" : ""}{scenario.stale ? " · source changed" : ""}{scenario.archived ? " · archived" : ""}</option>)}</select></label>
+      <form onSubmit={create}><label>Scenario name<input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} placeholder="e.g. January launch option" required /><small>Enter a name for this option; example text is not a saved value.</small></label><button disabled={busy || !newName.trim() || !readiness?.ready}>Create from board</button></form>
     </div>
     {selected && <div className="scenario-draft">
       <div><h3>{selected.name}</h3><p className="meta">Draft v{selected.editVersion} · source {new Date(selected.sourceAt).toLocaleString()}{selected.stale ? " · newer Linear source available" : " · current source"}{active ? " · loaded on board" : " · not loaded"}</p></div>
@@ -142,6 +143,6 @@ export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated
       {(comparison.capacity.from.cycleAnchor !== comparison.capacity.to.cycleAnchor || comparison.capacity.from.cycleDays !== comparison.capacity.to.cycleDays) && <p>Legacy calendar: anchor {comparison.capacity.from.cycleAnchor || "none"} → {comparison.capacity.to.cycleAnchor || "none"}; duration {comparison.capacity.from.cycleDays || "unset"} → {comparison.capacity.to.cycleDays || "unset"} days.</p>}
       {!!comparison.linearCycles.length && <p>{comparison.linearCycles.length} Linear cycle calendar entr{comparison.linearCycles.length === 1 ? "y" : "ies"} changed.</p>}
     </div>}
-    {!data?.scenarios.length && <p className="empty">No scenarios yet. Configure the board, then save the first decision option.</p>}
+    {!data?.scenarios.length && <p className="empty">No decision options have been captured yet. Complete the readiness steps above, enter a name, and create the first draft from the board.</p>}
   </section>;
 }

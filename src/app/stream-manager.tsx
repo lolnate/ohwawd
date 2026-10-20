@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "./client-api";
-import "./stream-manager.css";
 
 type Stream = { id: string; name: string; position: number; wip_limit: number; allocation: number; active: boolean; retired_at: string | null; retirement_reason: string; package_count: number };
 type StreamData = {

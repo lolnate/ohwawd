@@ -5,9 +5,10 @@ import Board from "./board";
 import { apiRequest } from "./client-api";
 import ScenarioPanel from "./scenario-panel";
 import StatusFilter from "./status-filter";
+import OutcomeProjectPicker from "./outcome-project-picker";
 
 type Team = { id: string; name: string; key: string };
-type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
+type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
 type Outcome = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null };
 type Link = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
 type State = { connection: { viewer_name: string; team_id: string; team_name: string; last_imported_at: string } | null; projects: Project[]; outcomes: Outcome[]; links: Link[]; streams: { id: string; name: string }[] };
@@ -48,12 +49,11 @@ export default function App() {
   const [showCreateOutcome, setShowCreateOutcome] = useState(false);
   const [editingOutcome, setEditingOutcome] = useState<Outcome | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [draftLinks, setDraftLinks] = useState<Record<string, "minimum" | "optional">>({});
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatuses, setProjectStatuses] = useState<string[]>([]);
-  const [showHidden, setShowHidden] = useState(false);
-  const [linkSearch, setLinkSearch] = useState("");
-  const [linkStatuses, setLinkStatuses] = useState<string[]>([]);
+  const [projectPreset, setProjectPreset] = useState<"needs" | "active" | "completed" | "hidden" | "all">("needs");
+  const [projectSort, setProjectSort] = useState<"planning" | "name" | "status" | "points">("planning");
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [syncReport, setSyncReport] = useState<ImportResult["report"] | null>(null);
   const reloadGeneration = useRef(0);
 
@@ -115,9 +115,7 @@ export default function App() {
   }
 
   function startLinking(outcome: Outcome) {
-    const draft: Record<string, "minimum" | "optional"> = {};
-    for (const link of state?.links ?? []) if (link.outcome_id === outcome.id) draft[link.project_id] = link.requirement;
-    setDraftLinks(draft); setLinkSearch(""); setLinkStatuses([]); setEditingOutcome(null); setEditing(outcome.id);
+    setEditingOutcome(null); setEditing(outcome.id);
   }
 
   function saveOutcome(event: FormEvent) {
@@ -148,7 +146,7 @@ export default function App() {
     });
   }
 
-  async function saveLinks(outcomeId: string) {
+  async function saveLinks(outcomeId: string, draftLinks: Record<string, "minimum" | "optional">) {
     await api(`/api/outcomes/${outcomeId}/links`, "PUT", {
       links: Object.entries(draftLinks).map(([projectId, requirement]) => ({ projectId, requirement })),
     });
@@ -161,23 +159,30 @@ export default function App() {
     setNotice(project.in_scope ? "Project hidden from planning lists. Existing outcome links remain." : "Project restored to planning lists.");
   }
 
+  async function setProjectsScope(projectIds: string[], inScope: boolean): Promise<void> {
+    await api("/api/projects/scope", "PUT", { projectIds, inScope });
+    setSelectedProjectIds([]);
+    await reload();
+    setNotice(`${projectIds.length} project${projectIds.length === 1 ? "" : "s"} ${inScope ? "restored to" : "hidden from"} planning lists.`);
+  }
+
   const statuses = [...new Set(state?.projects.map((project) => project.status) ?? [])].sort();
   const statusKey = statuses.join("\0");
   useEffect(() => {
     setProjectStatuses((current) => current.filter((status) => statuses.includes(status)));
-    setLinkStatuses((current) => current.filter((status) => statuses.includes(status)));
   }, [statusKey]);
-  const visibleProjects = state?.projects.filter((project) =>
-    (showHidden || project.in_scope) &&
+  const terminalProject = (project: Project) => /completed|done|finished|canceled|cancelled/i.test(project.status);
+  const activeProject = (project: Project) => !terminalProject(project) && (!!project.stream_id || /started|active|in progress/i.test(project.status));
+  const needsPlanning = (project: Project) => project.in_scope && !terminalProject(project) && (project.needs_review || !project.stream_id || project.unestimated_open_issues > 0);
+  const presetMatches = (project: Project) => projectPreset === "needs" ? needsPlanning(project) : projectPreset === "active" ? project.in_scope && activeProject(project) : projectPreset === "completed" ? project.in_scope && terminalProject(project) : projectPreset === "hidden" ? !project.in_scope : project.in_scope;
+  const visibleProjects = (state?.projects.filter((project) =>
+    presetMatches(project) &&
     (!projectStatuses.length || projectStatuses.includes(project.status)) &&
     project.name.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase()),
-  ) ?? [];
-  const linkableProjects = state?.projects.filter((project) =>
-    (project.in_scope || !!draftLinks[project.id]) &&
-    (!linkStatuses.length || linkStatuses.includes(project.status) || !!draftLinks[project.id]) &&
-    project.name.toLocaleLowerCase().includes(linkSearch.trim().toLocaleLowerCase()),
-  ) ?? [];
+  ) ?? []).sort((left, right) => projectSort === "name" ? left.name.localeCompare(right.name) : projectSort === "status" ? left.status.localeCompare(right.status) || left.name.localeCompare(right.name) : projectSort === "points" ? right.estimated_open_points - left.estimated_open_points || left.name.localeCompare(right.name) : Number(right.needs_review) - Number(left.needs_review) || right.unestimated_open_issues - left.unestimated_open_issues || Number(!right.stream_id) - Number(!left.stream_id) || left.name.localeCompare(right.name));
   const hiddenCount = state?.projects.filter((project) => !project.in_scope).length ?? 0;
+  const presetCounts = { needs: state?.projects.filter(needsPlanning).length ?? 0, active: state?.projects.filter((project) => project.in_scope && activeProject(project)).length ?? 0, completed: state?.projects.filter((project) => project.in_scope && terminalProject(project)).length ?? 0, hidden: hiddenCount, all: state?.projects.filter((project) => project.in_scope).length ?? 0 };
+  const allVisibleSelected = visibleProjects.length > 0 && visibleProjects.every((project) => selectedProjectIds.includes(project.id));
 
   if (signedIn === null) return <main className="shell"><p>Opening workspace…</p></main>;
   if (!signedIn) return <main className="shell auth"><div className="brand">Oh, WAWD!</div><h1>Your private planning space</h1><p>Sign in as the workspace owner.</p><form onSubmit={login}><label>Owner password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error" role="alert">{error}</p>}</main>;
@@ -197,19 +202,21 @@ export default function App() {
     <section className="panel projects-panel">
       <div className="section-head"><div><h2>Imported projects</h2><p>Linear project IDs stay stable when names and other fields change, preserving planning assignments.</p></div><div className="actions"><span className="count">{state?.projects.length ?? 0}</span><button className="secondary" disabled={busy || !state?.connection} onClick={() => void run(async () => { setSyncReport(null); const result = await api<ImportResult>("/api/linear/import", "POST", { teamId: state!.connection!.team_id }); setSyncReport(result.report); await reload(); setNotice(`${result.imported} projects synced from Linear. Local planning choices and outcome links were preserved.`); }, "Syncing projects, issues, dependencies, and cycles from Linear…")}>Sync Linear</button></div></div>
       {syncReport && <SyncReport report={syncReport} />}
+      <div className="project-presets" role="group" aria-label="Project triage view">{([['needs','Needs planning'],['active','Active'],['completed','Completed'],['hidden','Hidden'],['all','All visible']] as const).map(([id, label]) => <button key={id} className={projectPreset === id ? "active" : ""} aria-pressed={projectPreset === id} onClick={() => { setProjectPreset(id); setSelectedProjectIds([]); }}>{label}<span>{presetCounts[id]}</span></button>)}</div>
       <div className="project-filters">
         <label>Search<input type="search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Project name" /></label>
         <StatusFilter statuses={statuses} selected={projectStatuses} onChange={setProjectStatuses} />
-        <label className="show-hidden"><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} />Show hidden{hiddenCount ? ` (${hiddenCount})` : ""}</label>
+        <label>Sort<select value={projectSort} onChange={(event) => setProjectSort(event.target.value as typeof projectSort)}><option value="planning">Planning attention</option><option value="name">Project name</option><option value="status">Linear status</option><option value="points">Open points</option></select></label>
       </div>
-      <p className="meta">Showing {visibleProjects.length} of {state?.projects.length ?? 0} imported projects. Hide irrelevant work from planning lists without removing it from Linear or existing outcomes.</p>
-      <div className="project-table-list">{visibleProjects.map((project) => <article className="project-row" key={project.id}>
-        <div><a href={project.url} target="_blank" rel="noreferrer">{project.name} ↗</a><p>{project.issue_count} issues · {project.estimated_open_points} known open points{project.unestimated_open_issues ? ` · ${project.unestimated_open_issues} unestimated` : ""}</p>{project.cross_team && <span className="inline-warning">Cross-team</span>}{project.needs_review && <span className="inline-warning">Needs review</span>}</div><span className="tag">{project.status}</span><button className="text-button" disabled={busy} onClick={() => void run(() => setProjectScope(project))}>{project.in_scope ? "Hide" : "Restore"}</button>
+      <p className="meta project-result-summary"><strong>{visibleProjects.length} results</strong> · {projectPreset === "needs" ? "Needs planning" : projectPreset === "active" ? "Active" : projectPreset === "completed" ? "Completed or canceled" : projectPreset === "hidden" ? "Hidden" : "All visible"}{projectStatuses.length ? ` · ${projectStatuses.length} status ${projectStatuses.length === 1 ? "filter" : "filters"}` : " · all statuses"}{projectSearch.trim() ? ` · search “${projectSearch.trim()}”` : ""}. Hide work without removing it from Linear or existing outcomes.</p>
+      <div className="project-bulk"><label><input type="checkbox" checked={allVisibleSelected} onChange={(event) => setSelectedProjectIds((current) => event.target.checked ? [...new Set([...current, ...visibleProjects.map((project) => project.id)])] : current.filter((id) => !visibleProjects.some((project) => project.id === id)))} />Select all {visibleProjects.length} results</label><span>{selectedProjectIds.length} selected</span><button className="secondary" disabled={busy || !selectedProjectIds.length} onClick={() => void run(() => setProjectsScope(selectedProjectIds, projectPreset === "hidden"))}>{projectPreset === "hidden" ? "Restore selected" : "Hide selected"}</button>{!!selectedProjectIds.length && <button className="quiet" disabled={busy} onClick={() => setSelectedProjectIds([])}>Clear</button>}</div>
+      <div className="project-table-list">{visibleProjects.map((project) => <article className={`project-row${terminalProject(project) ? " terminal" : ""}${selectedProjectIds.includes(project.id) ? " selected" : ""}`} key={project.id}>
+        <label className="project-select"><input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={(event) => setSelectedProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} /><span className="sr-only">Select {project.name}</span></label><div><a href={project.url} target="_blank" rel="noreferrer">{project.name} ↗</a><p>{project.issue_count} issues · {project.estimated_open_points} known open points{project.unestimated_open_issues ? ` · ${project.unestimated_open_issues} unestimated` : ""}{project.stream_id ? " · stream assigned" : " · needs assignment"}</p>{project.cross_team && <span className="inline-warning">Cross-team</span>}{project.needs_review && <span className="inline-warning">Needs review</span>}</div><span className="tag">{project.status}</span><button className="text-button" disabled={busy} onClick={() => void run(() => setProjectScope(project))}>{project.in_scope ? "Hide" : "Restore"}</button>
       </article>)}
       {!visibleProjects.length && <p className="empty">{state?.projects.length ? "No projects match these filters." : "Projects will appear here after import."}</p>}</div>
     </section></section>
-    <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} refreshKey={boardVersion} /></section>
-    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => void reload()} onAddOutcome={() => { setShowCreateOutcome(true); setActiveView("outcomes"); }} onManageOutcome={(id) => { const outcome = state?.outcomes.find((item) => item.id === id); if (outcome) startLinking(outcome); setActiveView("outcomes"); }} /></section>
+    <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} onOpenBoard={() => setActiveView("board")} refreshKey={boardVersion} /></section>
+    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")} onAddOutcome={() => { setShowCreateOutcome(true); setActiveView("outcomes"); }} onManageOutcome={(id) => { const outcome = state?.outcomes.find((item) => item.id === id); if (outcome) startLinking(outcome); setActiveView("outcomes"); }} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}><section className="panel outcomes-panel"><div className="section-head"><div><h2>Outcome catalog</h2><p>Describe the change you need, even before there is a Linear project.</p></div><span className="count">{state?.outcomes.length ?? 0}</span></div>
       <details className="create-outcome" open={showCreateOutcome} onToggle={(event) => setShowCreateOutcome(event.currentTarget.open)}><summary>Add outcome</summary><form className="outcome-form" onSubmit={createOutcome}><label>Outcome title<input value={newOutcome.title} onChange={(event) => setNewOutcome({ ...newOutcome, title: event.target.value })} maxLength={200} required placeholder="Customers can complete onboarding" /></label><label>Success signal<input value={newOutcome.successSignal} onChange={(event) => setNewOutcome({ ...newOutcome, successSignal: event.target.value })} placeholder="e.g. 80% finish without support" /></label><div className="form-row"><label>Owner<input value={newOutcome.owner} onChange={(event) => setNewOutcome({ ...newOutcome, owner: event.target.value })} /></label><label>Needed by<input type="date" value={newOutcome.neededBy} onChange={(event) => setNewOutcome({ ...newOutcome, neededBy: event.target.value })} /></label></div><label>Notes<textarea value={newOutcome.description} onChange={(event) => setNewOutcome({ ...newOutcome, description: event.target.value })} rows={2} /></label><button disabled={busy}>Create outcome</button></form></details>
       <div className="card-list">{state?.outcomes.map((outcome) => { const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card" key={outcome.id}>
@@ -220,16 +227,8 @@ export default function App() {
           <label>Notes<textarea value={editingOutcome.description} onChange={(event) => setEditingOutcome({ ...editingOutcome, description: event.target.value })} rows={2} /></label>
           <div className="actions"><button disabled={busy}>Save outcome</button><button type="button" className="quiet" disabled={busy} onClick={() => setEditingOutcome(null)}>Cancel</button></div>
         </form> : <><div className="card-title"><h3>{outcome.title}</h3><span className={minimum.length ? "tag" : "tag unplanned"}>{minimum.length ? `${minimum.length} required` : "Unplanned"}</span></div>{outcome.description && <p>{outcome.description}</p>}<p className="meta">{outcome.owner || "No owner"}{outcome.needed_by ? ` · Needed by ${outcome.needed_by.slice(0, 10)}` : " · No target"}{outcome.success_signal ? ` · ${outcome.success_signal}` : ""}</p>{links.length > 0 && <ul className="linked">{links.map((link) => <li key={link.project_id}>{state.projects.find((project) => project.id === link.project_id)?.name || "Unavailable project"} <small>· {link.requirement}</small></li>)}</ul>}<div className="actions"><button className="text-button" disabled={busy} onClick={() => { setEditing(null); setEditingOutcome({ ...outcome }); }}>Edit outcome</button><button className="text-button" disabled={busy} onClick={() => deleteOutcome(outcome)}>Delete</button></div></>}
-      {editing === outcome.id ? <div className="link-editor">
-        <p>Select a project and whether it is needed for the first delivery. Hidden projects already linked to this outcome remain available here.</p>
-        <div className="link-filters"><label>Find a project<input type="search" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="Search imported projects" /></label><StatusFilter statuses={statuses} selected={linkStatuses} onChange={setLinkStatuses} /></div>
-        {linkableProjects.map((project) => <div className="link-row" key={project.id}>
-          <label><input type="checkbox" checked={!!draftLinks[project.id]} onChange={(event) => setDraftLinks((current) => { const next = { ...current }; if (event.target.checked) next[project.id] = "minimum"; else delete next[project.id]; return next; })} />{project.name}{!project.in_scope && <small> · hidden</small>}</label>
-          {draftLinks[project.id] && <select aria-label={`${project.name} requirement`} value={draftLinks[project.id]} onChange={(event) => setDraftLinks({ ...draftLinks, [project.id]: event.target.value as "minimum" | "optional" })}><option value="minimum">Minimum required</option><option value="optional">Optional</option></select>}
-        </div>)}
-        {!linkableProjects.length && <p className="empty">{state.projects.length ? "No matching projects in the planning list." : "Import projects to link them."}</p>}
-        <div className="actions"><button disabled={busy} onClick={() => void run(() => saveLinks(outcome.id))}>Save links</button><button className="quiet" disabled={busy} onClick={() => setEditing(null)}>Cancel</button></div>
-      </div> : <button className="text-button" disabled={busy} onClick={() => startLinking(outcome)}>Manage project links →</button>}</article>; })}{!state?.outcomes.length && <p className="empty">No outcomes yet. Add one to start the plan.</p>}</div>
+      <button className="text-button" disabled={busy} onClick={() => startLinking(outcome)}>Manage project links →</button></article>; })}{!state?.outcomes.length && <p className="empty">No outcomes yet. Add one to start the plan.</p>}</div>
+      {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
     </section></section>
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;

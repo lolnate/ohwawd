@@ -63,7 +63,10 @@ test("scenario lifecycle saves drafts with optimistic versions and publishes fro
     const created = await createScenario({ name: "Launch plan" }, client);
     assert.equal(created.editVersion, 1);
     assert.equal(created.stale, false);
-    assert.equal((await listScenarios(client)).scenarios[0].name, "Launch plan");
+    const listed = await listScenarios(client);
+    assert.equal(listed.scenarios[0].name, "Launch plan");
+    assert.equal(listed.creationReadiness.ready, true);
+    assert.deepEqual(listed.creationReadiness.blockers, []);
 
     await database.query("UPDATE work_package SET priority_rank=7 WHERE project_id='project-1'");
     const saved = await saveScenario(created.id, { expectedVersion: 1, name: "Launch plan", archived: false }, client);
@@ -91,6 +94,20 @@ test("scenario lifecycle saves drafts with optimistic versions and publishes fro
     await database.query("UPDATE linear_project_cache SET name='Changed live name' WHERE linear_id='project-1'");
     const frozen = await database.query<{ snapshot: { packages: { name: string }[] } }>("SELECT snapshot FROM scenario_revision WHERE id=$1", [revision.id]);
     assert.equal(frozen.rows[0].snapshot.packages[0].name, "Project One");
+  } finally {
+    await database.close();
+  }
+});
+
+test("scenario creation rejects a board with incomplete forecast prerequisites", async () => {
+  const { database, client } = await fixture();
+  try {
+    await database.query("DELETE FROM capacity_profile WHERE workspace_id=1");
+    await assert.rejects(
+      createScenario({ name: "Not ready" }, client),
+      (error: unknown) => error instanceof HttpError && error.status === 422 && error.details?.code === "SCENARIO_BOARD_NOT_READY",
+    );
+    assert.equal((await database.query("SELECT id FROM scenario")).rows.length, 0);
   } finally {
     await database.close();
   }

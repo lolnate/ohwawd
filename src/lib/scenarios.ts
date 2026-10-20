@@ -212,6 +212,11 @@ export async function listScenarios(client?: ScenarioClient) {
     activeScenarioId: activeId,
     activeDraftDirty: !!active && fingerprint(planningState(active.draft_snapshot)) !== fingerprint(planningState(board, active.draft_snapshot)),
     currentSourceAt: sourceAt,
+    creationReadiness: {
+      ready: board.forecast.ready,
+      blockers: [...board.forecast.setup, ...board.forecast.errors],
+      warnings: board.reconciliationWarnings.map((warning) => warning.message),
+    },
     scenarios: scenarios.rows.map((row) => scenarioSummary(row, sourceAt,
       revisions.rows.filter((revision) => revision.scenario_id === row.id).map(revisionSummary), registry)),
   };
@@ -222,6 +227,9 @@ export async function createScenario(input: { name: string }, client?: ScenarioC
   await database.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
   const name = validateName(input.name);
   const board = await getBoard(database);
+  if (!board.forecast.ready) throw new HttpError(422, "Complete the board forecast prerequisites before creating a scenario.", {
+    code: "SCENARIO_BOARD_NOT_READY", blockers: [...board.forecast.setup, ...board.forecast.errors],
+  });
   const id = randomUUID();
   const result = await database.query(`INSERT INTO scenario(id,workspace_id,name,draft_source_at,draft_source_snapshot,draft_snapshot)
     VALUES($1,1,$2,$3,$4::jsonb,$5::jsonb) ON CONFLICT(workspace_id,name) DO NOTHING RETURNING id`,

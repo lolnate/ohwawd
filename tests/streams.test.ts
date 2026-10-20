@@ -31,7 +31,10 @@ test("stream lifecycle migrates work, updates the active draft, and preserves ol
     encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" }, team: { id: "team", name: "Team" },
     projects: ["one", "two"].map((id) => ({ id, teamId: "team", name: `Project ${id}`, description: "", status: "planned", url: `https://linear.app/${id}`,
       updatedAt: seenAt, crossTeam: false, issues: [] })),
+    cycles: [{ id: "cycle-1", teamId: "team", number: 1, name: null, startsAt: new Date("2026-10-19T00:00:00Z"), endsAt: new Date("2026-10-26T00:00:00Z"), completedAt: null, cycleDays: 7, completedPoints: null }],
+    cycleSettings: { timezone: "UTC", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 1 },
   }, seenAt);
+  await database.query("INSERT INTO capacity_profile(workspace_id,baseline,baseline_reason,reserve,horizon) VALUES(1,10,'test baseline',0,4)");
   await database.query("UPDATE work_package SET stream_id='stream-1' WHERE project_id='one'");
   await database.query("UPDATE work_package SET stream_id='stream-1',selected=false,pause_reason='later' WHERE project_id='two'");
   const oldDraft = await createScenario({ name: "Old stream plan" }, client);
