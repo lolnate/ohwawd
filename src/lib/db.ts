@@ -1,4 +1,4 @@
-import { Pool, type PoolClient } from "pg";
+import { Pool, type PoolClient, type PoolConfig } from "pg";
 
 declare global {
   // Reuse the pool across Next.js development reloads.
@@ -6,49 +6,45 @@ declare global {
   var ohwawdPool: Pool | undefined;
 }
 
-export function db(): Pool {
+export function databasePoolConfig(): PoolConfig {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
-  return (globalThis.ohwawdPool ??= new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }));
+  const sslMode = process.env.DATABASE_SSL || "disable";
+  if (process.env.NODE_ENV === "production" && sslMode !== "require") {
+    throw new Error("DATABASE_SSL=require is required in production");
+  }
+  const configuredMax = Number(process.env.DATABASE_POOL_MAX || 5);
+  if (!Number.isSafeInteger(configuredMax) || configuredMax < 1 || configuredMax > 50) throw new Error("DATABASE_POOL_MAX must be an integer from 1 to 50");
+  return {
+    connectionString: process.env.DATABASE_URL,
+    max: configuredMax,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: 30_000,
+    application_name: "ohwawd",
+    ssl: sslMode === "require" ? { rejectUnauthorized: true } : undefined,
+  };
+}
+
+export function db(): Pool {
+  return (globalThis.ohwawdPool ??= new Pool(databasePoolConfig()));
 }
 
 let ready: Promise<void> | undefined;
 export function ensureSchema(): Promise<void> {
-  return (ready ??= createSchema().catch((error) => {
+  return (ready ??= verifySchema().catch((error) => {
     ready = undefined;
     throw error;
   }));
 }
 
-async function createSchema(): Promise<void> {
-  await db().query(schemaSql);
-  await db().query("ALTER TABLE scenario_revision DROP CONSTRAINT IF EXISTS scenario_revision_scenario_id_fkey");
-  await db().query(`ALTER TABLE scenario_revision ADD CONSTRAINT scenario_revision_scenario_id_fkey
-    FOREIGN KEY (scenario_id) REFERENCES scenario(id) ON DELETE RESTRICT`);
-  await db().query("ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS in_scope boolean NOT NULL DEFAULT true");
-  await db().query("ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS external_blockers text[] NOT NULL DEFAULT '{}'");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS selected boolean NOT NULL DEFAULT true");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS must_include boolean NOT NULL DEFAULT false");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS priority_rank integer NOT NULL DEFAULT 1000");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS earliest_cycle integer");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS preferred_cycle integer");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS pause_reason text NOT NULL DEFAULT ''");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS earliest_linear_cycle_id text");
-  await db().query("ALTER TABLE work_package ADD COLUMN IF NOT EXISTS preferred_linear_cycle_id text");
-  await db().query("ALTER TABLE stream ADD COLUMN IF NOT EXISTS allocation numeric NOT NULL DEFAULT 0");
-  await db().query("ALTER TABLE workspace ADD COLUMN IF NOT EXISTS legacy_cycles_migrated boolean NOT NULL DEFAULT false");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS team_timezone text NOT NULL DEFAULT 'America/New_York'");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycles_enabled boolean NOT NULL DEFAULT false");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycle_duration integer");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycle_start_day integer");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycle_cooldown_time integer");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS upcoming_cycle_count integer");
-  await db().query("ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycles_refreshed_at timestamptz");
-  await db().query("INSERT INTO workspace (id) VALUES (1) ON CONFLICT DO NOTHING");
-  for (let position = 1; position <= 5; position++) {
-    await db().query(
-      "INSERT INTO stream (id, name, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-      [`stream-${position}`, `Stream ${position}`, position],
-    );
+async function verifySchema(): Promise<void> {
+  const table = await db().query<{ present: string | null }>("SELECT to_regclass('public.schema_migration')::text AS present");
+  if (!table.rows[0]?.present) throw new Error("Database migrations are required. Run `npm run db:migrate` before starting the app.");
+  const result = await db().query<{ version: number; name: string }>("SELECT version,name FROM schema_migration ORDER BY version");
+  const valid = result.rows.length === migrations.length && result.rows.every((row, index) =>
+    row.version === migrations[index].version && row.name === migrations[index].name);
+  if (!valid) {
+    throw new Error(`Database migration history does not match required version ${latestMigrationVersion}. Run \`npm run db:migrate\`.`);
   }
 }
 
@@ -57,6 +53,9 @@ export const schemaSql = `
       id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
       timezone text NOT NULL DEFAULT 'America/New_York',
       legacy_cycles_migrated boolean NOT NULL DEFAULT false,
+      legacy_cycle_source_at timestamptz,
+      linear_sync_generation bigint NOT NULL DEFAULT 0,
+      cycle_sync_generation bigint NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE IF NOT EXISTS linear_connection (
@@ -122,10 +121,23 @@ export const schemaSql = `
     CREATE TABLE IF NOT EXISTS stream (
       id text PRIMARY KEY,
       name text NOT NULL,
-      position integer NOT NULL UNIQUE,
+      position integer NOT NULL,
       wip_limit integer NOT NULL DEFAULT 1,
       allocation numeric NOT NULL DEFAULT 0 CHECK (allocation >= 0 AND allocation <= 1),
-      active boolean NOT NULL DEFAULT true
+      active boolean NOT NULL DEFAULT true,
+      retired_at timestamptz,
+      retirement_reason text NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS stream_active_position_key ON stream(position) WHERE active=true;
+    CREATE UNIQUE INDEX IF NOT EXISTS stream_active_name_key ON stream(lower(name)) WHERE active=true;
+    CREATE TABLE IF NOT EXISTS stream_lifecycle_event (
+      id uuid PRIMARY KEY,
+      stream_id text REFERENCES stream(id),
+      action text NOT NULL,
+      actor text NOT NULL,
+      rationale text NOT NULL DEFAULT '',
+      payload jsonb NOT NULL DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE IF NOT EXISTS outcome (
       id uuid PRIMARY KEY,
@@ -245,11 +257,72 @@ export const schemaSql = `
       FOR EACH ROW EXECUTE FUNCTION reject_scenario_revision_change();
   `;
 
+const upgradeSql = `
+  ALTER TABLE scenario_revision DROP CONSTRAINT IF EXISTS scenario_revision_scenario_id_fkey;
+  ALTER TABLE scenario_revision ADD CONSTRAINT scenario_revision_scenario_id_fkey
+    FOREIGN KEY (scenario_id) REFERENCES scenario(id) ON DELETE RESTRICT;
+  ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS in_scope boolean NOT NULL DEFAULT true;
+  ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS external_blockers text[] NOT NULL DEFAULT '{}';
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS selected boolean NOT NULL DEFAULT true;
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS must_include boolean NOT NULL DEFAULT false;
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS priority_rank integer NOT NULL DEFAULT 1000;
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS earliest_cycle integer;
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS preferred_cycle integer;
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS pause_reason text NOT NULL DEFAULT '';
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS earliest_linear_cycle_id text;
+  ALTER TABLE work_package ADD COLUMN IF NOT EXISTS preferred_linear_cycle_id text;
+  ALTER TABLE stream ADD COLUMN IF NOT EXISTS allocation numeric NOT NULL DEFAULT 0;
+  ALTER TABLE stream ADD COLUMN IF NOT EXISTS retired_at timestamptz;
+  ALTER TABLE stream ADD COLUMN IF NOT EXISTS retirement_reason text NOT NULL DEFAULT '';
+  ALTER TABLE stream_lifecycle_event ALTER COLUMN stream_id DROP NOT NULL;
+  ALTER TABLE stream DROP CONSTRAINT IF EXISTS stream_position_key;
+  CREATE UNIQUE INDEX IF NOT EXISTS stream_active_position_key ON stream(position) WHERE active=true;
+  CREATE UNIQUE INDEX IF NOT EXISTS stream_active_name_key ON stream(lower(name)) WHERE active=true;
+  ALTER TABLE workspace ADD COLUMN IF NOT EXISTS legacy_cycles_migrated boolean NOT NULL DEFAULT false;
+  ALTER TABLE workspace ADD COLUMN IF NOT EXISTS legacy_cycle_source_at timestamptz;
+  ALTER TABLE workspace ADD COLUMN IF NOT EXISTS linear_sync_generation bigint NOT NULL DEFAULT 0;
+  ALTER TABLE workspace ADD COLUMN IF NOT EXISTS cycle_sync_generation bigint NOT NULL DEFAULT 0;
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS team_timezone text NOT NULL DEFAULT 'America/New_York';
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycles_enabled boolean NOT NULL DEFAULT false;
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycle_duration integer;
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycle_start_day integer;
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycle_cooldown_time integer;
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS upcoming_cycle_count integer;
+  ALTER TABLE linear_connection ADD COLUMN IF NOT EXISTS cycles_refreshed_at timestamptz;
+  INSERT INTO workspace (id) VALUES (1) ON CONFLICT DO NOTHING;
+  INSERT INTO stream (id,name,position) VALUES
+    ('stream-1','Stream 1',1),('stream-2','Stream 2',2),('stream-3','Stream 3',3),('stream-4','Stream 4',4),('stream-5','Stream 5',5)
+    ON CONFLICT DO NOTHING;
+`;
+
+export const migrations = [
+  { version: 1, name: "initial-schema", sql: schemaSql },
+  { version: 2, name: "upgrade-existing-proof-schema", sql: upgradeSql },
+] as const;
+
+export const latestMigrationVersion = migrations.at(-1)!.version;
+
 export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   await ensureSchema();
   const client = await db().connect();
   try {
     await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function readTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const result = await fn(client);
     await client.query("COMMIT");
     return result;

@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { ForecastResult, PackageForecast, OutcomeForecast } from "@/lib/forecast";
 import { linearCycleLabel } from "@/lib/cycles";
 import CycleCalendar, { type CalendarCycle } from "./cycle-calendar";
+import StreamManager from "./stream-manager";
+import { readApiResponse } from "./client-api";
 import "./board.css";
 import "./board-compact.css";
 import "./stream-controls.css";
@@ -31,26 +33,32 @@ export default function Board({ refreshKey, onChanged, onAddOutcome, onManageOut
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const loadGeneration = useRef(0);
   const load = useCallback(async () => {
-    const response = await fetch("/api/board", { cache: "no-store" });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not load board");
-    setState(data);
-    setDrafts(Object.fromEntries(data.packages.map((item: Package) => { const draft = draftFor(item); return [item.id, {
-      ...draft, earliest: data.futureCycleIds.includes(draft.earliest) ? draft.earliest : "",
-      preferred: data.futureCycleIds.includes(draft.preferred) ? draft.preferred : "",
-    }]; })));
-    setAdjustment((old) => ({ ...old, selectedCycleIds: [] }));
-    setCapacity({ baseline: data.capacity.baseline?.toString() || "", reserve: data.capacity.reserve.toString(), horizon: data.capacity.horizon, reason: data.capacity.baseline_reason });
-    setStreamDrafts(Object.fromEntries(data.streams.map((item: Stream) => [item.id, { name: item.name, allocation: (item.allocation * 100).toString(), wip: item.wip_limit }])));
+    const generation = ++loadGeneration.current;
+    try {
+      const response = await fetch("/api/board", { cache: "no-store" });
+      const data = await readApiResponse<BoardState>(response, "Could not load board");
+      if (generation !== loadGeneration.current) return;
+      setError("");
+      setState(data);
+      setDrafts(Object.fromEntries(data.packages.map((item: Package) => { const draft = draftFor(item); return [item.id, {
+        ...draft, earliest: data.futureCycleIds.includes(draft.earliest) ? draft.earliest : "",
+        preferred: data.futureCycleIds.includes(draft.preferred) ? draft.preferred : "",
+      }]; })));
+      setAdjustment((old) => ({ ...old, selectedCycleIds: [] }));
+      setCapacity({ baseline: data.capacity.baseline?.toString() || "", reserve: data.capacity.reserve.toString(), horizon: data.capacity.horizon, reason: data.capacity.baseline_reason });
+      setStreamDrafts(Object.fromEntries(data.streams.map((item: Stream) => [item.id, { name: item.name, allocation: (item.allocation * 100).toString(), wip: item.wip_limit }])));
+    } catch (failure) {
+      if (generation === loadGeneration.current) throw failure;
+    }
   }, []);
   useEffect(() => { void load().catch((reason) => setError(reason.message)); }, [load, refreshKey]);
   async function save(change: unknown, message: string): Promise<boolean> {
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/board", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not save board");
+      const data = await readApiResponse<BoardState>(response, "Could not save board");
       setState(data); setNotice(message); onChanged?.();
       return true;
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save board"); return false; }
@@ -60,8 +68,7 @@ export default function Board({ refreshKey, onChanged, onAddOutcome, onManageOut
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/linear/cycles", { method: "POST", credentials: "same-origin" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not refresh Linear cycles");
+      const data = await readApiResponse<{ refreshed: number }>(response, "Could not refresh Linear cycles");
       await load();
       onChanged?.();
       setNotice(`${data.refreshed} team cycles refreshed from Linear.`);
@@ -77,8 +84,7 @@ export default function Board({ refreshKey, onChanged, onAddOutcome, onManageOut
         title: outcomeDraft.title, description: outcomeDraft.description, owner: outcomeDraft.owner,
         successSignal: outcomeDraft.success_signal, neededBy: outcomeDraft.needed_by?.slice(0, 10) || "",
       }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not update outcome");
+      await readApiResponse<unknown>(response, "Could not update outcome");
       setOutcomeDraft(null); await load(); onChanged?.(); setNotice("Outcome updated.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update outcome"); }
     finally { setBusy(false); }
@@ -88,8 +94,7 @@ export default function Board({ refreshKey, onChanged, onAddOutcome, onManageOut
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(`/api/outcomes/${outcome.id}`, { method: "DELETE", credentials: "same-origin" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not delete outcome");
+      await readApiResponse<unknown>(response, "Could not delete outcome");
       if (outcomeDraft?.id === outcome.id) setOutcomeDraft(null);
       await load(); onChanged?.(); setNotice("Outcome deleted.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete outcome"); }
@@ -176,8 +181,9 @@ export default function Board({ refreshKey, onChanged, onAddOutcome, onManageOut
       {state.observations.map((item) => <p className="meta" key={item.linear_id}>{item.starts_at.slice(0, 10)} – {item.ends_at.slice(0, 10)}: {fmt(item.completed_points)} completed points</p>)}
       <div className="board-fields"><label>Manual baseline (optional)<input type="number" min="0" step="0.001" value={capacity.baseline} onChange={(event) => setCapacity({ ...capacity, baseline: event.target.value })} placeholder={state.observedBaseline === null ? "Required" : `Median ${fmt(state.observedBaseline)}`} /></label><label>Reserve points/cycle<input type="number" min="0" step="0.001" required value={capacity.reserve} onChange={(event) => setCapacity({ ...capacity, reserve: event.target.value })} /></label><label>Forecast horizon (Linear cycles)<input type="number" min="1" max="104" required value={capacity.horizon} onChange={(event) => setCapacity({ ...capacity, horizon: Number(event.target.value) })} /></label></div>
       <label>Manual baseline source / override reason<input value={capacity.reason} onChange={(event) => setCapacity({ ...capacity, reason: event.target.value })} placeholder="Required when entering a manual baseline" /></label><button disabled={busy}>Save capacity</button></form>
-      {futureCycles.length < state.capacity.horizon && <p className="warning">Linear currently has {futureCycles.length} upcoming cycles. The forecast stops at Cycle {futureCycles.at(-1)?.number ?? "?"}; increase upcoming cycles in Linear to extend it.</p>}
+      {futureCycles.length < state.capacity.horizon && <p className="warning">Linear currently has {futureCycles.length} upcoming cycles. The forecast stops at {futureCycles.length ? linearCycleLabel(futureCycles.at(-1)!) : "the current cycle"}; increase upcoming cycles in Linear to extend it.</p>}
     </details></div>
+    <StreamManager refreshKey={refreshKey} onChanged={() => { void load(); onChanged?.(); }} />
     <div className="stream-list">{state.streams.map((stream) => {
       const plan = streamDrafts[stream.id] || { name: stream.name, allocation: (stream.allocation * 100).toString(), wip: stream.wip_limit };
       const members = selected.filter((item) => item.stream_id === stream.id);
@@ -192,8 +198,9 @@ export default function Board({ refreshKey, onChanged, onAddOutcome, onManageOut
       <details className="lane-packages"><summary>Manage work <span>{members.length}</span></summary><div className="stream-assignment"><div className="assignment-intro"><h4>Assign work to {stream.name}</h4><p>Assign every project linked to an outcome, or move one project at a time. A project can belong to only one stream; assigning it here moves it from its current stream.</p></div><div className="assignment-columns"><section><h5>By outcome</h5><div className="assignment-list">{state.outcomes.map((outcome) => {
         const outcomeProjectIds = new Set(state.links.filter((link) => link.outcome_id === outcome.id).map((link) => link.project_id));
         const packages = state.packages.filter((item) => outcomeProjectIds.has(item.project_id));
+        const hidden = packages.filter((item) => !item.in_scope);
         const allAssigned = packages.length > 0 && packages.every((item) => item.selected && item.stream_id === stream.id);
-        return <div className="assignment-group" key={outcome.id}><div><strong>{outcome.title}</strong><small>{packages.length ? packages.map((item) => `${item.name} · ${locationFor(item)}`).join("\n") : "No linked projects"}</small></div><button className={allAssigned ? "quiet" : "secondary"} disabled={busy || !packages.length || allAssigned} onClick={() => void save({ type: "assignment", streamId: stream.id, packageIds: packages.map((item) => item.id) }, `${packages.length} project${packages.length === 1 ? "" : "s"} from ${outcome.title} assigned to ${stream.name}.`)}>{allAssigned ? "Assigned" : `Assign all ${packages.length}`}</button></div>;
+        return <div className="assignment-group" key={outcome.id}><div><strong>{outcome.title}</strong><small>{packages.length ? packages.map((item) => `${item.name} · ${locationFor(item)}${item.in_scope ? "" : " · hidden"}`).join("\n") : "No linked projects"}</small></div><button className={allAssigned ? "quiet" : "secondary"} disabled={busy || !packages.length || allAssigned} onClick={() => { if (hidden.length && !window.confirm(`This outcome includes ${hidden.length} hidden project${hidden.length === 1 ? "" : "s"}. Assign and select all linked projects anyway?`)) return; void save({ type: "assignment", streamId: stream.id, packageIds: packages.map((item) => item.id) }, `${packages.length} project${packages.length === 1 ? "" : "s"} from ${outcome.title} assigned to ${stream.name}.`); }}>{allAssigned ? "Assigned" : `Assign all ${packages.length}`}</button></div>;
       })}{!state.outcomes.length && <p className="empty">Create an outcome and link projects to assign them together.</p>}</div></section><section><h5>By individual project</h5><label className="assignment-search">Find project<input type="search" value={assignmentSearches[stream.id] || ""} onChange={(event) => setAssignmentSearches((old) => ({ ...old, [stream.id]: event.target.value }))} placeholder="Search project names" /></label><div className="assignment-list project-assignment-list">{matchingPackages.map((item) => {
         const assignedHere = item.selected && item.stream_id === stream.id;
         return <div className="assignment-group" key={item.id}><div><strong>{item.name}</strong><small>{locationFor(item)}</small></div><button className={assignedHere ? "quiet" : "secondary"} disabled={busy || assignedHere} onClick={() => void save({ type: "assignment", streamId: stream.id, packageIds: [item.id] }, `${item.name} assigned to ${stream.name}.`)}>{assignedHere ? "Assigned" : item.stream_id && item.selected ? "Move here" : "Assign"}</button></div>;

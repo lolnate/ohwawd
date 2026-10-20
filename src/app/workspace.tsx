@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Board from "./board";
+import { apiRequest } from "./client-api";
 import ScenarioPanel from "./scenario-panel";
 import StatusFilter from "./status-filter";
 
@@ -15,14 +16,7 @@ type ProjectSyncItem = { id: string; name: string; previousName?: string; change
 type ImportResult = { imported: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
 
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method, credentials: "same-origin", cache: "no-store",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Request failed");
-  return data as T;
+  return apiRequest<T>(path, method, body);
 }
 
 function SyncReport({ report }: { report: ImportResult["report"] }) {
@@ -61,12 +55,20 @@ export default function App() {
   const [linkSearch, setLinkSearch] = useState("");
   const [linkStatuses, setLinkStatuses] = useState<string[]>([]);
   const [syncReport, setSyncReport] = useState<ImportResult["report"] | null>(null);
+  const reloadGeneration = useRef(0);
 
   const reload = useCallback(async () => {
-    const data = await api<State>("/api/state");
-    setState(data);
-    setBoardVersion((version) => version + 1);
-    if (data.connection) setTeamId(data.connection.team_id);
+    const generation = ++reloadGeneration.current;
+    try {
+      const data = await api<State>("/api/state");
+      if (generation !== reloadGeneration.current) return;
+      setError("");
+      setState(data);
+      setBoardVersion((version) => version + 1);
+      if (data.connection) setTeamId(data.connection.team_id);
+    } catch (failure) {
+      if (generation === reloadGeneration.current) throw failure;
+    }
   }, []);
 
   useEffect(() => {
@@ -207,7 +209,7 @@ export default function App() {
       {!visibleProjects.length && <p className="empty">{state?.projects.length ? "No projects match these filters." : "Projects will appear here after import."}</p>}</div>
     </section></section>
     <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} refreshKey={boardVersion} /></section>
-    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => setBoardVersion((version) => version + 1)} onAddOutcome={() => { setShowCreateOutcome(true); setActiveView("outcomes"); }} onManageOutcome={(id) => { const outcome = state?.outcomes.find((item) => item.id === id); if (outcome) startLinking(outcome); setActiveView("outcomes"); }} /></section>
+    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => void reload()} onAddOutcome={() => { setShowCreateOutcome(true); setActiveView("outcomes"); }} onManageOutcome={(id) => { const outcome = state?.outcomes.find((item) => item.id === id); if (outcome) startLinking(outcome); setActiveView("outcomes"); }} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}><section className="panel outcomes-panel"><div className="section-head"><div><h2>Outcome catalog</h2><p>Describe the change you need, even before there is a Linear project.</p></div><span className="count">{state?.outcomes.length ?? 0}</span></div>
       <details className="create-outcome" open={showCreateOutcome} onToggle={(event) => setShowCreateOutcome(event.currentTarget.open)}><summary>Add outcome</summary><form className="outcome-form" onSubmit={createOutcome}><label>Outcome title<input value={newOutcome.title} onChange={(event) => setNewOutcome({ ...newOutcome, title: event.target.value })} maxLength={200} required placeholder="Customers can complete onboarding" /></label><label>Success signal<input value={newOutcome.successSignal} onChange={(event) => setNewOutcome({ ...newOutcome, successSignal: event.target.value })} placeholder="e.g. 80% finish without support" /></label><div className="form-row"><label>Owner<input value={newOutcome.owner} onChange={(event) => setNewOutcome({ ...newOutcome, owner: event.target.value })} /></label><label>Needed by<input type="date" value={newOutcome.neededBy} onChange={(event) => setNewOutcome({ ...newOutcome, neededBy: event.target.value })} /></label></div><label>Notes<textarea value={newOutcome.description} onChange={(event) => setNewOutcome({ ...newOutcome, description: event.target.value })} rows={2} /></label><button disabled={busy}>Create outcome</button></form></details>
       <div className="card-list">{state?.outcomes.map((outcome) => { const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card" key={outcome.id}>

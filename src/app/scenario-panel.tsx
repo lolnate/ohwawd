@@ -1,29 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { apiRequest } from "./client-api";
 import "./scenario.css";
 
 type Revision = { id: string; scenarioId: string; revisionNumber: number; sourceAt: string; rationale: string; author: string; publishedAt: string; staleSourceConfirmed: boolean };
-type Scenario = { id: string; name: string; editVersion: number; sourceAt: string; stale: boolean; archived: boolean; updatedAt: string; revisions: Revision[] };
+type Scenario = { id: string; name: string; editVersion: number; sourceAt: string; stale: boolean; archived: boolean; updatedAt: string; streamConflicts: { id: string; name: string }[]; revisions: Revision[] };
 type ScenarioList = { baselineRevisionId: string | null; activeScenarioId: string | null; activeDraftDirty: boolean; currentSourceAt: string; scenarios: Scenario[] };
 type Change<T> = { id: string; name?: string; title?: string; from: T | null; to: T | null };
+type AssumptionChange = { id: string; name: string; from: Record<string, unknown> | null; to: Record<string, unknown> | null };
 type Comparison = {
   left?: { label: string }; right?: { label: string }; sourceChanged: boolean;
-  capacity: { from: { baseline: number | null; reserve: number; horizon: number }; to: { baseline: number | null; reserve: number; horizon: number } };
-  packages: Change<{ selected: boolean; streamId: string | null; priority: number }>[];
-  streams: Change<{ name: string; allocation: number; wip: number }>[];
-  outcomes: Change<{ status: string; endDate: string | null; target: string; gapCycles: number | null; reasons: string[] }>[];
+  capacity: { from: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null }; to: { baseline: number | null; configuredBaseline: number | null; reserve: number; horizon: number; baselineReason: string; cycleAnchor: string | null; cycleDays: number | null } };
+  packages: Change<{ selected: boolean; streamId: string | null; priority: number; mustInclude: boolean; earliestCycleId: string | null; preferredCycleId: string | null; legacyEarliest: number | null; legacyPreferred: number | null; pauseReason: string }>[];
+  streams: Change<{ name: string; position: number; allocation: number; wip: number }>[];
+  streamLifecycle: Change<{ name: string; position: number; allocation: number; wip: number }>[];
+  outcomes: Change<{ status: string; endDate: string | null; target: string; gapCycles: number | null; reasons: string[]; title: string | null; description: string; owner: string; successSignal: string; neededBy: string | null }>[];
+  adjustments: AssumptionChange[]; allowances: AssumptionChange[]; dependencies: AssumptionChange[]; links: AssumptionChange[];
+  linearCycles: AssumptionChange[];
 };
 
 async function request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method, credentials: "same-origin", cache: "no-store",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Scenario request failed");
-  return data as T;
+  return apiRequest<T>(path, method, body, "Scenario request failed");
+}
+
+function assumptionSummary(kind: string, value: Record<string, unknown> | null): string {
+  if (!value) return "absent";
+  if (kind === "Cycle exceptions") return `${Math.round(Number(value.availability) * 100)}% availability, reserve ${value.reserve ?? "base"}`;
+  if (kind === "Allowances") return `${value.kind}, ${value.points} points, issues ${Array.isArray(value.issues) && value.issues.length ? value.issues.join(", ") : "none"}, owner ${value.owner || "none"}, review ${value.reviewDate || "unset"}, rationale ${value.rationale || "none"}`;
+  if (kind === "Dependencies and waivers") return `${value.source} dependency, ${value.waived ? `waived: ${value.waiverReason || "no reason"}` : "active"}`;
+  if (kind === "Outcome links") return String(value.requirement || "absent");
+  return "changed";
 }
 
 export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated: () => Promise<void>; refreshKey: number }) {
@@ -40,23 +47,43 @@ export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
-    const next = await request<ScenarioList>("/api/scenarios");
-    setData(next);
-    setSelectedId((current) => current && next.scenarios.some((item) => item.id === current) ? current : next.scenarios.find((item) => !item.archived)?.id || "");
+    const generation = ++loadGeneration.current;
+    try {
+      const next = await request<ScenarioList>("/api/scenarios");
+      if (generation !== loadGeneration.current) return;
+      setError("");
+      setData(next);
+      setSelectedId((current) => current && next.scenarios.some((item) => item.id === current) ? current : next.scenarios.find((item) => !item.archived)?.id || "");
+    } catch (failure) {
+      if (generation === loadGeneration.current) throw failure;
+    }
   }, []);
-  useEffect(() => { void load().catch((reason) => setError(reason.message)); }, [load, refreshKey]);
+  useEffect(() => {
+    setConfirmStale(false); setPendingRebase(null); setComparison(null);
+    void load().catch((reason) => setError(reason.message));
+  }, [load, refreshKey]);
 
   async function run(action: () => Promise<void>, message: string) {
     setBusy(true); setError(""); setNotice("");
     try { await action(); setNotice(message); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Scenario request failed"); }
+    catch (reason) { setConfirmStale(false); setPendingRebase(null); setComparison(null); setError(reason instanceof Error ? reason.message : "Scenario request failed"); }
     finally { setBusy(false); }
   }
 
   const selected = data?.scenarios.find((item) => item.id === selectedId) ?? null;
   const active = selected?.id === data?.activeScenarioId;
+  const selectedSignature = selected ? `${selected.id}:${selected.editVersion}:${selected.sourceAt}` : "";
+  const previousSelectedSignature = useRef("");
+  useEffect(() => {
+    if (previousSelectedSignature.current && previousSelectedSignature.current !== selectedSignature) {
+      setConfirmStale(false); setPendingRebase(null); setComparison(null);
+    }
+    previousSelectedSignature.current = selectedSignature;
+  }, [selectedSignature]);
+  useEffect(() => { if (comparison?.left) setPendingRebase(null); }, [comparison]);
   const references = data?.scenarios.flatMap((scenario) => [
     { value: `draft:${scenario.id}`, label: `${scenario.name} draft` },
     ...scenario.revisions.map((revision) => ({ value: `revision:${revision.id}`, label: `${scenario.name} r${revision.revisionNumber}` })),
@@ -74,11 +101,12 @@ export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated
     <div className="section-head"><div><h2>Decision scenarios</h2><p>Save board assumptions as drafts, publish reviewed decisions, and compare what moved the forecast.</p></div><span className="tag">Slice 3</span></div>
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
     <div className="scenario-toolbar">
-      <label>Selected draft<select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setComparison(null); setPendingRebase(null); }}><option value="">Choose a scenario</option>{data?.scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.name}{scenario.id === data.activeScenarioId ? " · on board" : ""}{scenario.stale ? " · source changed" : ""}{scenario.archived ? " · archived" : ""}</option>)}</select></label>
+      <label>Selected draft<select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setComparison(null); setPendingRebase(null); setConfirmStale(false); }}><option value="">Choose a scenario</option>{data?.scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.name}{scenario.id === data.activeScenarioId ? " · on board" : ""}{scenario.stale ? " · source changed" : ""}{scenario.archived ? " · archived" : ""}</option>)}</select></label>
       <form onSubmit={create}><label>New scenario<input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} placeholder="January plan" required /></label><button disabled={busy}>Create from board</button></form>
     </div>
     {selected && <div className="scenario-draft">
       <div><h3>{selected.name}</h3><p className="meta">Draft v{selected.editVersion} · source {new Date(selected.sourceAt).toLocaleString()}{selected.stale ? " · newer Linear source available" : " · current source"}{active ? " · loaded on board" : " · not loaded"}</p></div>
+      {!!selected.streamConflicts.length && <p className="warning">Stream reconciliation required: {selected.streamConflicts.map((stream) => stream.name).join(", ")} {selected.streamConflicts.length === 1 ? "is" : "are"} retired. Restore the stream or create a reconciled draft from the current board before loading or publishing this draft.</p>}
       <div className="actions">
         {!active && <button className="secondary" disabled={busy} onClick={() => { if (window.confirm("Replace package choices, capacity, allowances, dependencies, this draft’s outcome links, and matching outcome titles, owners, success signals, notes, and targets on the live board? Save the current board to its active draft first if you need to keep unsaved changes. Linear source data and newer unrelated outcomes will not be deleted.")) void run(async () => { await request(`/api/scenarios/${selected.id}/activate`, "POST", { expectedVersion: selected.editVersion, confirmReplace: true }); setComparison(null); setPendingRebase(null); await load(); await onActivated(); }, "Draft loaded onto the board."); }}>Load draft</button>}
         <button disabled={busy || selected.stale || !active} title={!active ? "Load this draft before saving board changes." : undefined} onClick={() => void run(async () => { await request(`/api/scenarios/${selected.id}`, "PUT", { expectedVersion: selected.editVersion }); setComparison(null); setPendingRebase(null); await load(); }, "Current board saved to the active draft.")}>Save board</button>
@@ -90,6 +118,30 @@ export default function ScenarioPanel({ onActivated, refreshKey }: { onActivated
     </div>}
     {references.length >= 2 && <div className="scenario-compare"><h3>Compare decisions</h3><div className="scenario-fields"><label>From<select value={left} onChange={(event) => setLeft(event.target.value)}><option value="">Choose draft or revision</option>{references.map((item) => <option key={`left:${item.value}`} value={item.value}>{item.label}</option>)}</select></label><label>To<select value={right} onChange={(event) => setRight(event.target.value)}><option value="">Choose draft or revision</option>{references.map((item) => <option key={`right:${item.value}`} value={item.value}>{item.label}</option>)}</select></label></div><button className="secondary" disabled={busy || !left || !right || left === right} onClick={() => void run(async () => setComparison(await request<Comparison>(`/api/scenarios/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`)), "Comparison loaded.")}>Compare</button></div>}
     {comparison && <div className="comparison"><h3>{comparison.left ? `${comparison.left.label} → ${comparison.right?.label}` : "Rebase preview"}</h3><p className="meta">Capacity: {comparison.capacity.from.baseline ?? "unset"} → {comparison.capacity.to.baseline ?? "unset"} pts/cycle · reserve {comparison.capacity.from.reserve} → {comparison.capacity.to.reserve} · horizon {comparison.capacity.from.horizon} → {comparison.capacity.to.horizon}{comparison.sourceChanged ? " · source snapshot changed" : ""}</p><div className="comparison-grid"><div><h4>Scope and placement</h4>{comparison.packages.map((change) => <p key={change.id}><strong>{change.name}</strong>: {change.from?.selected ? change.from.streamId || "unassigned" : "deferred"} (priority {change.from?.priority ?? "-"}) → {change.to?.selected ? change.to.streamId || "unassigned" : "deferred"} (priority {change.to?.priority ?? "-"})</p>)}{!comparison.packages.length && <p className="empty">No package changes.</p>}</div><div><h4>Streams</h4>{comparison.streams.map((change) => <p key={change.id}><strong>{change.from?.name || change.name}</strong>{change.from?.name !== change.to?.name ? ` → ${change.to?.name}` : ""}: {Math.round((change.from?.allocation || 0) * 100)}% / WIP {change.from?.wip ?? "-"} → {Math.round((change.to?.allocation || 0) * 100)}% / WIP {change.to?.wip ?? "-"}</p>)}{!comparison.streams.length && <p className="empty">No stream changes.</p>}</div><div><h4>Outcome forecast</h4>{comparison.outcomes.map((change) => <p key={change.id}><strong>{change.title}</strong>: {change.from?.endDate || change.from?.status || "absent"} ({change.from?.target || "-"}{change.from?.gapCycles ? `, ${change.from.gapCycles} cycle gap` : ""}) → {change.to?.endDate || change.to?.status || "absent"} ({change.to?.target || "-"}{change.to?.gapCycles ? `, ${change.to.gapCycles} cycle gap` : ""}){change.to?.reasons.length ? ` · ${change.to.reasons.join(" ")}` : ""}</p>)}{!comparison.outcomes.length && <p className="empty">No outcome changes.</p>}</div></div>{pendingRebase && <div className="actions"><button disabled={busy} onClick={() => void run(async () => { await request(`/api/scenarios/${pendingRebase.id}/rebase`, "POST", { expectedVersion: pendingRebase.version, confirm: true, previewToken: pendingRebase.token }); setPendingRebase(null); setComparison(null); await load(); await onActivated(); }, "Rebase accepted and draft version advanced.")}>Accept rebase</button><button className="quiet" disabled={busy} onClick={() => { setPendingRebase(null); setComparison(null); }}>Cancel</button></div>}</div>}
+    {pendingRebase && <div className="comparison actions"><button disabled={busy} onClick={() => void run(async () => {
+      await request(`/api/scenarios/${pendingRebase.id}/rebase`, "POST", { expectedVersion: pendingRebase.version, confirm: true, previewToken: pendingRebase.token });
+      setPendingRebase(null); setComparison(null); await load(); await onActivated();
+    }, "Scenario rebased onto the current Linear source.")}>Accept rebase</button><button className="quiet" disabled={busy} onClick={() => { setPendingRebase(null); setComparison(null); setNotice("Rebase preview cancelled."); }}>Cancel rebase</button></div>}
+    {comparison && <div className="comparison"><h4>Other forecast inputs</h4>{([
+      ["Cycle exceptions", comparison.adjustments], ["Allowances", comparison.allowances],
+      ["Dependencies and waivers", comparison.dependencies], ["Outcome links", comparison.links],
+    ] as const).map(([label, changes]) => <div key={label}><strong>{label}</strong>{changes.length
+      ? <ul>{changes.map((change) => <li key={change.id}><strong>{change.name}</strong>: {assumptionSummary(label, change.from)} → {assumptionSummary(label, change.to)}</li>)}</ul>
+      : <p className="empty">No changes.</p>}</div>)}</div>}
+    {comparison && <div className="comparison"><h4>Decision detail</h4>
+      {comparison.packages.some((change) => change.from?.mustInclude !== change.to?.mustInclude || change.from?.earliestCycleId !== change.to?.earliestCycleId || change.from?.preferredCycleId !== change.to?.preferredCycleId || change.from?.legacyEarliest !== change.to?.legacyEarliest || change.from?.legacyPreferred !== change.to?.legacyPreferred || change.from?.pauseReason !== change.to?.pauseReason)
+        ? <ul>{comparison.packages.filter((change) => change.from?.mustInclude !== change.to?.mustInclude || change.from?.earliestCycleId !== change.to?.earliestCycleId || change.from?.preferredCycleId !== change.to?.preferredCycleId || change.from?.legacyEarliest !== change.to?.legacyEarliest || change.from?.legacyPreferred !== change.to?.legacyPreferred || change.from?.pauseReason !== change.to?.pauseReason)
+          .map((change) => <li key={change.id}><strong>{change.name}</strong>: must include {String(change.from?.mustInclude ?? false)} → {String(change.to?.mustInclude ?? false)}; earliest {change.from?.earliestCycleId || change.from?.legacyEarliest || "any"} → {change.to?.earliestCycleId || change.to?.legacyEarliest || "any"}; preferred {change.from?.preferredCycleId || change.from?.legacyPreferred || "any"} → {change.to?.preferredCycleId || change.to?.legacyPreferred || "any"}; rationale {change.from?.pauseReason || "none"} → {change.to?.pauseReason || "none"}</li>)}</ul>
+        : <p className="empty">No package constraint changes.</p>}
+      {!!comparison.streamLifecycle.length && <ul>{comparison.streamLifecycle.map((change) => <li key={change.id}><strong>{change.name}</strong>: {!change.from ? "added" : "removed"}</li>)}</ul>}
+      {comparison.outcomes.some((change) => change.from?.title !== change.to?.title || change.from?.owner !== change.to?.owner || change.from?.neededBy !== change.to?.neededBy || change.from?.successSignal !== change.to?.successSignal || change.from?.description !== change.to?.description) &&
+        <ul>{comparison.outcomes.filter((change) => change.from?.title !== change.to?.title || change.from?.owner !== change.to?.owner || change.from?.neededBy !== change.to?.neededBy || change.from?.successSignal !== change.to?.successSignal || change.from?.description !== change.to?.description)
+          .map((change) => <li key={change.id}><strong>{change.from?.title || "absent"} → {change.to?.title || "absent"}</strong>: owner {change.from?.owner || "none"} → {change.to?.owner || "none"}; needed by {change.from?.neededBy || "unset"} → {change.to?.neededBy || "unset"}{change.from?.successSignal !== change.to?.successSignal ? "; success signal changed" : ""}{change.from?.description !== change.to?.description ? "; notes changed" : ""}</li>)}</ul>}
+      {comparison.capacity.from.baselineReason !== comparison.capacity.to.baselineReason && <p>Capacity rationale: {comparison.capacity.from.baselineReason || "none"} → {comparison.capacity.to.baselineReason || "none"}.</p>}
+      {comparison.capacity.from.configuredBaseline !== comparison.capacity.to.configuredBaseline && <p>Configured baseline: {comparison.capacity.from.configuredBaseline ?? "observed"} → {comparison.capacity.to.configuredBaseline ?? "observed"} points/cycle.</p>}
+      {(comparison.capacity.from.cycleAnchor !== comparison.capacity.to.cycleAnchor || comparison.capacity.from.cycleDays !== comparison.capacity.to.cycleDays) && <p>Legacy calendar: anchor {comparison.capacity.from.cycleAnchor || "none"} → {comparison.capacity.to.cycleAnchor || "none"}; duration {comparison.capacity.from.cycleDays || "unset"} → {comparison.capacity.to.cycleDays || "unset"} days.</p>}
+      {!!comparison.linearCycles.length && <p>{comparison.linearCycles.length} Linear cycle calendar entr{comparison.linearCycles.length === 1 ? "y" : "ies"} changed.</p>}
+    </div>}
     {!data?.scenarios.length && <p className="empty">No scenarios yet. Configure the board, then save the first decision option.</p>}
   </section>;
 }

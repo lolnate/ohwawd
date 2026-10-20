@@ -1,6 +1,7 @@
+# Development only. Production deployments should use managed PostgreSQL with backups and TLS.
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine@sha256:5660c2cbfea50c7a9127d17dc4e48543eedd3d7a41a595a2dfa572471e37e64c
     environment:
       POSTGRES_DB: ohwawd
       POSTGRES_USER: ohwawd
@@ -9,6 +10,12 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - ohwawd_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ohwawd -d ohwawd"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
 volumes:
   ohwawd_pg:

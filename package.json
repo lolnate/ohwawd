@@ -2,10 +2,15 @@
   "name": "ohwawd",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=20.9 <27"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
     "set-owner-password": "node --import tsx scripts/set-owner-password.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"

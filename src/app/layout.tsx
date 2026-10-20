@@ -3,6 +3,7 @@ import "./styles.css";
 import "./project-filters.css";
 import "./workspace-shell.css";
 import "./view-state.css";
+import "./responsive.css";
 
 export const metadata: Metadata = { title: "Oh, WAWD!", description: "Outcomes and Linear work, connected." };
 

@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type { ImportedCycle, ImportedProject, LinearCycleSettings } from "./linear";
+import { HttpError } from "./security";
 
 export type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 export type ImportResult = {
@@ -22,8 +23,15 @@ export async function saveImport(
   client: PoolClient,
   input: { encryptedKey: string; viewer: { id: string; name: string }; team: { id: string; name: string }; projects: ImportedProject[]; cycles?: ImportedCycle[]; cycleSettings?: LinearCycleSettings },
   seenAt = new Date(),
+  generation?: { linear: number; cycles: number },
 ): Promise<ImportResult> {
-  await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+  const workspace = await client.query<{ linear_sync_generation: string | number; cycle_sync_generation: string | number }>(
+    "SELECT linear_sync_generation,cycle_sync_generation FROM workspace WHERE id=1 FOR UPDATE",
+  );
+  if (generation && Number(workspace.rows[0]?.linear_sync_generation) !== generation.linear) {
+    throw new HttpError(409, "A newer Linear import started while this one was loading. This stale result was not saved.", { code: "STALE_LINEAR_SYNC" });
+  }
+  const saveCycles = !generation || Number(workspace.rows[0]?.cycle_sync_generation) === generation.cycles;
   const connection = await client.query<{ team_id: string }>("SELECT team_id FROM linear_connection WHERE workspace_id = 1 FOR UPDATE");
   if (connection.rows[0] && connection.rows[0].team_id !== input.team.id) {
     throw new Error("This proof workspace is already connected to another team.");
@@ -122,21 +130,25 @@ export async function saveImport(
   for (const edge of existingEdges.rows) if (!currentEdges.has(`${edge.predecessor_id}\0${edge.successor_id}`)) {
     await client.query("DELETE FROM package_dependency WHERE predecessor_id=$1 AND successor_id=$2 AND source='linear'", [edge.predecessor_id, edge.successor_id]);
   }
-  if (input.cycles) await saveCycleData(client, input.team.id, input.cycles, seenAt, importId);
+  if (input.cycles && saveCycles) await saveCycleData(client, input.team.id, input.cycles, seenAt, importId);
   await client.query("UPDATE linear_project_cache SET needs_review=true WHERE team_id=$1 AND last_seen_import_id <> $2", [input.team.id, importId]);
   const settings = input.cycleSettings;
   await client.query(`INSERT INTO linear_connection (workspace_id, encrypted_key, viewer_id, viewer_name, team_id, team_name, last_imported_at,cycles_refreshed_at,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count)
     VALUES (1,$1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (workspace_id) DO UPDATE SET encrypted_key=EXCLUDED.encrypted_key,
       viewer_id=EXCLUDED.viewer_id, viewer_name=EXCLUDED.viewer_name,
-      team_name=EXCLUDED.team_name, last_imported_at=EXCLUDED.last_imported_at,cycles_refreshed_at=EXCLUDED.cycles_refreshed_at,
-      team_timezone=EXCLUDED.team_timezone,cycles_enabled=EXCLUDED.cycles_enabled,
-      cycle_duration=EXCLUDED.cycle_duration,cycle_start_day=EXCLUDED.cycle_start_day,
-      cycle_cooldown_time=EXCLUDED.cycle_cooldown_time,upcoming_cycle_count=EXCLUDED.upcoming_cycle_count`,
+      team_name=EXCLUDED.team_name, last_imported_at=EXCLUDED.last_imported_at,
+      cycles_refreshed_at=CASE WHEN $13 THEN EXCLUDED.cycles_refreshed_at ELSE linear_connection.cycles_refreshed_at END,
+      team_timezone=CASE WHEN $13 THEN EXCLUDED.team_timezone ELSE linear_connection.team_timezone END,
+      cycles_enabled=CASE WHEN $13 THEN EXCLUDED.cycles_enabled ELSE linear_connection.cycles_enabled END,
+      cycle_duration=CASE WHEN $13 THEN EXCLUDED.cycle_duration ELSE linear_connection.cycle_duration END,
+      cycle_start_day=CASE WHEN $13 THEN EXCLUDED.cycle_start_day ELSE linear_connection.cycle_start_day END,
+      cycle_cooldown_time=CASE WHEN $13 THEN EXCLUDED.cycle_cooldown_time ELSE linear_connection.cycle_cooldown_time END,
+      upcoming_cycle_count=CASE WHEN $13 THEN EXCLUDED.upcoming_cycle_count ELSE linear_connection.upcoming_cycle_count END`,
     [input.encryptedKey, input.viewer.id, input.viewer.name, input.team.id, input.team.name, seenAt,
       settings?.timezone ?? "America/New_York", settings?.cyclesEnabled ?? false, settings?.cycleDuration ?? null,
-      settings?.cycleStartDay ?? null, settings?.cycleCooldownTime ?? null, settings?.upcomingCycleCount ?? null]);
-  if (settings?.timezone) await client.query("UPDATE workspace SET timezone=$1 WHERE id=1", [settings.timezone]);
+      settings?.cycleStartDay ?? null, settings?.cycleCooldownTime ?? null, settings?.upcomingCycleCount ?? null, saveCycles]);
+  if (saveCycles && settings?.timezone) await client.query("UPDATE workspace SET timezone=$1 WHERE id=1", [settings.timezone]);
   return { imported: input.projects.length, crossTeam: input.projects.filter((project) => project.crossTeam).length, report };
 }
 
@@ -162,15 +174,17 @@ export async function saveCycleData(client: PoolClient, teamId: string, cycles: 
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   const migration = await client.query<{ legacy_cycles_migrated: boolean }>("SELECT legacy_cycles_migrated FROM workspace WHERE id=1 FOR UPDATE");
   if (!migration.rows[0]?.legacy_cycles_migrated && future.length) {
-    const legacy = await client.query<{ cycle_anchor: string | null; cycle_days: number | null; timezone: string; last_imported_at: Date | null }>(`
-      SELECT p.cycle_anchor::text,p.cycle_days,w.timezone,l.last_imported_at FROM workspace w
+    const legacy = await client.query<{ cycle_anchor: string | null; cycle_days: number | null; timezone: string; last_imported_at: Date | null; legacy_cycle_source_at: Date | null }>(`
+      SELECT p.cycle_anchor::text,p.cycle_days,w.timezone,w.legacy_cycle_source_at,l.last_imported_at FROM workspace w
       LEFT JOIN capacity_profile p ON p.workspace_id=w.id LEFT JOIN linear_connection l ON l.workspace_id=w.id WHERE w.id=1`);
     const old = legacy.rows[0];
+    const migrationSourceAt = old?.legacy_cycle_source_at ?? old?.last_imported_at ?? seenAt;
+    await client.query("UPDATE workspace SET legacy_cycle_source_at=COALESCE(legacy_cycle_source_at,$1) WHERE id=1", [migrationSourceAt]);
     const localDay = (timestamp: Date, timezone: string) => new Intl.DateTimeFormat("en-CA", {
       timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
     }).format(timestamp);
     const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
-    const sourceDay = old?.last_imported_at ? localDay(old.last_imported_at, old.timezone) : null;
+    const sourceDay = localDay(migrationSourceAt, old.timezone);
     const firstOffset = old?.cycle_anchor && old.cycle_days && sourceDay
       ? Math.max(0, Math.floor((Date.parse(`${sourceDay}T00:00:00Z`) - Date.parse(`${old.cycle_anchor}T00:00:00Z`)) / (old.cycle_days * 86400000)) + 1)
       : null;
@@ -198,6 +212,11 @@ export async function saveCycleData(client: PoolClient, teamId: string, cycles: 
         preferred_cycle=CASE WHEN $3::text IS NOT NULL THEN NULL ELSE preferred_cycle END WHERE id=$1`,
       [old.id, earliestId, preferredId]);
     }
-    await client.query("UPDATE workspace SET legacy_cycles_migrated=true WHERE id=1");
+    const remaining = await client.query<{ pending: boolean }>(`SELECT
+      EXISTS(SELECT 1 FROM cycle_adjustment) OR EXISTS(
+        SELECT 1 FROM work_package WHERE earliest_cycle IS NOT NULL OR preferred_cycle IS NOT NULL
+      ) AS pending`);
+    await client.query(`UPDATE workspace SET legacy_cycles_migrated=$1,
+      legacy_cycle_source_at=CASE WHEN $1 THEN NULL ELSE legacy_cycle_source_at END WHERE id=1`, [!remaining.rows[0].pending]);
   }
 }

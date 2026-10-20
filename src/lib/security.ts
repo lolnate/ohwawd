@@ -13,7 +13,14 @@ function required(name: string): string {
 function sessionSecret(): string {
   const value = required("SESSION_SECRET");
   if (value.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
+  if (/^(replace|change|example|development)/i.test(value)) throw new Error("SESSION_SECRET must not use an example placeholder");
   return value;
+}
+
+export function validDateString(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function same(a: string, b: string): boolean {

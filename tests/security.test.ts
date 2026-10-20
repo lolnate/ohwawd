@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { test } from "node:test";
-import { decryptKey, encryptKey } from "../src/lib/security";
+import { decryptKey, encryptKey, validDateString } from "../src/lib/security";
 import { hashPassword, setPasswordHashInEnv, verifyPassword } from "../src/lib/password";
 import { validPassword } from "../src/lib/security";
 
@@ -38,4 +38,11 @@ test("password setup replaces a plaintext setting and preserves other settings",
   assert.equal(updated.includes("OWNER_PASSWORD=old"), false);
   assert.equal(updated.includes(`OWNER_PASSWORD_HASH=${encoded}`), true);
   assert.equal(updated.includes("SESSION_SECRET=stay"), true);
+});
+
+test("date validation rejects normalized impossible dates", () => {
+  assert.equal(validDateString("2026-02-28"), true);
+  assert.equal(validDateString("2026-02-29"), false);
+  assert.equal(validDateString("2024-02-29"), true);
+  assert.equal(validDateString("2026-13-01"), false);
 });

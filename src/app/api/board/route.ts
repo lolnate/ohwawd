@@ -1,12 +1,11 @@
 import { db, transaction } from "@/lib/db";
 import { assignPackagesToStream, getBoard } from "@/lib/board";
-import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib/security";
+import { HttpError, requireOwner, requireSameOrigin, responseError, validDateString } from "@/lib/security";
 
 const finite = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
-const date = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 
 export async function GET(): Promise<Response> {
-  try { await requireOwner(); return Response.json(await getBoard(undefined, new Date())); }
+  try { await requireOwner(); return Response.json(await getBoard()); }
   catch (error) { return responseError(error); }
 }
 
@@ -34,7 +33,8 @@ export async function PUT(request: Request): Promise<Response> {
         for (const id of [earliest, preferred]) if (id !== null) {
           if (typeof id !== "string") throw new HttpError(400, "Choose a Linear cycle or blank.");
           const found = await client.query(`SELECT c.linear_id FROM linear_cycle_cache c JOIN linear_connection l ON l.team_id=c.team_id
-            WHERE c.linear_id=$1 AND c.active=true AND c.completed_at IS NULL AND c.starts_at>now()`, [id]);
+            WHERE c.linear_id=$1 AND c.active=true AND c.completed_at IS NULL
+              AND c.starts_at>COALESCE(GREATEST(l.last_imported_at,l.cycles_refreshed_at),l.connected_at)`, [id]);
           if (!found.rowCount) throw new HttpError(400, "Choose an upcoming cycle from this Linear team.");
         }
         const reason = body.reason === undefined ? row.pause_reason : body.reason;
@@ -78,7 +78,8 @@ export async function PUT(request: Request): Promise<Response> {
       } else if (body.type === "adjustment") {
         if (!Array.isArray(body.cycleIds) || !body.cycleIds.length || body.cycleIds.length > 15 || body.cycleIds.some((id: unknown) => typeof id !== "string") || new Set(body.cycleIds).size !== body.cycleIds.length) throw new HttpError(400, "Select one or more upcoming Linear cycles.");
         const found = await client.query(`SELECT c.linear_id FROM linear_cycle_cache c JOIN linear_connection l ON l.team_id=c.team_id
-          WHERE c.linear_id=ANY($1::text[]) AND c.active=true AND c.completed_at IS NULL AND c.starts_at>now()`, [body.cycleIds]);
+          WHERE c.linear_id=ANY($1::text[]) AND c.active=true AND c.completed_at IS NULL
+            AND c.starts_at>COALESCE(GREATEST(l.last_imported_at,l.cycles_refreshed_at),l.connected_at)`, [body.cycleIds]);
         if (found.rowCount !== body.cycleIds.length) throw new HttpError(400, "Every selected cycle must be upcoming in the connected Linear team.");
         if (body.action === "clear") {
           await client.query("DELETE FROM linear_cycle_adjustment WHERE linear_cycle_id=ANY($1::text[])", [body.cycleIds]);
@@ -90,14 +91,22 @@ export async function PUT(request: Request): Promise<Response> {
       } else if (body.type === "allowance") {
         if (typeof body.packageId !== "string" || !["unestimated", "discovery"].includes(body.kind)) throw new HttpError(400, "Invalid allowance.");
         if (body.remove === true) { await client.query("DELETE FROM package_allowance WHERE package_id=$1 AND kind=$2", [body.packageId, body.kind]); return; }
-        if (!finite(body.points, 0.001, 100000) || typeof body.owner !== "string" || !body.owner.trim() || !date(body.reviewDate) || typeof body.rationale !== "string" || !body.rationale.trim() || !Array.isArray(body.issueIds)) throw new HttpError(400, "Allowance needs positive points, owner, review date, and rationale.");
+        if (!finite(body.points, 0.001, 100000) || typeof body.owner !== "string" || !body.owner.trim() || !validDateString(body.reviewDate) || typeof body.rationale !== "string" || !body.rationale.trim() || !Array.isArray(body.issueIds)) throw new HttpError(400, "Allowance needs positive points, owner, review date, and rationale.");
+        let issueIds = body.issueIds;
         if (body.kind === "unestimated") {
           if (!body.issueIds.length || new Set(body.issueIds).size !== body.issueIds.length) throw new HttpError(400, "Choose unestimated issues to cover.");
           const issues = await client.query("SELECT i.linear_id FROM linear_issue_cache i JOIN work_package w ON w.project_id=i.project_id WHERE w.id=$1 AND i.estimate IS NULL AND i.state_type NOT IN ('completed','canceled') AND i.linear_id=ANY($2::text[])", [body.packageId, body.issueIds]);
           if (issues.rowCount !== body.issueIds.length) throw new HttpError(400, "Allowance issue IDs must be open and unestimated in this package.");
-        } else if (body.issueIds.length) throw new HttpError(400, "Discovery allowances do not claim issues.");
+        } else {
+          if (body.issueIds.length) throw new HttpError(400, "Discovery allowance issue baselines are recorded by the server.");
+          const packageIssues = await client.query<{ linear_id: string }>(`SELECT i.linear_id FROM work_package w
+            LEFT JOIN linear_issue_cache i ON i.project_id=w.project_id AND i.state_type NOT IN ('completed','canceled')
+            WHERE w.id=$1`, [body.packageId]);
+          if (!packageIssues.rowCount) throw new HttpError(404, "Package not found.");
+          issueIds = packageIssues.rows.flatMap((item) => item.linear_id ? [item.linear_id] : []);
+        }
         await client.query(`INSERT INTO package_allowance(package_id,kind,points,issue_ids,owner,review_date,rationale) VALUES($1,$2,$3,$4,$5,$6,$7)
-          ON CONFLICT(package_id,kind) DO UPDATE SET points=$3,issue_ids=$4,owner=$5,review_date=$6,rationale=$7`, [body.packageId, body.kind, body.points, body.issueIds, body.owner.trim(), body.reviewDate, body.rationale.trim()]);
+          ON CONFLICT(package_id,kind) DO UPDATE SET points=$3,issue_ids=$4,owner=$5,review_date=$6,rationale=$7`, [body.packageId, body.kind, body.points, issueIds, body.owner.trim(), body.reviewDate, body.rationale.trim()]);
       } else if (body.type === "dependency") {
         if (typeof body.predecessorId !== "string" || typeof body.successorId !== "string" || body.predecessorId === body.successorId) throw new HttpError(400, "Choose two different packages.");
         if (body.action === "remove") { await client.query("DELETE FROM package_dependency WHERE predecessor_id=$1 AND successor_id=$2 AND source='local'", [body.predecessorId, body.successorId]); return; }
@@ -124,6 +133,6 @@ export async function PUT(request: Request): Promise<Response> {
         if (walk(body.successorId)) throw new HttpError(400, "That dependency would create a cycle.");
       } else throw new HttpError(400, "Unknown board change.");
     });
-    return Response.json(await getBoard(undefined, new Date()));
+    return Response.json(await getBoard());
   } catch (error) { return responseError(error); }
 }

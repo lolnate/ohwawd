@@ -85,10 +85,45 @@ test("old relative cycle settings migrate to Linear cycle IDs on import", async 
   assert.deepEqual(adjusted.rows, [{ linear_cycle_id: "cycle-45", availability: "0.5" }]);
   assert.deepEqual((await db.query<{ cycle_number: number }>("SELECT cycle_number FROM cycle_adjustment")).rows, [{ cycle_number: 3 }]);
   assert.equal((await db.query<{ team_timezone: string }>("SELECT team_timezone FROM linear_connection WHERE workspace_id=1")).rows[0].team_timezone, "UTC");
+  assert.equal((await db.query<{ legacy_cycles_migrated: boolean }>("SELECT legacy_cycles_migrated FROM workspace WHERE id=1")).rows[0].legacy_cycles_migrated, false);
   future[0].startsAt = new Date("2026-10-20T00:00:00Z");
   future[0].endsAt = new Date("2026-10-27T00:00:00Z");
   await saveCycleData(client, "team-a", future, new Date("2026-10-15T18:00:00Z"));
   assert.equal((await db.query<{ starts_at: Date }>("SELECT starts_at FROM linear_cycle_cache WHERE linear_id='cycle-45'")).rows[0].starts_at.toISOString().slice(0, 10), "2026-10-20");
   assert.equal((await db.query("SELECT * FROM linear_cycle_adjustment WHERE linear_cycle_id='cycle-45'")).rows.length, 1);
+  await db.query("UPDATE linear_connection SET last_imported_at='2026-10-29T12:00:00Z' WHERE workspace_id=1");
+  future.push({ id: "cycle-47", teamId: "team-a", number: 47, name: null, startsAt: new Date("2026-11-02T00:00:00Z"),
+    endsAt: new Date("2026-11-09T00:00:00Z"), completedAt: null, cycleDays: 7, completedPoints: null });
+  await saveCycleData(client, "team-a", future, new Date("2026-10-15T18:00:00Z"));
+  assert.equal((await db.query<{ preferred_linear_cycle_id: string }>("SELECT preferred_linear_cycle_id FROM work_package WHERE project_id='p'")).rows[0].preferred_linear_cycle_id, "cycle-47");
+  assert.equal((await db.query("SELECT * FROM cycle_adjustment")).rows.length, 0);
+  assert.equal((await db.query<{ legacy_cycles_migrated: boolean }>("SELECT legacy_cycles_migrated FROM workspace WHERE id=1")).rows[0].legacy_cycles_migrated, true);
   await db.close();
+});
+
+test("sync generations reject stale imports and preserve newer cycle data", async () => {
+  const database = new PGlite();
+  await database.exec(schemaSql);
+  await database.query("INSERT INTO workspace(id,linear_sync_generation,cycle_sync_generation) VALUES(1,2,2)");
+  const client = database as unknown as PoolClient;
+  const project = (name: string): ImportedProject => ({ id: "p", teamId: "team-a", name, description: "", status: "planned",
+    url: "https://linear.app/p/p", updatedAt: new Date("2026-10-15T12:00:00Z"), crossTeam: false, issues: [] });
+  const cycle = (startsAt: string) => ({ id: "cycle", teamId: "team-a", number: 45, name: "Cycle 45", startsAt: new Date(startsAt),
+    endsAt: new Date(Date.parse(startsAt) + 7 * 86400000), completedAt: null, cycleDays: 7, completedPoints: null });
+  const input = (name: string, startsAt: string, timezone: string) => ({ encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" },
+    team: { id: "team-a", name: "A" }, projects: [project(name)], cycles: [cycle(startsAt)],
+    cycleSettings: { timezone, cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 1 } });
+
+  await saveImport(client, input("Current", "2026-10-19T00:00:00Z", "UTC"), new Date("2026-10-15T12:00:00Z"), { linear: 2, cycles: 2 });
+  await assert.rejects(() => saveImport(client, input("Stale", "2026-10-20T00:00:00Z", "America/New_York"),
+    new Date("2026-10-15T13:00:00Z"), { linear: 1, cycles: 1 }), /newer Linear import/);
+  assert.equal((await database.query<{ name: string }>("SELECT name FROM linear_project_cache WHERE linear_id='p'")).rows[0].name, "Current");
+
+  await database.query("UPDATE workspace SET cycle_sync_generation=3 WHERE id=1");
+  await saveImport(client, input("Fresh project", "2026-10-21T00:00:00Z", "America/Los_Angeles"),
+    new Date("2026-10-15T14:00:00Z"), { linear: 2, cycles: 2 });
+  assert.equal((await database.query<{ name: string }>("SELECT name FROM linear_project_cache WHERE linear_id='p'")).rows[0].name, "Fresh project");
+  assert.equal((await database.query<{ starts_at: Date }>("SELECT starts_at FROM linear_cycle_cache WHERE linear_id='cycle'")).rows[0].starts_at.toISOString(), "2026-10-19T00:00:00.000Z");
+  assert.equal((await database.query<{ team_timezone: string }>("SELECT team_timezone FROM linear_connection WHERE workspace_id=1")).rows[0].team_timezone, "UTC");
+  await database.close();
 });

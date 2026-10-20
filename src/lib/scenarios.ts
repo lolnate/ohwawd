@@ -32,6 +32,7 @@ type RevisionRow = {
   published_at: Date;
   stale_source_confirmed: boolean;
 };
+type StreamRegistry = Map<string, { name: string; active: boolean }>;
 
 export type ScenarioReference = { kind: "draft" | "revision"; id: string };
 
@@ -117,7 +118,20 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 }
 
-function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: ReturnType<typeof revisionSummary>[]) {
+function streamConflicts(snapshot: BoardSnapshot, registry: StreamRegistry) {
+  const references = new Set<string>();
+  for (const stream of snapshot.streams ?? []) references.add(stream.id);
+  for (const item of snapshot.packages ?? []) if (item.stream_id) references.add(item.stream_id);
+  return [...references].filter((id) => !registry.get(id)?.active).sort()
+    .map((id) => ({ id, name: registry.get(id)?.name ?? snapshot.streams?.find((item) => item.id === id)?.name ?? id }));
+}
+
+async function currentStreamRegistry(database: ScenarioClient): Promise<StreamRegistry> {
+  const streams = await database.query<{ id: string; name: string; active: boolean }>("SELECT id,name,active FROM stream");
+  return new Map(streams.rows.map((stream) => [stream.id, { name: stream.name, active: stream.active }]));
+}
+
+function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: ReturnType<typeof revisionSummary>[], registry: StreamRegistry) {
   return {
     id: row.id,
     name: row.name,
@@ -127,6 +141,7 @@ function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: R
     archived: row.archived,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
+    streamConflicts: streamConflicts(row.draft_snapshot, registry),
     revisions,
   };
 }
@@ -171,23 +186,25 @@ async function requireActiveScenario(database: ScenarioClient, id: string): Prom
 }
 
 async function summaryFor(database: ScenarioClient, id: string) {
-  const [row, sourceAt, revisions] = await Promise.all([
+  const [row, sourceAt, revisions, registry] = await Promise.all([
     loadScenario(database, id),
     currentSourceAt(database),
     database.query<RevisionRow>("SELECT * FROM scenario_revision WHERE scenario_id=$1 ORDER BY revision_number", [id]),
+    currentStreamRegistry(database),
   ]);
-  return scenarioSummary(row, sourceAt, revisions.rows.map(revisionSummary));
+  return scenarioSummary(row, sourceAt, revisions.rows.map(revisionSummary), registry);
 }
 
 export async function listScenarios(client?: ScenarioClient) {
   const database = await useDatabase(client);
-  const [scenarios, revisions, baseline, activeId, sourceAt, board] = await Promise.all([
+  const [scenarios, revisions, baseline, activeId, sourceAt, board, registry] = await Promise.all([
     database.query<ScenarioRow>("SELECT * FROM scenario ORDER BY archived,name,id"),
     database.query<RevisionRow>("SELECT * FROM scenario_revision ORDER BY scenario_id,revision_number"),
     database.query<{ revision_id: string }>("SELECT revision_id FROM workspace_baseline WHERE workspace_id=1"),
     activeScenarioId(database),
     currentSourceAt(database),
     getBoard(database),
+    currentStreamRegistry(database),
   ]);
   const active = scenarios.rows.find((row) => row.id === activeId);
   return {
@@ -196,7 +213,7 @@ export async function listScenarios(client?: ScenarioClient) {
     activeDraftDirty: !!active && fingerprint(planningState(active.draft_snapshot)) !== fingerprint(planningState(board, active.draft_snapshot)),
     currentSourceAt: sourceAt,
     scenarios: scenarios.rows.map((row) => scenarioSummary(row, sourceAt,
-      revisions.rows.filter((revision) => revision.scenario_id === row.id).map(revisionSummary))),
+      revisions.rows.filter((revision) => revision.scenario_id === row.id).map(revisionSummary), registry)),
   };
 }
 
@@ -286,6 +303,10 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
   const snapshot = scenario.draft_snapshot;
+  const conflicts = streamConflicts(snapshot, await currentStreamRegistry(database));
+  if (conflicts.length) throw new HttpError(409, "This draft references retired streams. Restore those streams or create a reconciled draft from the current board.", {
+    code: "STREAM_RECONCILIATION_REQUIRED", streamConflicts: conflicts,
+  });
 
   for (const item of snapshot.packages) {
     await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,must_include=$4,priority_rank=$5,
@@ -293,9 +314,22 @@ export async function activateScenario(id: string, input: { expectedVersion: num
     [item.id, item.stream_id, item.selected, item.must_include, item.priority_rank, item.earliest_cycle, item.preferred_cycle,
       item.earliest_linear_cycle_id, item.preferred_linear_cycle_id, item.pause_reason]);
   }
+  const snapshotStreamIds = snapshot.streams.map((stream) => stream.id);
+  const extraStreams = await database.query<{ id: string; name: string }>("SELECT id,name FROM stream WHERE active=true AND NOT(id=ANY($1::text[])) ORDER BY position,name,id", [snapshotStreamIds]);
+  const desiredNames = [...snapshot.streams.map((stream) => stream.name), ...extraStreams.rows.map((stream) => stream.name)];
+  if (new Set(desiredNames.map((name) => name.toLocaleLowerCase())).size !== desiredNames.length) {
+    throw new HttpError(409, "This draft's stream names conflict with a stream added later. Rename the current stream before loading the draft.", {
+      code: "STREAM_RECONCILIATION_REQUIRED",
+    });
+  }
+  await database.query("UPDATE stream SET position=position+100000 WHERE active=true");
+  await database.query("UPDATE stream SET name='__activating__' || id WHERE id=ANY($1::text[])", [snapshotStreamIds]);
   for (const stream of snapshot.streams) {
     await database.query("UPDATE stream SET name=$2,position=$3,wip_limit=$4,allocation=$5 WHERE id=$1 AND active=true",
       [stream.id, stream.name, stream.position, stream.wip_limit, stream.allocation]);
+  }
+  for (let index = 0; index < extraStreams.rows.length; index++) {
+    await database.query("UPDATE stream SET position=$2,allocation=0 WHERE id=$1", [extraStreams.rows[index].id, snapshot.streams.length + index + 1]);
   }
   const capacity = snapshot.capacity;
   await database.query(`INSERT INTO capacity_profile(workspace_id,cycle_anchor,cycle_days,baseline,baseline_reason,reserve,horizon)
@@ -361,10 +395,19 @@ export async function publishScenario(id: string, input: {
   const author = typeof input.author === "string" ? input.author.trim() : "";
   if (!rationale || rationale.length > 4000) throw new HttpError(400, "Publishing requires a rationale of at most 4000 characters.");
   if (!author || author.length > 200) throw new HttpError(400, "Publishing requires an author of at most 200 characters.");
+  const conflicts = streamConflicts(scenario.draft_snapshot, await currentStreamRegistry(database));
+  if (conflicts.length) throw new HttpError(409, "This draft references retired streams and must be reconciled before publishing.", {
+    code: "STREAM_RECONCILIATION_REQUIRED", streamConflicts: conflicts,
+  });
   if (!scenario.draft_snapshot.forecast?.ready) {
     throw new HttpError(422, "The draft forecast is not ready to publish.", {
       code: "FORECAST_NOT_READY",
       reasons: [...(scenario.draft_snapshot.forecast?.setup ?? []), ...(scenario.draft_snapshot.forecast?.errors ?? [])],
+    });
+  }
+  if (scenario.draft_snapshot.reconciliationWarnings?.length) {
+    throw new HttpError(422, "Reconcile source changes before publishing this draft.", {
+      code: "ALLOWANCE_RECONCILIATION_REQUIRED", warnings: scenario.draft_snapshot.reconciliationWarnings,
     });
   }
   const sourceAt = await currentSourceAt(database);
@@ -418,12 +461,22 @@ async function resolveSnapshot(database: ScenarioClient, reference: ScenarioRefe
 export function compareSnapshots(left: BoardSnapshot, right: BoardSnapshot) {
   const leftPackages = new Map(left.packages.map((item) => [item.id, item]));
   const rightPackages = new Map(right.packages.map((item) => [item.id, item]));
+  const leftStreamNames = new Map(left.streams.map((item) => [item.id, item.name]));
+  const rightStreamNames = new Map(right.streams.map((item) => [item.id, item.name]));
+  const leftCycleNames = new Map(left.linearCycles.map((item) => [item.id, item.name || `Cycle ${item.number}`]));
+  const rightCycleNames = new Map(right.linearCycles.map((item) => [item.id, item.name || `Cycle ${item.number}`]));
   const packageIds = [...new Set([...leftPackages.keys(), ...rightPackages.keys()])].sort();
   const packages = packageIds.flatMap((id) => {
     const before = leftPackages.get(id);
     const after = rightPackages.get(id);
-    const from = before ? { selected: before.selected, streamId: before.stream_id, priority: before.priority_rank } : null;
-    const to = after ? { selected: after.selected, streamId: after.stream_id, priority: after.priority_rank } : null;
+    const from = before ? { selected: before.selected, streamId: before.stream_id ? leftStreamNames.get(before.stream_id) ?? "Retired stream" : null, priority: before.priority_rank,
+      mustInclude: before.must_include, earliestCycleId: before.earliest_linear_cycle_id ? leftCycleNames.get(before.earliest_linear_cycle_id) ?? "Unavailable cycle" : null,
+      preferredCycleId: before.preferred_linear_cycle_id ? leftCycleNames.get(before.preferred_linear_cycle_id) ?? "Unavailable cycle" : null,
+      legacyEarliest: before.earliest_cycle, legacyPreferred: before.preferred_cycle, pauseReason: before.pause_reason } : null;
+    const to = after ? { selected: after.selected, streamId: after.stream_id ? rightStreamNames.get(after.stream_id) ?? "Retired stream" : null, priority: after.priority_rank,
+      mustInclude: after.must_include, earliestCycleId: after.earliest_linear_cycle_id ? rightCycleNames.get(after.earliest_linear_cycle_id) ?? "Unavailable cycle" : null,
+      preferredCycleId: after.preferred_linear_cycle_id ? rightCycleNames.get(after.preferred_linear_cycle_id) ?? "Unavailable cycle" : null,
+      legacyEarliest: after.earliest_cycle, legacyPreferred: after.preferred_cycle, pauseReason: after.pause_reason } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: after?.name ?? before?.name ?? id, from, to }];
   });
   const leftOutcomes = new Map(left.forecast.outcomes.map((item) => [item.id, item]));
@@ -433,29 +486,81 @@ export function compareSnapshots(left: BoardSnapshot, right: BoardSnapshot) {
   const outcomes = outcomeIds.flatMap((id) => {
     const before = leftOutcomes.get(id);
     const after = rightOutcomes.get(id);
-    const from = before ? { status: before.status, endDate: before.endDate, target: before.target, gapCycles: before.gapCycles, reasons: before.reasons } : null;
-    const to = after ? { status: after.status, endDate: after.endDate, target: after.target, gapCycles: after.gapCycles, reasons: after.reasons } : null;
+    const beforeDefinition = left.outcomes.find((item) => item.id === id);
+    const afterDefinition = right.outcomes.find((item) => item.id === id);
+    const from = before ? { status: before.status, endDate: before.endDate, target: before.target, gapCycles: before.gapCycles, reasons: before.reasons,
+      title: beforeDefinition?.title ?? null, description: beforeDefinition?.description ?? "", owner: beforeDefinition?.owner ?? "",
+      successSignal: beforeDefinition?.success_signal ?? "", neededBy: beforeDefinition?.needed_by ?? null } : null;
+    const to = after ? { status: after.status, endDate: after.endDate, target: after.target, gapCycles: after.gapCycles, reasons: after.reasons,
+      title: afterDefinition?.title ?? null, description: afterDefinition?.description ?? "", owner: afterDefinition?.owner ?? "",
+      successSignal: afterDefinition?.success_signal ?? "", neededBy: afterDefinition?.needed_by ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, title: outcomeNames.get(id) ?? id, from, to }];
   });
   const leftStreams = new Map(left.streams.map((item) => [item.id, item]));
   const rightStreams = new Map(right.streams.map((item) => [item.id, item]));
   const streamIds = [...new Set([...leftStreams.keys(), ...rightStreams.keys()])].sort();
-  const streams = streamIds.flatMap((id) => {
+  const streamChanges = streamIds.flatMap((id) => {
     const before = leftStreams.get(id);
     const after = rightStreams.get(id);
-    const from = before ? { name: before.name, allocation: before.allocation, wip: before.wip_limit } : null;
-    const to = after ? { name: after.name, allocation: after.allocation, wip: after.wip_limit } : null;
+    const from = before ? { name: before.name, position: before.position, allocation: before.allocation, wip: before.wip_limit } : null;
+    const to = after ? { name: after.name, position: after.position, allocation: after.allocation, wip: after.wip_limit } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: after?.name ?? before?.name ?? id, from, to }];
   });
+  const namedChanges = <T extends Record<string, unknown>>(leftItems: T[], rightItems: T[], key: (item: T) => string) => {
+    const before = new Map(leftItems.map((item) => [key(item), item]));
+    const after = new Map(rightItems.map((item) => [key(item), item]));
+    return [...new Set([...before.keys(), ...after.keys()])].sort().flatMap((id) => {
+      const from = before.get(id) ?? null;
+      const to = after.get(id) ?? null;
+      return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, from, to }];
+    });
+  };
+  const leftIssueNames = new Map(left.issues.map((item) => [item.linear_id, item.identifier]));
+  const rightIssueNames = new Map(right.issues.map((item) => [item.linear_id, item.identifier]));
+  const allowanceValue = (item: BoardSnapshot["allowances"][number], issueNames: Map<string, string>) => ({ packageId: item.package_id, kind: item.kind,
+    points: item.points, issues: [...item.issue_ids].map((id) => issueNames.get(id) ?? "Unavailable issue").sort(), owner: item.owner,
+    reviewDate: item.review_date, rationale: item.rationale });
+  const adjustmentValue = (item: BoardSnapshot["adjustments"][number]) => ({ cycleId: item.linear_cycle_id,
+    availability: item.availability, reserve: item.reserve });
+  const dependencyValue = (item: BoardSnapshot["dependencies"][number]) => ({ predecessorId: item.predecessor_id,
+    successorId: item.successor_id, source: item.source, waived: item.waived, waiverReason: item.waiver_reason });
+  const linkValue = (item: BoardSnapshot["links"][number]) => ({ outcomeId: item.outcome_id, projectId: item.project_id, requirement: item.requirement });
+  const linearCycleValue = (item: BoardSnapshot["linearCycles"][number]) => ({ id: item.id, number: item.number, name: item.name,
+    startsAt: item.startsAt, endsAt: item.endsAt });
+  const packageNames = new Map([...left.packages, ...right.packages].map((item) => [item.id, item.name]));
+  const outcomeTitles = new Map([...left.outcomes, ...right.outcomes].map((item) => [item.id, item.title]));
+  const cycleNames = new Map([...left.linearCycles, ...right.linearCycles].map((item) => [item.id, item.name || `Cycle ${item.number}`]));
+  const adjustments = namedChanges(left.adjustments.map(adjustmentValue), right.adjustments.map(adjustmentValue), (item) => item.cycleId as string)
+    .map((change) => ({ ...change, name: cycleNames.get(change.id) ?? "Removed cycle" }));
+  const allowances = namedChanges(left.allowances.map((item) => allowanceValue(item, leftIssueNames)), right.allowances.map((item) => allowanceValue(item, rightIssueNames)), (item) => `${item.packageId}:${item.kind}`)
+    .map((change) => ({ ...change, name: packageNames.get((change.to ?? change.from)!.packageId as string) ?? "Removed package" }));
+  const dependencies = namedChanges(left.dependencies.map(dependencyValue), right.dependencies.map(dependencyValue),
+    (item) => `${item.predecessorId}:${item.successorId}:${item.source}`).map((change) => {
+      const value = (change.to ?? change.from)!;
+      return { ...change, name: `${packageNames.get(value.predecessorId as string) ?? "Removed package"} blocks ${packageNames.get(value.successorId as string) ?? "Removed package"}` };
+    });
+  const links = namedChanges(left.links.map(linkValue), right.links.map(linkValue), (item) => `${item.outcomeId}:${item.projectId}`)
+    .map((change) => { const value = (change.to ?? change.from)!; return { ...change,
+      name: `${outcomeTitles.get(value.outcomeId as string) ?? "Removed outcome"} / ${packageNames.get(`linear:${value.projectId as string}`) ?? "Removed project"}` }; });
+  const linearCycles = namedChanges(left.linearCycles.map(linearCycleValue), right.linearCycles.map(linearCycleValue), (item) => item.id as string)
+    .map((change) => ({ ...change, name: cycleNames.get(change.id) ?? "Removed cycle" }));
   return {
     sourceChanged: left.forecast.sourceAt !== right.forecast.sourceAt,
     capacity: {
-      from: { baseline: left.effectiveBaseline, reserve: left.capacity.reserve, horizon: left.capacity.horizon },
-      to: { baseline: right.effectiveBaseline, reserve: right.capacity.reserve, horizon: right.capacity.horizon },
+      from: { baseline: left.effectiveBaseline, configuredBaseline: left.capacity.baseline, reserve: left.capacity.reserve, horizon: left.capacity.horizon, baselineReason: left.capacity.baseline_reason,
+        cycleAnchor: left.capacity.cycle_anchor, cycleDays: left.capacity.cycle_days },
+      to: { baseline: right.effectiveBaseline, configuredBaseline: right.capacity.baseline, reserve: right.capacity.reserve, horizon: right.capacity.horizon, baselineReason: right.capacity.baseline_reason,
+        cycleAnchor: right.capacity.cycle_anchor, cycleDays: right.capacity.cycle_days },
     },
     packages,
-    streams,
+    streams: streamChanges.filter((change) => change.from && change.to),
+    streamLifecycle: streamChanges.filter((change) => !change.from || !change.to),
     outcomes,
+    adjustments,
+    allowances,
+    dependencies,
+    links,
+    linearCycles,
   };
 }
 

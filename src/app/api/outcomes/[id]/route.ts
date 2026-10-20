@@ -1,14 +1,15 @@
 import { transaction } from "@/lib/db";
-import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib/security";
+import { HttpError, requireOwner, requireSameOrigin, responseError, validDateString } from "@/lib/security";
 
 function outcomeFields(body: Record<string, unknown>) {
   const title = typeof body.title === "string" ? body.title.trim() : "";
   if (!title || title.length > 200) throw new HttpError(400, "Enter an outcome title of at most 200 characters.");
-  const description = typeof body.description === "string" ? body.description.trim().slice(0, 4000) : "";
-  const owner = typeof body.owner === "string" ? body.owner.trim().slice(0, 160) : "";
-  const successSignal = typeof body.successSignal === "string" ? body.successSignal.trim().slice(0, 1000) : "";
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  const owner = typeof body.owner === "string" ? body.owner.trim() : "";
+  const successSignal = typeof body.successSignal === "string" ? body.successSignal.trim() : "";
+  if (description.length > 4000 || owner.length > 160 || successSignal.length > 1000) throw new HttpError(400, "Outcome notes, owner, or success signal is too long.");
   const neededBy = body.neededBy === "" || body.neededBy == null ? null : body.neededBy;
-  if (neededBy !== null && (typeof neededBy !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(neededBy) || Number.isNaN(Date.parse(neededBy)))) {
+  if (neededBy !== null && !validDateString(neededBy)) {
     throw new HttpError(400, "Enter a valid needed-by date.");
   }
   return { title, description, owner, successSignal, neededBy };

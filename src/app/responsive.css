@@ -1,0 +1,26 @@
+@media (max-width: 760px) {
+  .workspace-shell { padding-inline: 12px; }
+  .app-header { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-inline: -12px; padding: 9px 12px 0; }
+  .app-brand p, .source-freshness { display: none; }
+  .header-actions { margin-left: auto; }
+  .app-tabs { order: 3; width: 100%; min-width: 0; overflow-x: auto; }
+  .app-tab { min-height: 42px; flex: 0 0 auto; padding-inline: 10px; }
+  .view-heading { align-items: flex-start; padding-top: 16px; }
+  .view-heading .phase { display: none; }
+  .workspace-shell .panel { padding: 13px; }
+  .board-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .board-config-row { grid-template-columns: 1fr; }
+  .outcome-forecast-row { grid-template-columns: minmax(0, 1fr); }
+  .outcome-status { text-align: left; }
+  .row-actions, .stream-controls { flex-wrap: wrap; }
+  .inline-outcome-editor { grid-template-columns: 1fr; }
+  .stream-heading { align-items: stretch; flex-direction: column; }
+  .stream-controls label { width: min(130px, 45%); }
+  .calendar-months { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 420px) {
+  .board-summary { grid-template-columns: 1fr; }
+  .connect-grid, .section-head { align-items: stretch; flex-direction: column; }
+  .connect-grid button { min-width: 0; width: 100%; }
+}

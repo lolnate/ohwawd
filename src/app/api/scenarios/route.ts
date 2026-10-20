@@ -1,11 +1,11 @@
 import { createScenario, listScenarios } from "@/lib/scenarios";
-import { transaction } from "@/lib/db";
+import { readTransaction, transaction } from "@/lib/db";
 import { requireOwner, requireSameOrigin, responseError } from "@/lib/security";
 
 export async function GET(): Promise<Response> {
   try {
     await requireOwner();
-    return Response.json(await listScenarios());
+    return Response.json(await readTransaction((client) => listScenarios(client)));
   } catch (error) { return responseError(error); }
 }
 

@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import { db, ensureSchema } from "./db";
+import { readTransaction } from "./db";
 import { forecast, historicalBaseline, type ForecastInput } from "./forecast";
 
 export async function assignPackagesToStream(client: Pick<PoolClient, "query">, streamId: string, packageIds: string[]): Promise<void> {
@@ -7,8 +7,11 @@ export async function assignPackagesToStream(client: Pick<PoolClient, "query">, 
 }
 
 export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?: Date) {
-  if (!client) await ensureSchema();
-  const database = client ?? db();
+  if (!client) return readTransaction((database) => loadBoard(database, cycleAnchor));
+  return loadBoard(client, cycleAnchor);
+}
+
+async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor?: Date) {
   const [workspace, connection, packages, streams, links, outcomes, capacity, adjustments, dependencies, allowances, issues, observations, linearCycles, legacyAdjustments] = await Promise.all([
     database.query("SELECT created_at FROM workspace WHERE id=1"),
     database.query("SELECT last_imported_at,cycles_refreshed_at,GREATEST(last_imported_at,cycles_refreshed_at) AS source_at,team_id,team_name,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count FROM linear_connection WHERE workspace_id=1"),
@@ -44,6 +47,7 @@ export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?:
   const comparableDays = connection.rows[0]?.cycle_duration ? connection.rows[0].cycle_duration * 7 : null;
   const comparable = comparableDays ? observations.rows.filter((item) => item.cycle_days === comparableDays).slice(0, 6) : [];
   const observedBaseline = historicalBaseline(comparable.map((item) => item.completed_points));
+  const reconciliationWarnings: { packageId: string; message: string }[] = [];
   const input: ForecastInput = {
     packages: packages.rows.map((row) => {
       const open = issues.rows.filter((issue) => issue.project_id === row.project_id && !["completed", "canceled"].includes(issue.state_type));
@@ -51,8 +55,14 @@ export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?:
       const discovery = allowances.rows.find((item) => item.package_id === row.id && item.kind === "discovery");
       const claimed = unestimated?.issue_ids as string[] | undefined;
       const claimedIssues = claimed?.map((id) => issues.rows.find((issue) => issue.linear_id === id && issue.project_id === row.project_id));
-      const allowanceReview = claimedIssues?.some((issue) => !issue || (["completed", "canceled"].includes(issue.state_type) && issue.estimate === null))
+      const unestimatedReview = claimedIssues?.some((issue) => !issue || (["completed", "canceled"].includes(issue.state_type) && issue.estimate === null))
         ? "Allowance issue set changed or closed without an estimate; reconcile it." : null;
+      const discoveryBaseline = new Set(discovery?.issue_ids as string[] | undefined);
+      const newDiscoveryIssues = discovery ? open.filter((issue) => !discoveryBaseline.has(issue.linear_id)) : [];
+      const discoveryReview = newDiscoveryIssues.length
+        ? `${newDiscoveryIssues.length} Linear issue${newDiscoveryIssues.length === 1 ? " was" : "s were"} added after the discovery allowance; reconcile possible double counting.` : null;
+      const allowanceReview = unestimatedReview ?? discoveryReview;
+      if (allowanceReview) reconciliationWarnings.push({ packageId: row.id, message: allowanceReview });
       const residual = unestimated ? Math.max(0, unestimated.points - (claimedIssues || []).reduce((sum, issue) => sum + (issue?.estimate ?? 0), 0)) : 0;
       const earliest = cycleIndex(row.earliest_linear_cycle_id, row.earliest_cycle);
       const preferred = cycleIndex(row.preferred_linear_cycle_id, row.preferred_cycle);
@@ -79,6 +89,6 @@ export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?:
     observations: comparable, observedBaseline, effectiveBaseline: input.baseline,
     linearCycles: input.linearCycles, currentCycleId: currentCycle?.linear_id ?? null, cycleAnchorAt, futureCycleIds: future.map((row) => row.linear_id),
     adjustments: adjustments.rows, legacyAdjustments: legacyAdjustments.rows,
-    dependencies: dependencies.rows, allowances: allowances.rows, issues: issues.rows, timezone: input.timezone,
+    dependencies: dependencies.rows, allowances: allowances.rows, issues: issues.rows, reconciliationWarnings, timezone: input.timezone,
     forecast: forecast(input) };
 }

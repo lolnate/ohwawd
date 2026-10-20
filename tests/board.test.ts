@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
-import type { Pool, PoolClient } from "pg";
+import type { PoolClient } from "pg";
 import { assignPackagesToStream, getBoard } from "../src/lib/board";
 import { schemaSql } from "../src/lib/db";
 import { saveImport } from "../src/lib/import";
 
 test("board reads the connected team's Linear cycles and ID-bound exception", async () => {
   const pg = new PGlite();
-  const priorUrl = process.env.DATABASE_URL;
-  process.env.DATABASE_URL = "pglite-test";
-  globalThis.ohwawdPool = { query: (sql: string, params?: unknown[]) => sql === schemaSql
-    ? pg.exec(sql).then(() => ({ rows: [], rowCount: 0 }))
-    : pg.query(sql, params) } as unknown as Pool;
+  await pg.exec(schemaSql);
+  await pg.query("INSERT INTO workspace(id) VALUES(1)");
+  for (let position = 1; position <= 5; position++) {
+    await pg.query("INSERT INTO stream(id,name,position) VALUES($1,$2,$3)", [`stream-${position}`, `Stream ${position}`, position]);
+  }
   try {
-    await getBoard();
     await saveImport(pg as unknown as PoolClient, {
       encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" }, team: { id: "devops", name: "DevOps" },
       projects: [{ id: "p", teamId: "devops", name: "Project", description: "", status: "planned", url: "https://linear.app/p/p",
@@ -32,7 +31,7 @@ test("board reads the connected team's Linear cycles and ID-bound exception", as
     await pg.query("UPDATE stream SET allocation=1 WHERE id='stream-1'");
     await pg.query("INSERT INTO capacity_profile(workspace_id,baseline,baseline_reason,reserve,horizon) VALUES(1,6,'test',0,4)");
     await pg.query("INSERT INTO linear_cycle_adjustment(linear_cycle_id,availability,reserve) VALUES('c45',0.5,NULL)");
-    const board = await getBoard(undefined, new Date("2026-10-15T12:00:00Z"));
+    const board = await getBoard(pg as unknown as PoolClient, new Date("2026-10-15T12:00:00Z"));
     assert.deepEqual(board.futureCycleIds, ["c45"]);
     assert.equal(board.currentCycleId, "c44");
     assert.equal(board.connection.team_name, "DevOps");
@@ -47,9 +46,33 @@ test("board reads the connected team's Linear cycles and ID-bound exception", as
       { id: "linear:q", stream_id: "stream-2", selected: true },
     ]);
   } finally {
-    globalThis.ohwawdPool = undefined;
-    if (priorUrl === undefined) delete process.env.DATABASE_URL;
-    else process.env.DATABASE_URL = priorUrl;
     await pg.close();
   }
+});
+
+test("discovery allowance requires reconciliation when new issues appear", async () => {
+  const pg = new PGlite();
+  await pg.exec(schemaSql);
+  await pg.query("INSERT INTO workspace(id) VALUES(1)");
+  await pg.query("INSERT INTO stream(id,name,position,allocation) VALUES('stream-1','Stream 1',1,1)");
+  const client = pg as unknown as PoolClient;
+  const project = {
+    id: "p", teamId: "team", name: "Project", description: "", status: "planned", url: "https://linear.app/p/p",
+    updatedAt: new Date("2026-10-15T12:00:00Z"), crossTeam: false,
+    issues: [{ id: "known", projectId: "p", teamId: "team", identifier: "T-1", title: "Known", estimate: 3,
+      stateType: "started", completedAt: null, updatedAt: new Date("2026-10-15T12:00:00Z") }],
+  };
+  const source = { encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" }, team: { id: "team", name: "Team" }, projects: [project] };
+  await saveImport(client, source, new Date("2026-10-15T12:00:00Z"));
+  await pg.query("UPDATE work_package SET stream_id='stream-1' WHERE project_id='p'");
+  await pg.query("INSERT INTO package_allowance(package_id,kind,points,issue_ids,owner,review_date,rationale) VALUES('linear:p','discovery',2,ARRAY['known'],'Owner','2026-10-31','Discovery')");
+  assert.equal((await getBoard(client)).reconciliationWarnings.length, 0);
+
+  project.issues.push({ id: "new", projectId: "p", teamId: "team", identifier: "T-2", title: "New", estimate: 2,
+    stateType: "started", completedAt: null, updatedAt: new Date("2026-10-16T12:00:00Z") });
+  await saveImport(client, source, new Date("2026-10-16T12:00:00Z"));
+  const board = await getBoard(client);
+  assert.equal(board.reconciliationWarnings.length, 1);
+  assert.match(board.forecast.packages[0].reason || "", /possible double counting/);
+  await pg.close();
 });
