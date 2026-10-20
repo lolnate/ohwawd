@@ -5,7 +5,7 @@ import { db, ensureSchema } from "./db";
 import { HttpError } from "./security";
 import { adaptLegacyPlanning } from "./legacy-planning";
 
-export const calculationVersion = "v2";
+export const calculationVersion = "v3";
 
 type ScenarioClient = Pick<PoolClient, "query">;
 type BoardSnapshot = Awaited<ReturnType<typeof getBoard>>;
@@ -149,9 +149,11 @@ function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: R
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     streamConflicts: streamConflicts(row.draft_snapshot, registry),
-    conversionNotice: row.draft_snapshot.calculationVersion === "v2" ? null : row.draft_snapshot.calculationVersion === "v1"
-      ? "This draft predates weekly availability. Loading preserves its capacity with holiday defaults disabled; save the board to store the v2 plan."
-      : "This legacy draft uses numeric ranks and retired start/must-include controls. Loading adapts its sequence and Extra scope with holiday defaults disabled; save the board to store the v2 plan.",
+    conversionNotice: row.draft_snapshot.calculationVersion === "v3" ? null : row.draft_snapshot.calculationVersion === "v2"
+      ? "This draft predates projected cycles. Loading uses the current Linear cadence and marks projected dates provisional; save the board to capture the v3 plan."
+      : row.draft_snapshot.calculationVersion === "v1"
+        ? "This draft predates weekly availability. Loading preserves its capacity with holiday defaults disabled and uses the v3 planning calendar; save the board to capture it."
+        : "This legacy draft uses numeric ranks and retired start/must-include controls. Loading adapts its sequence and Extra scope with holiday defaults disabled; save the board to store the v3 plan.",
     revisions,
   };
 }
@@ -414,7 +416,7 @@ export async function publishScenario(id: string, input: {
   const scenario = await loadScenario(database, id, true);
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
-  if (scenario.draft_snapshot.calculationVersion !== "v2") throw new HttpError(409, "Load and save this older draft to capture weekly availability assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
+  if (scenario.draft_snapshot.calculationVersion !== "v3") throw new HttpError(409, "Load and save this older draft to capture projected calendar assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
   const rationale = typeof input.rationale === "string" ? input.rationale.trim() : "";
   const author = typeof input.author === "string" ? input.author.trim() : "";
   if (!rationale || rationale.length > 4000) throw new HttpError(400, "Publishing requires a rationale of at most 4000 characters.");
@@ -508,10 +510,10 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     const after = rightOutcomes.get(id);
     const beforeDefinition = left.outcomes.find((item) => item.id === id);
     const afterDefinition = right.outcomes.find((item) => item.id === id);
-    const from = before ? { status: before.status, endDate: before.endDate, target: before.target, gapCycles: before.gapCycles, reasons: before.reasons,
+    const from = before ? { status: before.status, calendarProjected: before.calendarProjected ?? false, endDate: before.endDate, target: before.target, gapCycles: before.gapCycles, reasons: before.reasons,
       title: beforeDefinition?.title ?? null, description: beforeDefinition?.description ?? "", owner: beforeDefinition?.owner ?? "",
       successSignal: beforeDefinition?.success_signal ?? "", neededBy: beforeDefinition?.needed_by ?? null } : null;
-    const to = after ? { status: after.status, endDate: after.endDate, target: after.target, gapCycles: after.gapCycles, reasons: after.reasons,
+    const to = after ? { status: after.status, calendarProjected: after.calendarProjected ?? false, endDate: after.endDate, target: after.target, gapCycles: after.gapCycles, reasons: after.reasons,
       title: afterDefinition?.title ?? null, description: afterDefinition?.description ?? "", owner: afterDefinition?.owner ?? "",
       successSignal: afterDefinition?.success_signal ?? "", neededBy: afterDefinition?.needed_by ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, title: outcomeNames.get(id) ?? id, from, to }];

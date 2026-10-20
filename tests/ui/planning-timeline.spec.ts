@@ -57,7 +57,7 @@ test("holiday bands edit real weekly capacity and a 100% override restores the d
   await expect(region.locator('.timeline-weeks [data-week-start="2026-12-21"]')).toContainText("50%");
 });
 
-test("partial forecasts stop at imported capacity and successor rows explain their blockers", async ({ page, assignment }) => {
+test("partial forecasts stop at the planning horizon and successor rows explain their blockers", async ({ page, assignment }) => {
   await assignment.setDemand("a", 1000);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -65,13 +65,14 @@ test("partial forecasts stop at imported capacity and successor rows explain the
   const row = core.locator('[data-timeline-project="linear:a"]');
   const bar = row.locator(".calendar-project-bar.continuing");
   await expect(bar).toContainText("Continues");
-  const missing = row.locator(".timeline-week-band.no-calendar").first();
-  const [barBox, missingBox] = await Promise.all([bar.boundingBox(), missing.boundingBox()]);
-  expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(missingBox!.x + 1);
+  await expect(bar).toHaveClass(/uses-projected-cycles/);
+  const [barBox, trackBox] = await Promise.all([bar.boundingBox(), row.locator(".timeline-track").boundingBox()]);
+  expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(trackBox!.x + trackBox!.width + 1);
+  await expect(bar).toHaveAttribute("title", /continues beyond the simulated calendar/);
   const successor = page.getByRole("region", { name: /^Delivery forecast timeline/ }).locator('[data-timeline-project="linear:c"]');
   await expect(successor.locator("th")).toContainText("After API foundation");
   await expect(successor.locator(".calendar-row-reason")).toContainText("Waiting for API foundation");
   await expect(successor.locator(".calendar-project-bar")).toHaveCount(0);
-  await expect(core.locator(".timeline-week-band.no-calendar").first()).toBeAttached();
+  await expect(core.locator(".timeline-week-band.projected-calendar").first()).toBeAttached();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
 });

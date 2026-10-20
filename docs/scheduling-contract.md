@@ -1,16 +1,28 @@
 # Scheduling and scenario contract
 
-## Current calculation: v2
+## Current calculation: v3
+
+Calendar labeling and projection requirements are maintained in [cycle calendar](../openspec/specs/cycle-calendar/spec.md), with design and verification in the [archived projection change](../openspec/changes/archive/2026-10-20-project-linear-cycle-calendar/).
+
+Cycle labels prefer the name visible in Linear. A source cycle with internal ordinal 26 and name “Cycle 46” displays as Cycle 46 / C46; its ID and ordinal remain source metadata. Numbered name suffixes continue in projected cycles, independently of internal ordinals.
+
+The planning calendar extends beyond the latest imported boundary using the connected team's enabled cycle configuration: duration and cooldown in weeks, starting weekday and timezone. Projected boundaries retain the source boundary's local clock time across DST. Known source dates and gaps are preserved; projection only appends after the last actual cycle, and cooldowns supply no cycle capacity. Missing/invalid settings or a missing dated anchor leave the imported calendar usable with an explanation instead of inventing a cadence.
+
+The extension covers the configured forecast horizon and at least 26 visible calendar weeks. Synthetic projected entries are never written to Linear or the Linear cache; the next refresh replaces them with actual IDs/names/dates and regenerates later assumptions. Week headers mark projected labels with an asterisk. Date calendars show them as view-only, while weekly availability remains editable by calendar date.
+
+V3 forecasts may use projected cycle capacity. Those packages and required outcomes are provisional and explicitly identify projected cycle dates. Allocation, WIP, dependencies, reserve, holiday and weekly-override math apply unchanged. V3 snapshots freeze the resolved calendar, cadence/provenance and output; published v0/v1/v2 results remain intact. Older editable drafts retain their planning inputs and transition explicitly when saved under v3.
+
+## Capacity and timeline rules introduced in v2, retained in v3
 
 The calendar requirements are maintained in [planning timeline](../openspec/specs/planning-timeline/spec.md) and [weekly capacity](../openspec/specs/weekly-capacity/spec.md). Design and acceptance evidence are in the [archived calendar change](../openspec/changes/archive/2026-10-20-month-week-planning-timeline/).
 
-Stream timelines are month-first and subdivided into Monday-start calendar weeks, with compact scrolling and sticky project labels. Imported Linear cycles remain the scheduling buckets and secondary timeline context. A wider display calendar does not supply forecast capacity: dates outside imported cycles are shaded, blocked projects explain their predecessors, and unfinished projects get continuing bars without asserted completion dates.
+Stream timelines are month-first and subdivided into Monday-start calendar weeks, with compact scrolling and sticky project labels. Resolved imported/projected cycles supply scheduling buckets and secondary timeline context. Unsupported dates, including cooldowns, remain shaded without cycle capacity; blocked projects explain their predecessors, and unfinished projects get continuing bars without asserted completion dates.
 
 V2 adds weekly availability. The live-board default is a labeled 50% planning preset for US Thanksgiving week, Christmas week and the following week. It can be disabled, and explicit date-based week overrides (0–100%) take precedence. Week assumptions are evaluated in the team's timezone and apply across cycle boundaries.
 
 For each Monday–Friday date belonging to an imported cycle, use explicit weekly availability first, then an enabled holiday preset, then cycle availability (default 100%). Average those values. For a cycle with no weekdays, use its calendar dates instead. Multiply baseline by that effective availability, subtract reserve once, then apply the existing stream allocation and WIP rules. Overlapping 50% week/cycle assumptions yield 50%, not 25%; a fortnight with one full week and one half week yields 75%.
 
-V2 snapshots capture weekly overrides, enabled state and resolved holiday dates. Comparisons identify the changed assumptions and calculation versions. Published v0/v1 results remain frozen. Loading pre-weekly editable drafts defaults to no weekly overrides and disabled holiday presets, preserving former capacity assumptions until deliberately changed.
+V2 and later snapshots capture weekly overrides, enabled state and resolved holiday dates. Comparisons identify the changed assumptions and calculation versions. Published earlier results remain frozen. Loading pre-weekly editable drafts defaults to no weekly overrides and disabled holiday presets, preserving former capacity assumptions until deliberately changed.
 
 ## Assignment and sequencing rules introduced in v1, retained in v2
 
@@ -48,7 +60,7 @@ Legacy editable drafts are adapted when loaded and converted when saved. Queue s
 
 ## Historical calculation: v0
 
-The following contract is retained to explain published v0 snapshots. New snapshots use v2 and comparisons identify differing calculation versions. Published historical inputs and outputs remain immutable.
+The following contract is retained to explain published v0 snapshots. New snapshots use v3 and comparisons identify differing calculation versions. Published historical inputs and outputs remain immutable.
 
 ### Original v0 contract
 

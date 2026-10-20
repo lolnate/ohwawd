@@ -4,7 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import type { PoolClient } from "pg";
 import { assignPackagesToStream, getBoard } from "../src/lib/board";
 import { schemaSql } from "../src/lib/db";
-import { saveImport } from "../src/lib/import";
+import { saveCycleData, saveImport } from "../src/lib/import";
 import { saveExtraScope } from "../src/lib/scope-store";
 import { placeProjects } from "../src/lib/sequence-store";
 
@@ -111,5 +111,33 @@ test("new Linear dependencies preserve user order and only withhold affected lan
     board = await getBoard(client);
     assert.equal(board.sequenceConflicts.length, 0);
     assert.equal(board.forecast.packages.find((item) => item.id === "linear:b")!.start, 2);
+  } finally { await database.close(); }
+});
+
+test("board keeps projected cycles out of the source cache and replaces them with real imports", async () => {
+  const database = new PGlite();
+  try {
+    await database.exec(schemaSql);
+    await database.query("INSERT INTO workspace(id) VALUES(1)");
+    const client = database as unknown as PoolClient;
+    const source = { id: "real-49", teamId: "team", number: 29, name: "Cycle 49", startsAt: new Date("2026-11-17T05:00:00Z"),
+      endsAt: new Date("2026-11-24T05:00:00Z"), completedAt: null, cycleDays: 7, completedPoints: null };
+    await saveImport(client, { encryptedKey: "test", viewer: { id: "v", name: "Owner" }, team: { id: "team", name: "Team" }, projects: [], cycles: [source],
+      cycleSettings: { timezone: "America/New_York", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 2, cycleCooldownTime: 0, upcomingCycleCount: 4 } }, new Date("2026-11-16T12:00:00Z"));
+    let board = await getBoard(client);
+    const projection = board.planningCycles.find((cycle) => cycle.name === "Cycle 50")!;
+    assert.equal(projection.projected, true);
+    assert.equal(board.linearCycles.length, 1);
+    assert.equal((await database.query("SELECT * FROM linear_cycle_cache")).rows.length, 1);
+    const actual = { ...source, id: "real-50", number: 30, name: "Cycle 50", startsAt: new Date("2026-11-24T05:00:00Z"), endsAt: new Date("2026-12-01T05:00:00Z") };
+    await saveCycleData(client, "team", [source, actual], new Date("2026-11-16T13:00:00Z"));
+    board = await getBoard(client);
+    const cycle50 = board.planningCycles.filter((cycle) => cycle.name === "Cycle 50");
+    assert.equal(cycle50.length, 1);
+    assert.equal(cycle50[0].id, "real-50");
+    assert.notEqual(cycle50[0].projected, true);
+    assert.equal(board.planningCycles.some((cycle) => cycle.id === projection.id), false);
+    assert.equal(board.linearCycles.length, 2);
+    assert.equal((await database.query("SELECT * FROM linear_cycle_cache WHERE linear_id LIKE 'projected:%'")).rows.length, 0);
   } finally { await database.close(); }
 });

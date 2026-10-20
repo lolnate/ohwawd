@@ -90,7 +90,7 @@ test("scenario lifecycle saves drafts with optimistic versions and publishes fro
       expectedVersion: 2, rationale: "Commit to the launch scope.", author: "Owner",
     }, client);
     assert.equal(revision.revisionNumber, 1);
-    assert.equal(revision.calculationVersion, "v2");
+    assert.equal(revision.calculationVersion, "v3");
     assert.equal(revision.draftEditVersion, 2);
     assert.equal(JSON.stringify((await database.query("SELECT snapshot FROM scenario_revision WHERE id=$1", [revision.id])).rows[0]).includes("must-not-appear-in-snapshots"), false);
     await assert.rejects(database.query("UPDATE scenario_revision SET rationale='rewritten' WHERE id=$1", [revision.id]), /immutable/i);
@@ -104,7 +104,7 @@ test("scenario lifecycle saves drafts with optimistic versions and publishes fro
   }
 });
 
-test("v2 drafts round-trip sequence, extra scope and lead days; source review is advisory and frozen reminders remain unchanged", async () => {
+test("v3 drafts round-trip sequence, extra scope and lead days; source review is advisory and frozen reminders remain unchanged", async () => {
   const { database, client } = await fixture();
   try {
     await placeProjects(client, [{ packageId: "linear:project-1", selected: true, streamId: "stream-1" }]);
@@ -141,6 +141,7 @@ test("legacy draft conversion preserves effective budgets and old revisions with
     const legacy = JSON.parse(JSON.stringify(board));
     delete legacy.calculationVersion; delete legacy.extraScopes; delete legacy.scoping; delete legacy.evaluatedAt;
     delete legacy.weeklyAdjustments; delete legacy.holidayWeeks; delete legacy.capacity.holidays_enabled;
+    delete legacy.planningCycles; delete legacy.calendarProjection;
     delete legacy.capacity.scoping_lead_days;
     legacy.packages[0].priority_rank = 7;
     legacy.packages[0].must_include = true;
@@ -167,12 +168,12 @@ test("legacy draft conversion preserves effective budgets and old revisions with
     const saved = await saveScenario(scenario.id, { expectedVersion: 1 }, client);
     const revision = await publishScenario(scenario.id, { expectedVersion: saved.editVersion, rationale: "New rules", author: "Owner" }, client);
     const comparison = await compareScenarios({ kind: "revision", id: "00000000-0000-4000-8000-000000000088" }, { kind: "revision", id: revision.id }, client);
-    assert.deepEqual(comparison.calculationVersions, { from: "v0", to: "v2" });
+    assert.deepEqual(comparison.calculationVersions, { from: "v0", to: "v3" });
     assert.deepEqual((await database.query<{ snapshot: unknown }>("SELECT snapshot FROM scenario_revision WHERE calculation_version='v0'")).rows[0].snapshot, JSON.parse(before));
   } finally { await database.close(); }
 });
 
-test("v2 weekly assumptions round-trip and v1 drafts preserve their former holiday-free capacity", async () => {
+test("v3 weekly assumptions round-trip and v1 drafts preserve their former holiday-free capacity", async () => {
   const { database, client } = await fixture();
   try {
     await saveHolidayPreset(client, true);
@@ -201,6 +202,37 @@ test("v2 weekly assumptions round-trip and v1 drafts preserve their former holid
     assert.equal(board.capacity.holidays_enabled, false);
     assert.deepEqual(board.weeklyAdjustments, []);
     assert.deepEqual((await database.query<{ snapshot: unknown }>("SELECT snapshot FROM scenario_revision WHERE id=$1", [first.id])).rows[0].snapshot, original);
+  } finally { await database.close(); }
+});
+
+test("v3 saves projected calendar provenance while published v2 calendars remain immutable", async () => {
+  const { database, client } = await fixture();
+  try {
+    const scenario = await createScenario({ name: "Calendar versions" }, client);
+    const current = await getBoard(client);
+    const old = JSON.parse(JSON.stringify(current));
+    old.calculationVersion = "v2";
+    delete old.planningCycles; delete old.calendarProjection;
+    for (const row of old.forecast.cycles) delete row.projected;
+    for (const row of old.forecast.packages) delete row.calendarProjected;
+    for (const row of old.forecast.outcomes) delete row.calendarProjected;
+    const oldId = "00000000-0000-4000-8000-000000000077";
+    await database.query(`INSERT INTO scenario_revision(id,scenario_id,revision_number,draft_edit_version,calculation_version,source_at,source_snapshot,snapshot,rationale,author)
+      VALUES($1,$2,1,1,'v2',$3,'{}',$4::jsonb,'Imported-only calendar','Owner')`, [oldId, scenario.id, current.forecast.sourceAt, JSON.stringify(old)]);
+    await database.query("UPDATE capacity_profile SET baseline=0.5,horizon=8,baseline_reason='Longer option' WHERE workspace_id=1");
+    const saved = await saveScenario(scenario.id, { expectedVersion: 1 }, client);
+    const next = await publishScenario(scenario.id, { expectedVersion: saved.editVersion, author: "Owner", rationale: "Project from cadence" }, client);
+    assert.equal(next.calculationVersion, "v3");
+    const stored = (await database.query<{ snapshot: Awaited<ReturnType<typeof getBoard>>; source_snapshot: { linearCycles: { projected?: boolean }[] } }>("SELECT snapshot,source_snapshot FROM scenario_revision WHERE id=$1", [next.id])).rows[0];
+    assert.ok(stored.snapshot.planningCycles.some((cycle) => cycle.projected));
+    assert.equal(stored.snapshot.calendarProjection.cadence.durationWeeks, 1);
+    assert.equal(stored.snapshot.forecast.packages[0].calendarProjected, true);
+    assert.equal(stored.snapshot.forecast.outcomes[0].status, "provisional");
+    assert.ok(stored.source_snapshot.linearCycles.every((cycle) => !cycle.projected));
+    const comparison = await compareScenarios({ kind: "revision", id: oldId }, { kind: "revision", id: next.id }, client);
+    assert.deepEqual(comparison.calculationVersions, { from: "v2", to: "v3" });
+    assert.equal(comparison.outcomes[0].to!.calendarProjected, true);
+    assert.deepEqual((await database.query<{ snapshot: unknown }>("SELECT snapshot FROM scenario_revision WHERE id=$1", [oldId])).rows[0].snapshot, old);
   } finally { await database.close(); }
 });
 

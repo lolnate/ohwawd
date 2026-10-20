@@ -35,7 +35,7 @@ export default function CalendarAvailability({ enabled, overrides, holidays, sel
     setWeekStart(monday); setAvailability(String(Math.round((current?.availability ?? 1) * 100))); setLabel(current?.label ?? "");
   }
   return <details className="board-settings" id="calendar-availability" ref={details}>
-    <summary>Calendar availability <span>{enabled ? "Holiday preset on" : "Holiday preset off"} · {overrides.length} week overrides</span></summary>
+    <summary>Weekly availability and holidays <span>{enabled ? "Holiday preset on" : "Holiday preset off"} · {overrides.length} week overrides</span></summary>
     <label className="board-check holiday-preset"><input type="checkbox" checked={enabled} disabled={busy}
       onChange={(event) => void onSave({ type: "holidayPreset", enabled: event.target.checked }, "Holiday availability updated.")} />
       US Thanksgiving + Christmas: 3 holiday weeks at 50%

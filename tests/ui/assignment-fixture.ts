@@ -9,9 +9,11 @@ import { saveExtraScope, saveScopingWindow } from "../../src/lib/scope-store";
 import { createScenario, listScenarios, saveScenario, activateScenario, publishScenario, compareScenarios } from "../../src/lib/scenarios";
 import { HttpError } from "../../src/lib/security";
 import { saveHolidayPreset, saveWeeklyAvailability } from "../../src/lib/weekly-capacity-store";
+import { addStream, listStreams } from "../../src/lib/streams";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
-  setDemand: (projectId: string, points: number) => Promise<void> };
+  setDemand: (projectId: string, points: number | null) => Promise<void>; requireProject: (projectId: string) => Promise<void>; pauseUnassigned: () => Promise<void>;
+  configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void> };
 export const test = base.extend<{ assignment: Controls }>({
   assignment: async ({ page }, use) => {
     const browserErrors: string[] = [];
@@ -69,7 +71,19 @@ export const test = base.extend<{ assignment: Controls }>({
             json = { connection: { viewer_name: "Owner", team_id: "team", team_name: "Product", last_imported_at: seenAt.toISOString() },
               projects: current.packages.map((item) => ({ ...item, id: item.project_id, package_id: item.id, description: "", issue_count: 1,
                 unestimated_open_issues: item.project_id === "d" ? 1 : 0, estimated_open_points: 5 })), outcomes: current.outcomes, links: current.links, streams: current.streams };
-          } else if (path === "/api/streams") json = { streams: (await board()).streams.map((stream) => ({ ...stream, active: true, package_count: 1 })), activeScenario: null, events: [] };
+          } else if (path === "/api/streams") json = request.method() === "POST" ? await addStream(body, client) : await listStreams(client);
+          else if (path.startsWith("/api/outcomes/")) {
+            const id = path.split("/")[3];
+            if (path.endsWith("/links") && request.method() === "PUT") {
+              await database.query("DELETE FROM outcome_project_link WHERE outcome_id=$1", [id]);
+              for (const link of body.links) await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES($1,$2,$3)", [id, link.projectId, link.requirement]);
+            } else if (request.method() === "PUT") {
+              await database.query("UPDATE outcome SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6 WHERE id=$1",
+                [id, body.title, body.description, body.owner, body.successSignal, body.neededBy || null]);
+            } else if (request.method() === "DELETE") await database.query("DELETE FROM outcome WHERE id=$1", [id]);
+            else throw new Error(`Unmocked outcome route ${path}`);
+            json = { saved: true };
+          }
           else if (path === "/api/scenarios/compare") {
             const parse = (value: string) => { const [kind, id] = value.split(":"); return { kind: kind as "draft" | "revision", id }; };
             json = await compareScenarios(parse(url.searchParams.get("left")!), parse(url.searchParams.get("right")!), client);
@@ -88,7 +102,17 @@ export const test = base.extend<{ assignment: Controls }>({
       });
       await use({ board, time: (value) => { evaluatedAt = new Date(value); }, invalidateNextMove: () => { invalidateNextMove = true; },
         addSourceConflict: async () => { await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','linear')"); },
-        setDemand: async (projectId, points) => { await database.query("UPDATE linear_issue_cache SET estimate=$2 WHERE project_id=$1", [projectId, points]); } });
+        setDemand: async (projectId, points) => { await database.query("UPDATE linear_issue_cache SET estimate=$2 WHERE project_id=$1", [projectId, points]); },
+        requireProject: async (projectId) => {
+          await database.query("DELETE FROM outcome_project_link");
+          await database.query("INSERT INTO outcome_project_link(outcome_id,project_id) VALUES('00000000-0000-4000-8000-000000000001',$1)", [projectId]);
+        },
+        pauseUnassigned: () => placeProjects(client, [{ packageId: "linear:d", streamId: null, selected: false }]),
+        configureCycles: async (options) => {
+          if (options.visibleOffset !== undefined) await database.query("UPDATE linear_cycle_cache SET name='Cycle ' || (number+$1)::text", [options.visibleOffset]);
+          if (options.importedCount !== undefined) await database.query("UPDATE linear_cycle_cache SET active=(number<=$1)", [options.importedCount]);
+          if (options.enabled !== undefined) await database.query("UPDATE linear_connection SET cycles_enabled=$1", [options.enabled]);
+        } });
       expect(browserErrors).toEqual([]);
     } finally { await database.close(); }
   },

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { linearCycleLabel } from "@/lib/cycles";
 
-export type CalendarCycle = { id: string; number: number; name: string | null; startsAt: string; endsAt: string; selectable: boolean; adjusted: boolean };
+export type CalendarCycle = { id: string; number: number; name: string | null; startsAt: string; endsAt: string; projected?: boolean; selectable: boolean; adjusted: boolean };
 
 const dateOnly = (value: string, timezone: string) => new Intl.DateTimeFormat("en-CA", {
   timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
@@ -38,10 +38,10 @@ export default function CycleCalendar({ cycles, timezone, sourceAt, selectedIds,
         const day = isoDay(new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), index - offset + 1)));
         const cycle = dated.find((item) => item.start <= day && day <= item.end);
         const inMonth = day.slice(0, 7) === key;
-        const className = ["calendar-day", !inMonth && "outside", !cycle && "no-cycle", cycle && !cycle.selectable && "current-cycle", cycle?.adjusted && "adjusted", cycle && selected.has(cycle.id) && "chosen"].filter(Boolean).join(" ");
-        return <button type="button" key={day} className={className} disabled={!inMonth || !cycle?.selectable} aria-pressed={!!cycle && selected.has(cycle.id)} aria-label={`${day}${cycle ? `, Linear ${linearCycleLabel(cycle)}` : ", no Linear cycle"}`} title={cycle ? `${linearCycleLabel(cycle)}: ${cycle.start} – ${cycle.end}${cycle.adjusted ? " · adjusted" : ""}` : "No Linear cycle"} onClick={() => cycle && onToggle(cycle.id)}><span>{Number(day.slice(8))}</span>{cycle && <small>{linearCycleLabel(cycle)}</small>}</button>;
+        const className = ["calendar-day", !inMonth && "outside", !cycle && "no-cycle", cycle?.projected && "projected-cycle", cycle && !cycle.selectable && !cycle.projected && "current-cycle", cycle?.adjusted && "adjusted", cycle && selected.has(cycle.id) && "chosen"].filter(Boolean).join(" ");
+        return <button type="button" key={day} className={className} disabled={!inMonth || !cycle?.selectable} aria-pressed={!!cycle && selected.has(cycle.id)} aria-label={`${day}${cycle ? `, ${cycle.projected ? "Projected" : "Linear"} ${linearCycleLabel(cycle)}` : ", no cycle"}`} title={cycle ? `${linearCycleLabel(cycle)}${cycle.projected ? " (projected)" : ""}: ${cycle.start} – ${cycle.end}${cycle.adjusted ? " · adjusted" : ""}` : "No cycle"} onClick={() => cycle && onToggle(cycle.id)}><span>{Number(day.slice(8))}</span>{cycle && <small>{linearCycleLabel(cycle)}{cycle.projected ? " *" : ""}</small>}</button>;
       })}</div></div>;
     })}</div>
-    <p className="meta">Select any date in an upcoming cycle. Dates without a Linear cycle cannot receive a planning exception; the current partial cycle is shown for context.</p>
+    <p className="meta">Select a date in an imported upcoming cycle for a cycle-wide override. * Projected cycles are view-only assumptions from Linear's cadence; use Weekly availability and holidays to adjust those dates. The current partial cycle is shown for context.</p>
   </div>;
 }

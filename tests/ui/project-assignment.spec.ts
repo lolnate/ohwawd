@@ -97,7 +97,7 @@ test("edit one extra budget and refresh scope attention across midnight", async 
 });
 });
 
-test("board changes can be saved, compared and published as v2 scenarios", async ({ page, assignment }) => {
+test("board changes can be saved, compared and published as v3 scenarios", async ({ page, assignment }) => {
   await page.goto("/");
   const discovery = page.locator(project("d"));
   await discovery.getByText("Plan this project", { exact: true }).click();
@@ -123,7 +123,7 @@ test("board changes can be saved, compared and published as v2 scenarios", async
   await page.getByRole("combobox", { name: "From", exact: true }).selectOption({ label: "Launch sequence r1" });
   await page.getByRole("combobox", { name: "To", exact: true }).selectOption({ label: "Launch sequence r2" });
   await page.getByRole("button", { name: "Compare", exact: true }).click();
-  await expect(page.getByText(/Calculation: v2 → v2/)).toBeVisible();
+  await expect(page.getByText(/Calculation: v3 → v3/)).toBeVisible();
   await expect(page.locator(".comparison p").filter({ hasText: /Web experience.*position 2.*position 1/ })).toBeVisible();
-  expect((await assignment.board()).calculationVersion).toBe("v2");
+  expect((await assignment.board()).calculationVersion).toBe("v3");
 });

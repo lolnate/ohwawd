@@ -7,12 +7,12 @@ type LegacyAllowance = { package_id: string; kind: string; points: number; issue
 
 /** Adapt planning inputs only; never recompute or write a published revision's result. */
 export function adaptLegacyPlanning(original: BoardSnapshot): BoardSnapshot {
-  if (original.calculationVersion === "v2" && original.extraScopes) return original;
+  if (original.calculationVersion === "v3" && original.extraScopes) return original;
   const snapshot = structuredClone(original);
   snapshot.weeklyAdjustments ??= [];
   snapshot.holidayWeeks ??= [];
   snapshot.capacity.holidays_enabled ??= false;
-  if (original.extraScopes) { snapshot.calculationVersion = "v2"; return snapshot; }
+  if (original.extraScopes) { snapshot.calculationVersion = "v3"; return snapshot; }
   const legacy = original as BoardSnapshot & { allowances?: LegacyAllowance[] };
   const edges = snapshot.dependencies.map((edge) => ({ predecessorId: edge.predecessor_id, successorId: edge.successor_id, waived: edge.waived }));
   const queues: QueuePackage[] = snapshot.packages.map((item) => ({ id: item.id, name: item.name, streamId: item.stream_id, selected: item.selected,
@@ -34,7 +34,7 @@ export function adaptLegacyPlanning(original: BoardSnapshot): BoardSnapshot {
   snapshot.capacity.scoping_lead_days ??= 14;
   snapshot.evaluatedAt ??= snapshot.forecast.sourceAt;
   snapshot.scoping ??= [];
-  snapshot.calculationVersion = "v2";
+  snapshot.calculationVersion = "v3";
   for (const item of snapshot.packages) {
     item.linear_priority ??= null;
     if (!item.selected) { item.stream_id = null; item.sequence_position = null; }

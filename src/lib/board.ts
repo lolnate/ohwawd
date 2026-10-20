@@ -5,6 +5,8 @@ import { placeProjects, sequencingState, sequenceToken } from "./sequence-store"
 import { orderConflicts } from "./sequencing";
 import { scopeChangeSummary, scopeReadiness, teamLocalDate, type ExtraScope } from "./project-scope";
 import { addCalendarDays, holidayWeeksForRange, mondayOf, type WeeklyAvailability } from "./planning-calendar";
+import { projectCycleCalendar } from "./cycle-projection";
+import type { PlanningCycle } from "./cycles";
 
 export async function assignPackagesToStream(client: Pick<PoolClient, "query">, streamId: string, packageIds: string[]): Promise<void> {
   await placeProjects(client, packageIds.map((packageId) => ({ packageId, streamId, selected: true })));
@@ -46,8 +48,15 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
   const sequencing = await sequencingState(database);
   const sequenceConflicts = orderConflicts(sequencing);
   const timezone = connection.rows[0]?.team_timezone ?? "America/New_York";
-  const calendarStart = mondayOf(teamLocalDate(future[0]?.starts_at ?? evaluationTime, timezone));
-  const calendarEnd = [addCalendarDays(calendarStart, 26 * 7), teamLocalDate(future.at(-1)?.ends_at ?? evaluationTime, timezone)].sort().at(-1)!;
+  const importedCycles: PlanningCycle[] = linearCycles.rows.map((row) => ({ id: row.linear_id, number: row.number, name: row.name,
+    startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString(), completedAt: row.completed_at?.toISOString() ?? null }));
+  const settings = connection.rows[0];
+  const calendar = projectCycleCalendar({ cycles: importedCycles, anchorAt: cycleAnchorAt, horizon: capacity.rows[0]?.horizon ?? 26,
+    cadence: { teamId: settings?.team_id ?? "workspace", enabled: settings?.cycles_enabled ?? false, durationWeeks: settings?.cycle_duration ?? null,
+      startDay: settings?.cycle_start_day ?? null, cooldownWeeks: settings?.cycle_cooldown_time ?? null, timezone } });
+  const planningFuture = calendar.cycles.filter((cycle) => !cycle.completedAt && Date.parse(cycle.startsAt) > cycleAnchorTime);
+  const calendarStart = mondayOf(teamLocalDate(planningFuture[0]?.startsAt ?? evaluationTime, timezone));
+  const calendarEnd = [addCalendarDays(calendarStart, 26 * 7), teamLocalDate(planningFuture.at(-1)?.endsAt ?? evaluationTime, timezone)].sort().at(-1)!;
   const holidaysEnabled = capacity.rows[0]?.holidays_enabled ?? true;
   const holidayWeeks = holidaysEnabled ? holidayWeeksForRange(calendarStart, calendarEnd) : [];
   const input: ForecastInput = {
@@ -65,8 +74,7 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
     dependencies: dependencies.rows.map((row) => ({ predecessorId: row.predecessor_id, successorId: row.successor_id, source: row.source, waived: row.waived })),
     outcomes: outcomes.rows.map((row) => ({ id: row.id, title: row.title, neededBy: row.needed_by, links: links.rows.filter((link) => link.outcome_id === row.id).map((link) => ({ projectId: link.project_id, requirement: link.requirement })) })),
     baseline: capacity.rows[0]?.baseline ?? observedBaseline, reserve: capacity.rows[0]?.reserve ?? 0,
-    linearCycles: linearCycles.rows.map((row) => ({ id: row.linear_id, number: row.number, name: row.name,
-      startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString() })),
+    linearCycles: calendar.cycles,
     horizon: capacity.rows[0]?.horizon ?? 26, sourceAt, cycleAnchorAt,
     timezone,
     adjustments: adjustments.rows.map((row) => ({ cycleId: row.linear_cycle_id, availability: row.availability, reserve: row.reserve })),
@@ -83,11 +91,12 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
       extra: !!extra, startDate, leadDays, evaluatedAt, timezone: input.timezone,
       review: extra ? scopeChangeSummary(extra, issues.rows.filter((issue) => issue.project_id === row.project_id)) : null });
   });
-  return { calculationVersion: "v2", evaluatedAt, scoping, extraScopes: extraScopes.rows, weeklyAdjustments: weeklyAdjustments.rows, holidayWeeks,
+  return { calculationVersion: "v3", evaluatedAt, scoping, extraScopes: extraScopes.rows, weeklyAdjustments: weeklyAdjustments.rows, holidayWeeks,
     connection: connection.rows[0] ?? null, packages: packages.rows, streams: streams.rows, links: links.rows, outcomes: outcomes.rows,
     capacity: capacity.rows[0] ?? { cycle_anchor: null, cycle_days: 14, baseline: null, baseline_reason: "", reserve: 0, horizon: 26, scoping_lead_days: 14, holidays_enabled: true },
     observations: comparable, observedBaseline, effectiveBaseline: input.baseline,
-    linearCycles: input.linearCycles, currentCycleId: currentCycle?.linear_id ?? null, cycleAnchorAt, futureCycleIds: future.map((row) => row.linear_id),
+    linearCycles: importedCycles, planningCycles: calendar.cycles, calendarProjection: calendar.projection,
+    currentCycleId: currentCycle?.linear_id ?? null, cycleAnchorAt, futureCycleIds: future.map((row) => row.linear_id),
     adjustments: adjustments.rows, legacyAdjustments: legacyAdjustments.rows,
     dependencies: dependencies.rows, issues: issues.rows, reconciliationWarnings, timezone: input.timezone,
     sequencing, sequenceToken: sequenceToken(sequencing), sequenceConflicts, forecast: result };

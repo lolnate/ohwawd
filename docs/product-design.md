@@ -1,14 +1,18 @@
 # Oh, WAWD! — initial product and technical design
 
-Status: Sequencing Board assignment and month/week timeline revised through calculation v2, 20 October 2026.
+Status: Sequencing Board assignment and month/week timeline revised through calculation v3, 20 October 2026.
 
 The exact first-proof calculation and state rules are in [scheduling-contract.md](scheduling-contract.md). This document describes the product direction and staged delivery; the contract governs behavior when the two differ.
 
-## Current month/week timeline (v2)
+## Current month/week timeline (v3)
 
-Each stream's schedule uses month headers, compact Monday-start weeks, sticky project names, and secondary Linear cycle labels. A desktop can view roughly a quarter at once and scroll farther ahead. Project bars use imported cycle boundaries; unfinished work indicates continuation, blockers are named in the row label, and dates beyond available Linear cycles are visibly unsupported rather than invented.
+View organization: the Board puts its configurable stream lanes directly after Planning attention, followed immediately by Manage streams. Needs assignment and the planning settings follow those primary lanes. Outcome delivery forecasts live at the top of the Outcomes tab alongside the outcome catalog, editing, and project linking. Blocker actions navigate between delivery forecasts and the relevant project controls on the Board, using the same loaded forecast data.
 
-Yellow week bands show actual reduced availability. The default US holiday preset uses 50% for Thanksgiving week, Christmas week and the following week. Calendar availability controls allow disabling the preset or adding/removing a week-specific override; selecting a week header opens its editor. A 100% override restores an individual holiday week. Weekly availability replaces cycle availability on overlapping working dates, avoiding double reductions, and all assumptions are saved with v2 scenarios.
+Each stream's schedule uses month headers, compact Monday-start weeks, sticky project names, and secondary Linear cycle labels. Labels follow the visible Linear name (Cycle 46 / C46), not a differing internal ordinal. A desktop can view roughly a quarter at once and scroll farther ahead. Beyond imported dates, the calendar follows Linear's configured duration, start weekday, cooldown and timezone, retaining local boundary times across DST. Projected cycle labels have an asterisk; dates using projected capacity are provisional. Source refreshes replace assumptions with actual cycles. Unfinished work indicates continuation, blockers are named in the row label, and cooldowns or unavailable cadence remain visibly unsupported.
+
+Yellow week bands show actual reduced availability. The default US holiday preset uses 50% for Thanksgiving week, Christmas week and the following week. Calendar availability controls allow disabling the preset or adding/removing a week-specific override; selecting a week header opens its editor. A 100% override restores an individual holiday week. Weekly availability replaces cycle availability on overlapping working dates, avoiding double reductions, and applies equally to projected cycles. All assumptions are saved with v3 scenarios; earlier published revisions remain frozen.
+
+The controls are labeled **Weekly availability and holidays** for date-based week changes, and **Linear cycles and cycle-wide overrides** for imported cycle dates plus availability/reserve overrides covering entire cycles. The cycle panel links to the weekly editor and explains that weekly availability takes precedence on overlapping dates.
 
 ## Current assignment and scope workflow (introduced in v1)
 

@@ -52,7 +52,7 @@ export default function ProjectPlanCard({ item, streams, sequencing, projection,
         <button type="button" className="quiet" aria-label={`Move ${item.name} down`} disabled={busy || !canDown} onClick={() => void onMove(down)}>↓</button>
       </div>}
     </div>
-    <p className="meta">{projection ? `${fmt(Math.max(0, projection.demand - (extra?.points ?? 0)))} estimated points${extra ? ` + ${fmt(extra.points)} extra` : ""}` : ""}{projection?.provisional ? " · provisional" : ""}{unknown.length ? ` · ${unknown.length} unestimated issues` : ""}</p>
+    <p className="meta">{projection ? `${fmt(Math.max(0, projection.demand - (extra?.points ?? 0)))} estimated points${extra ? ` + ${fmt(extra.points)} extra` : ""}` : ""}{projection?.provisional ? " · provisional" : ""}{projection?.calendarProjected ? " · projected cycle dates" : ""}{unknown.length ? ` · ${unknown.length} unestimated issues` : ""}</p>
     {projection?.finish !== null && projection?.finish !== undefined
       ? <p className="forecast-success">Forecast: {cycleText(projection.finish)}{projection.finish ? " end" : ""} · starts {projection.start === null ? "before next cycle" : cycleText(projection.start)}</p>
       : <div className="blocker-line"><p className="warning">{projection?.reason || "No finite date yet."}</p><button className="text-button" onClick={resolution.run}>{resolution.label}</button></div>}

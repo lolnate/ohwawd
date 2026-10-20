@@ -1,11 +1,11 @@
 import { teamLocalDate } from "./project-scope";
-import { linearCycleLabel } from "./cycles";
+import { linearCycleLabel, type PlanningCycle } from "./cycles";
 
 export type WeeklyAvailability = { weekStart: string; availability: number; label: string };
-export type CalendarCycle = { id: string; number: number; name: string | null; startsAt: string; endsAt: string };
+export type CalendarCycle = PlanningCycle;
 export type CalendarAdjustment = { cycleId: string; availability: number };
 export type PlanningWeek = { start: string; end: string; month: string; monthLabel: string; cycleLabels: string[]; cycleIds: string[];
-  coverage: "full" | "partial" | "none"; availability: number; baseAvailability: number; label: string; overridden: boolean };
+  coverage: "full" | "partial" | "none"; projected: boolean; availability: number; baseAvailability: number; label: string; overridden: boolean };
 
 const dayMilliseconds = 86_400_000;
 export function addCalendarDays(date: string, days: number): string {
@@ -74,6 +74,7 @@ export function planningWeeks(input: { cycles: CalendarCycle[]; timezone: string
     return { start: date, end, month: date.slice(0, 7),
       monthLabel: new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", year: "numeric" }).format(new Date(`${date}T12:00:00Z`)),
       cycleLabels: overlapping.map((range) => linearCycleLabel(range.cycle)), cycleIds: overlapping.map((range) => range.cycle.id),
+      projected: overlapping.some((range) => range.cycle.projected === true),
       coverage: covered === 7 ? "full" : covered ? "partial" : "none", availability: explicit?.availability ?? holiday?.availability ?? fallback, baseAvailability: fallback,
       label: explicit?.label || (explicit ? "Week override" : holiday?.label || (fallback < 1 ? "Cycle availability" : "Normal availability")), overridden: !!explicit };
   });

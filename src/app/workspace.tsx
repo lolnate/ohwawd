@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import Board from "./board";
+import Board, { type BoardState } from "./board";
 import { apiRequest } from "./client-api";
 import ScenarioPanel from "./scenario-panel";
 import StatusFilter from "./status-filter";
 import OutcomeProjectPicker from "./outcome-project-picker";
+import OutcomeDelivery from "./outcome-delivery";
 
 type Team = { id: string; name: string; key: string };
 type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
@@ -36,6 +37,9 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State | null>(null);
   const [boardVersion, setBoardVersion] = useState(0);
+  const [deliveryBoard, setDeliveryBoard] = useState<BoardState | null>(null);
+  const [deliveryError, setDeliveryError] = useState("");
+  const [boardFocus, setBoardFocus] = useState<{ id: string; request: number } | null>(null);
   const [key, setKey] = useState("");
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamId, setTeamId] = useState("");
@@ -56,6 +60,9 @@ export default function App() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [syncReport, setSyncReport] = useState<ImportResult["report"] | null>(null);
   const reloadGeneration = useRef(0);
+  const handleBoardStateChange = useCallback((board: BoardState | null, error: string) => {
+    setDeliveryBoard(board); setDeliveryError(error);
+  }, []);
 
   const reload = useCallback(async () => {
     const generation = ++reloadGeneration.current;
@@ -116,6 +123,37 @@ export default function App() {
 
   function startLinking(outcome: Outcome) {
     setEditingOutcome(null); setEditing(outcome.id);
+  }
+
+  function openOutcomeDelivery() {
+    setActiveView("outcomes");
+    window.requestAnimationFrame(() => {
+      document.getElementById("outcome-delivery")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      document.getElementById("outcome-delivery-title")?.focus();
+    });
+  }
+
+  function resolveOutcomeProject(id: string) {
+    setActiveView("board");
+    setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
+  }
+
+  function startEditingOutcome(outcome: Outcome) {
+    setEditing(null); setEditingOutcome({ ...outcome });
+    window.requestAnimationFrame(() => {
+      const card = document.getElementById(`outcome-${outcome.id}`);
+      card?.scrollIntoView({ block: "center", behavior: "smooth" });
+      card?.querySelector<HTMLInputElement>("input")?.focus();
+    });
+  }
+
+  function startAddingOutcome() {
+    setShowCreateOutcome(true);
+    window.requestAnimationFrame(() => {
+      const form = document.querySelector(".create-outcome");
+      form?.scrollIntoView({ block: "center", behavior: "smooth" });
+      form?.querySelector<HTMLInputElement>("input")?.focus();
+    });
   }
 
   function saveOutcome(event: FormEvent) {
@@ -216,17 +254,20 @@ export default function App() {
       {!visibleProjects.length && <p className="empty">{state?.projects.length ? "No projects match these filters." : "Projects will appear here after import."}</p>}</div>
     </section></section>
     <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} onOpenBoard={() => setActiveView("board")} refreshKey={boardVersion} /></section>
-    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")} onAddOutcome={() => { setShowCreateOutcome(true); setActiveView("outcomes"); }} onManageOutcome={(id) => { const outcome = state?.outcomes.find((item) => item.id === id); if (outcome) startLinking(outcome); setActiveView("outcomes"); }} /></section>
-    <section className="workspace-view" hidden={activeView !== "outcomes"}><section className="panel outcomes-panel"><div className="section-head"><div><h2>Outcome catalog</h2><p>Describe the change you need, even before there is a Linear project.</p></div><span className="count">{state?.outcomes.length ?? 0}</span></div>
+    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")}
+      onOpenOutcomes={openOutcomeDelivery} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
+    <section className="workspace-view" hidden={activeView !== "outcomes"}>
+      <OutcomeDelivery board={deliveryBoard} error={deliveryError} busy={busy} onAdd={startAddingOutcome} onEdit={startEditingOutcome} onManageLinks={startLinking} onDelete={deleteOutcome} onResolveProject={resolveOutcomeProject} />
+      <section className="panel outcomes-panel" id="outcome-catalog"><div className="section-head"><div><h2>Outcome catalog</h2><p>Describe the change you need, even before there is a Linear project.</p></div><span className="count">{state?.outcomes.length ?? 0}</span></div>
       <details className="create-outcome" open={showCreateOutcome} onToggle={(event) => setShowCreateOutcome(event.currentTarget.open)}><summary>Add outcome</summary><form className="outcome-form" onSubmit={createOutcome}><label>Outcome title<input value={newOutcome.title} onChange={(event) => setNewOutcome({ ...newOutcome, title: event.target.value })} maxLength={200} required placeholder="Customers can complete onboarding" /></label><label>Success signal<input value={newOutcome.successSignal} onChange={(event) => setNewOutcome({ ...newOutcome, successSignal: event.target.value })} placeholder="e.g. 80% finish without support" /></label><div className="form-row"><label>Owner<input value={newOutcome.owner} onChange={(event) => setNewOutcome({ ...newOutcome, owner: event.target.value })} /></label><label>Needed by<input type="date" value={newOutcome.neededBy} onChange={(event) => setNewOutcome({ ...newOutcome, neededBy: event.target.value })} /></label></div><label>Notes<textarea value={newOutcome.description} onChange={(event) => setNewOutcome({ ...newOutcome, description: event.target.value })} rows={2} /></label><button disabled={busy}>Create outcome</button></form></details>
-      <div className="card-list">{state?.outcomes.map((outcome) => { const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card" key={outcome.id}>
+      <div className="card-list">{state?.outcomes.map((outcome) => { const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card" id={`outcome-${outcome.id}`} key={outcome.id}>
         {editingOutcome?.id === outcome.id ? <form className="outcome-form" onSubmit={saveOutcome}>
           <label>Outcome title<input value={editingOutcome.title} onChange={(event) => setEditingOutcome({ ...editingOutcome, title: event.target.value })} maxLength={200} required /></label>
           <label>Success signal<input value={editingOutcome.success_signal} onChange={(event) => setEditingOutcome({ ...editingOutcome, success_signal: event.target.value })} /></label>
           <div className="form-row"><label>Owner<input value={editingOutcome.owner} onChange={(event) => setEditingOutcome({ ...editingOutcome, owner: event.target.value })} /></label><label>Needed by<input type="date" value={editingOutcome.needed_by?.slice(0, 10) || ""} onChange={(event) => setEditingOutcome({ ...editingOutcome, needed_by: event.target.value || null })} /></label></div>
           <label>Notes<textarea value={editingOutcome.description} onChange={(event) => setEditingOutcome({ ...editingOutcome, description: event.target.value })} rows={2} /></label>
           <div className="actions"><button disabled={busy}>Save outcome</button><button type="button" className="quiet" disabled={busy} onClick={() => setEditingOutcome(null)}>Cancel</button></div>
-        </form> : <><div className="card-title"><h3>{outcome.title}</h3><span className={minimum.length ? "tag" : "tag unplanned"}>{minimum.length ? `${minimum.length} required` : "Unplanned"}</span></div>{outcome.description && <p>{outcome.description}</p>}<p className="meta">{outcome.owner || "No owner"}{outcome.needed_by ? ` · Needed by ${outcome.needed_by.slice(0, 10)}` : " · No target"}{outcome.success_signal ? ` · ${outcome.success_signal}` : ""}</p>{links.length > 0 && <ul className="linked">{links.map((link) => <li key={link.project_id}>{state.projects.find((project) => project.id === link.project_id)?.name || "Unavailable project"} <small>· {link.requirement}</small></li>)}</ul>}<div className="actions"><button className="text-button" disabled={busy} onClick={() => { setEditing(null); setEditingOutcome({ ...outcome }); }}>Edit outcome</button><button className="text-button" disabled={busy} onClick={() => deleteOutcome(outcome)}>Delete</button></div></>}
+        </form> : <><div className="card-title"><h3>{outcome.title}</h3><span className={minimum.length ? "tag" : "tag unplanned"}>{minimum.length ? `${minimum.length} required` : "Unplanned"}</span></div>{outcome.description && <p>{outcome.description}</p>}<p className="meta">{outcome.owner || "No owner"}{outcome.needed_by ? ` · Needed by ${outcome.needed_by.slice(0, 10)}` : " · No target"}{outcome.success_signal ? ` · ${outcome.success_signal}` : ""}</p>{links.length > 0 && <ul className="linked">{links.map((link) => <li key={link.project_id}>{state.projects.find((project) => project.id === link.project_id)?.name || "Unavailable project"} <small>· {link.requirement}</small></li>)}</ul>}<div className="actions"><button className="text-button" disabled={busy} onClick={() => startEditingOutcome(outcome)}>Edit outcome</button><button className="text-button" disabled={busy} onClick={() => deleteOutcome(outcome)}>Delete</button></div></>}
       <button className="text-button" disabled={busy} onClick={() => startLinking(outcome)}>Manage project links →</button></article>; })}{!state?.outcomes.length && <p className="empty">No outcomes yet. Add one to start the plan.</p>}</div>
       {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
     </section></section>

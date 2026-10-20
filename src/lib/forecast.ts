@@ -1,4 +1,4 @@
-import { linearCycleLabel } from "./cycles";
+import { linearCycleLabel, type PlanningCycle } from "./cycles";
 import { orderConflicts } from "./sequencing";
 import { cycleAvailability, holidayWeeksForRange, cycleLocalDates, type WeeklyAvailability } from "./planning-calendar";
 
@@ -11,7 +11,7 @@ export type ForecastPackage = {
 export type ForecastStream = { id: string; name: string; allocation: number; wip: number };
 export type ForecastDependency = { predecessorId: string; successorId: string; source: "local" | "linear"; waived?: boolean };
 export type ForecastOutcome = { id: string; title: string; neededBy: string | null; links: { projectId: string; requirement: "minimum" | "optional" }[] };
-export type LinearForecastCycle = { id: string; number: number; name: string | null; startsAt: string; endsAt: string };
+export type LinearForecastCycle = PlanningCycle;
 export type ForecastInput = {
   packages: ForecastPackage[]; streams: ForecastStream[]; dependencies: ForecastDependency[];
   outcomes: ForecastOutcome[]; baseline: number | null; reserve: number; linearCycles: LinearForecastCycle[];
@@ -19,9 +19,9 @@ export type ForecastInput = {
   adjustments?: { cycleId: string; availability: number; reserve: number | null }[];
   weeklyAdjustments?: WeeklyAvailability[]; holidaysEnabled?: boolean; holidayWeeks?: WeeklyAvailability[];
 };
-export type PackageForecast = { id: string; demand: number; provisional: boolean; start: number | null; finish: number | null; reason: string | null; consumed: number[] };
-export type CycleForecast = { id: string; number: number; name: string | null; index: number; start: string; end: string; available: number; availability?: number; streams: { id: string; budget: number; used: number; idle: number; active: string[] }[] };
-export type OutcomeForecast = { id: string; status: "unplanned" | "setup_required" | "blocked" | "beyond_horizon" | "provisional" | "forecast"; finish: number | null; endDate: string | null; target: "no_target" | "met" | "missed" | "unknown"; gapCycles: number | null; reasons: string[]; requiredIds: string[] };
+export type PackageForecast = { id: string; demand: number; provisional: boolean; calendarProjected?: boolean; start: number | null; finish: number | null; reason: string | null; consumed: number[] };
+export type CycleForecast = { id: string; number: number; name: string | null; projected?: boolean; index: number; start: string; end: string; available: number; availability?: number; streams: { id: string; budget: number; used: number; idle: number; active: string[] }[] };
+export type OutcomeForecast = { id: string; status: "unplanned" | "setup_required" | "blocked" | "beyond_horizon" | "provisional" | "forecast"; calendarProjected?: boolean; finish: number | null; endDate: string | null; target: "no_target" | "met" | "missed" | "unknown"; gapCycles: number | null; reasons: string[]; requiredIds: string[] };
 export type ForecastResult = { ready: boolean; setup: string[]; cycles: CycleForecast[]; packages: PackageForecast[]; outcomes: OutcomeForecast[]; sourceAt: string; selectedKnown: number; selectedUnknown: number; unallocated: number; errors: string[] };
 
 const milli = (value: number) => Math.round(value * 1000);
@@ -57,7 +57,7 @@ export function forecast(input: ForecastInput): ForecastResult {
   const setup: string[] = [];
   if (input.baseline === null || !Number.isFinite(input.baseline) || input.baseline < 0) setup.push("Set a provisional baseline in points per cycle.");
   const cycleAnchorAt = input.cycleAnchorAt ?? input.sourceAt;
-  const futureCycles = input.linearCycles.filter((cycle) => new Date(cycle.startsAt).getTime() > new Date(cycleAnchorAt).getTime())
+  const futureCycles = input.linearCycles.filter((cycle) => !cycle.completedAt && new Date(cycle.startsAt).getTime() > new Date(cycleAnchorAt).getTime())
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)).slice(0, input.horizon);
   if (!futureCycles.length) setup.push("No upcoming Linear cycles were imported for this team. Configure upcoming cycles in Linear, then import again.");
   const allocated = input.streams.reduce((sum, stream) => sum + stream.allocation, 0);
@@ -106,7 +106,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     const adjustment = input.adjustments?.find((item) => item.cycleId === linearCycle.id);
     const availability = cycleAvailability(linearCycle, input.timezone, adjustment?.availability ?? 1, input.weeklyAdjustments ?? [], holidayWeeks);
     const available = Math.max(0, milli((input.baseline || 0) * availability - (adjustment?.reserve ?? input.reserve)));
-    const row: CycleForecast = { id: linearCycle.id, number: linearCycle.number, name: linearCycle.name, index: cycle,
+    const row: CycleForecast = { id: linearCycle.id, number: linearCycle.number, name: linearCycle.name, projected: linearCycle.projected ?? false, index: cycle,
       start: localDate(linearCycle.startsAt, input.timezone), end: localDate(new Date(Date.parse(linearCycle.endsAt) - 1).toISOString(), input.timezone),
       available: points(available), availability, streams: [] };
     for (const stream of [...input.streams].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -117,6 +117,10 @@ export function forecast(input: ForecastInput): ForecastResult {
         input.dependencies.filter((edge) => !edge.waived && edge.successorId === item.id).every((edge) => { const prior = packages.get(edge.predecessorId); return prior && prior.finish !== null && prior.finish < cycle; }));
       eligible.sort((a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
       const active = [...carried, ...eligible.slice(0, slots)];
+      if (linearCycle.projected) for (const item of active) {
+        packages.get(item.id)!.calendarProjected = true;
+        packages.get(item.id)!.provisional = true;
+      }
       for (const item of active) if (packages.get(item.id)!.start === null) packages.get(item.id)!.start = cycle;
       let left = budget;
       let unfinished = active.filter((item) => remaining.get(item.id)! > 0);
@@ -163,7 +167,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     let target: OutcomeForecast["target"] = !outcome.neededBy ? "no_target" : endDate ? endDate <= outcome.neededBy ? "met" : "missed" : "unknown";
     if (!ready && outcome.neededBy) target = "unknown";
     const gapCycles = target === "missed" && finish !== null && outcome.neededBy ? cycles.filter((row) => row.end > outcome.neededBy! && row.index <= finish).length : null;
-    return { id: outcome.id, status, finish, endDate, target, gapCycles, reasons: !ready && direct ? [...setup, ...errors, ...reasons] : reasons, requiredIds: [...required] };
+    return { id: outcome.id, status, calendarProjected: [...required].some((id) => packages.get(id)?.calendarProjected), finish, endDate, target, gapCycles, reasons: !ready && direct ? [...setup, ...errors, ...reasons] : reasons, requiredIds: [...required] };
   });
   return { ready, setup, cycles, packages: [...packages.values()], outcomes, sourceAt: input.sourceAt, selectedKnown, selectedUnknown, unallocated: Math.max(0, 1 - allocated), errors };
 }

@@ -16,7 +16,7 @@ type Comparison = {
   packages: Change<{ selected: boolean; streamId: string | null; sequence: number | null; pauseReason: string }>[];
   streams: Change<{ name: string; position: number; allocation: number; wip: number }>[];
   streamLifecycle: Change<{ name: string; position: number; allocation: number; wip: number }>[];
-  outcomes: Change<{ status: string; endDate: string | null; target: string; gapCycles: number | null; reasons: string[]; title: string | null; description: string; owner: string; successSignal: string; neededBy: string | null }>[];
+  outcomes: Change<{ status: string; calendarProjected?: boolean; endDate: string | null; target: string; gapCycles: number | null; reasons: string[]; title: string | null; description: string; owner: string; successSignal: string; neededBy: string | null }>[];
   adjustments: AssumptionChange[]; extraScopes: AssumptionChange[]; priorities: AssumptionChange[]; dependencies: AssumptionChange[]; links: AssumptionChange[];
   linearCycles: AssumptionChange[]; weeklyAvailability: AssumptionChange[];
 };
@@ -139,7 +139,7 @@ export default function ScenarioPanel({ onActivated, onOpenBoard, refreshKey }: 
         {comparison.streams.map((change) => <p key={change.id}><strong>{change.from?.name || change.name}</strong>{change.from?.name !== change.to?.name ? ` → ${change.to?.name}` : ""}: {Math.round((change.from?.allocation || 0) * 100)}% / WIP {change.from?.wip ?? "-"} → {Math.round((change.to?.allocation || 0) * 100)}% / WIP {change.to?.wip ?? "-"}</p>)}
         {!comparison.streams.length && <p className="empty">No stream changes.</p>}
       </div><div><h4>Outcome forecast</h4>
-        {comparison.outcomes.map((change) => <p key={change.id}><strong>{change.title}</strong>: {change.from?.endDate || change.from?.status || "absent"} ({change.from?.target || "-"}{change.from?.gapCycles ? `, ${change.from.gapCycles} cycle gap` : ""}) → {change.to?.endDate || change.to?.status || "absent"} ({change.to?.target || "-"}{change.to?.gapCycles ? `, ${change.to.gapCycles} cycle gap` : ""}){change.to?.reasons.length ? ` · ${change.to.reasons.join(" ")}` : ""}</p>)}
+        {comparison.outcomes.map((change) => <p key={change.id}><strong>{change.title}</strong>: {change.from?.endDate || change.from?.status || "absent"}{change.from?.calendarProjected ? " · projected cycles" : ""} ({change.from?.target || "-"}{change.from?.gapCycles ? `, ${change.from.gapCycles} cycle gap` : ""}) → {change.to?.endDate || change.to?.status || "absent"}{change.to?.calendarProjected ? " · projected cycles" : ""} ({change.to?.target || "-"}{change.to?.gapCycles ? `, ${change.to.gapCycles} cycle gap` : ""}){change.to?.reasons.length ? ` · ${change.to.reasons.join(" ")}` : ""}</p>)}
         {!comparison.outcomes.length && <p className="empty">No outcome changes.</p>}
       </div></div>
     </div>}
