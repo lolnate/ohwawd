@@ -74,6 +74,27 @@ test("outcome rows show every shared appearance and switching owner updates one 
   if (process.env.OUTCOME_SCREENSHOT) await page.locator("#project-streams").screenshot({ path: process.env.OUTCOME_SCREENSHOT });
 });
 
+test("unscheduled project cards stay inside shaded outcome rows without shifting later rows", async ({ page, assignment }) => {
+  await assignment.shareProjects();
+  await assignment.setDemand("a", null);
+  await page.goto("/");
+  const rows = [foundation, retention].map((id) => page.locator(`[data-timeline-outcome="${id}"]`));
+  for (const row of rows) {
+    const card = row.locator(".outcome-unscheduled [data-timeline-project='linear:a']");
+    const track = row.locator(".outcome-timeline-track");
+    const band = row.locator(".timeline-week-band").first();
+    await expect(card).toBeVisible();
+    const [cardBox, trackBox, bandBox] = await Promise.all([card.boundingBox(), track.boundingBox(), band.boundingBox()]);
+    expect(cardBox!.x).toBeGreaterThanOrEqual(trackBox!.x);
+    expect(cardBox!.y).toBeGreaterThanOrEqual(bandBox!.y);
+    expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(bandBox!.y + bandBox!.height);
+    expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(trackBox!.y + trackBox!.height);
+  }
+  const firstTrack = (await rows[0].locator(".outcome-timeline-track").boundingBox())!;
+  const secondRow = (await rows[1].boundingBox())!;
+  expect(secondRow.y).toBeGreaterThanOrEqual(firstTrack.y + firstTrack.height - 1);
+});
+
 test("outcomes can be unassigned and reassigned without stealing other capacity owners", async ({ page, assignment }) => {
   await assignment.shareProjects();
   await page.goto("/");
