@@ -5,8 +5,8 @@
 .counted-project { background: #4c8978; border: 1px solid #377664; }
 .outcome-timeline-track .shared-project, .calendar-legend .shared-project, .outcome-unscheduled .shared-project { background: #eef3f6; color: #48677d; border: 1px dashed #668296; }
 .shared-band-caption { position: absolute; left: 8px; color: #526e81; font-size: .62rem; z-index: 1; }
-.outcome-unscheduled { position: sticky; left: var(--project-width); width: min(620px, calc(100vw - var(--project-width) - 90px)); min-width: 100px; display: flex; flex-direction: column; gap: 5px; padding: 0 8px 9px; }
-.unscheduled-project { background: #fff5e2; color: #80602a; border: 1px solid #d6c398; border-radius: 5px; padding: 6px 8px; font-size: .67rem; text-align: left; white-space: normal; }
+.outcome-unscheduled { position: absolute; z-index: 2; left: 8px; right: 8px; bottom: 5px; display: flex; flex-direction: column; gap: 4px; }
+.unscheduled-project { background: #fff5e2; color: #80602a; border: 1px solid #d6c398; border-radius: 5px; padding: 5px 8px; font-size: .67rem; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .unassigned-outcomes { background: #f6f8f2; border: 1px solid #dae3d6; border-radius: 8px; padding: 16px; margin: 12px 0; }
 .unassigned-outcomes > label { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-top: 9px; }
 .unassigned-outcomes select { width: auto; min-width: 150px; max-width: 50%; }
@@ -34,5 +34,4 @@
   .unassigned-outcomes { padding: 12px; }
   .unassigned-outcomes > label { flex-direction: column; align-items: stretch; gap: 5px; }
   .unassigned-outcomes select { max-width: 100%; width: 100%; }
-  .outcome-unscheduled { width: 150px; }
 }
