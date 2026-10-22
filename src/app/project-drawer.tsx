@@ -5,6 +5,11 @@ import type { BoardState } from "./board";
 import type { BoardProject } from "./project-plan-card";
 import { projectCodes } from "@/lib/outcome-planning";
 
+function outsideDialog(dialog: HTMLDialogElement, x: number, y: number): boolean {
+  const bounds = dialog.getBoundingClientRect();
+  return x < bounds.left || x >= bounds.right || y < bounds.top || y >= bounds.bottom;
+}
+
 export default function ProjectDrawer({ project, state, busy, error, notice, children, onSave, onOpenProject, onClose }: {
   project: BoardProject; state: BoardState; busy: boolean; error: string; notice: string; children: ReactNode;
   onSave: (change: Record<string, unknown>, message: string) => Promise<boolean>;
@@ -12,6 +17,7 @@ export default function ProjectDrawer({ project, state, busy, error, notice, chi
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const backdropPress = useRef(false);
   useEffect(() => {
     const dialog = dialogRef.current;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -33,7 +39,14 @@ export default function ProjectDrawer({ project, state, busy, error, notice, chi
   const estimated = issues.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0);
   const codes = projectCodes(state.packages);
   const dependencies = state.dependencies.filter((edge) => edge.predecessor_id === project.id || edge.successor_id === project.id);
-  return <dialog ref={dialogRef} className="project-drawer" aria-labelledby="project-drawer-title" onCancel={(event) => { event.preventDefault(); onClose(); }}>
+  return <dialog ref={dialogRef} className="project-drawer" aria-labelledby="project-drawer-title" onCancel={(event) => { event.preventDefault(); onClose(); }}
+    onPointerDown={(event) => { backdropPress.current = event.target === event.currentTarget && outsideDialog(event.currentTarget, event.clientX, event.clientY); }}
+    onPointerCancel={() => { backdropPress.current = false; }}
+    onClick={(event) => {
+      const startedOutside = backdropPress.current;
+      backdropPress.current = false;
+      if (startedOutside && event.target === event.currentTarget && outsideDialog(event.currentTarget, event.clientX, event.clientY)) onClose();
+    }}>
     <header className="project-drawer-header"><div><p className="eyebrow">Linear project · {codes.get(project.id)}</p><h2 id="project-drawer-title" ref={titleRef} tabIndex={-1}>{project.name}</h2><p>{project.status}{!project.in_scope ? " · hidden from source view" : ""}</p></div><button type="button" className="secondary" onClick={onClose} aria-label="Close project details">Close</button></header>
     <div className="project-drawer-body">
       {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}

@@ -1,8 +1,4 @@
 .timeline-outcome-title { display: block; color: #264f43; font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
-.outcome-project-key { margin-top: 8px; font-weight: 400; font-size: .67rem; }
-.outcome-project-key summary { color: #416a5a; cursor: pointer; }
-.outcome-project-key button { display: block; text-align: left; width: 100%; background: transparent; color: #365c4e; padding: 7px 0; border-radius: 0; border-bottom: 1px solid #dce6de; white-space: normal; font-size: .68rem; }
-.outcome-project-key small { display: block; color: #6b7c73; font-size: .62rem; line-height: 1.5; }
 .outcome-timeline-track .outcome-project-block { min-height: 28px; padding: 5px 6px; text-align: left; border-width: 1px; }
 .outcome-timeline-track .outcome-project-block:hover { filter: brightness(.92); }
 .outcome-project-block:focus-visible { outline: 3px solid #bd8026; outline-offset: 2px; z-index: 3; }

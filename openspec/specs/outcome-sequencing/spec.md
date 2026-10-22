@@ -56,7 +56,7 @@ Outcome rows SHALL show compact uniquely distinguishable project codes using act
 - **AND** the outcome's required delivery still waits for the shared project without charging it again
 
 ### Requirement: Project details open from every appearance
-Selecting a project block or project key SHALL open an accessible sidebar showing the full name, imported description/status/link, estimate basis, unknown scope, linked outcomes, capacity owner, and dependencies. It SHALL support ownership changes, existing scope and placement edits, dependency navigation, keyboard dismissal, and focus restoration.
+Selecting a project block SHALL open an accessible sidebar showing the full name, imported description/status/link, estimate basis, unknown scope, linked outcomes, capacity owner, and dependencies. It SHALL support ownership changes, existing scope and placement edits, dependency navigation, keyboard dismissal, and focus restoration.
 
 #### Scenario: Inspect a reference and change its owner
 - **WHEN** the planner opens an outlined project block

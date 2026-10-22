@@ -90,9 +90,6 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
             <th scope="row" className="timeline-project-heading"><strong className="timeline-outcome-title">{row.title}</strong>
               <span>{countedPoints.toLocaleString()} pts counted here · {entries.length} projects</span>
               {outcomeForecast && <span>{outcomeForecast.endDate ? `Delivery ${shortCalendarDate(outcomeForecast.endDate)}` : outcomeForecast.status.replaceAll("_", " ")}{outcomeForecast.status === "provisional" ? " · provisional" : ""}</span>}
-              <details className="outcome-project-key"><summary>Project key & dependencies</summary>{entries.map((entry) => <button key={entry.project.id} onClick={() => onOpenProject(entry.project)} title={entry.detail}>
-                <b>{codes.get(entry.project.id)}</b> {entry.project.name}<small>{entry.counted ? "Counts here" : `Shared · 0 pts here · ${countedLocation(entry.project)}`}{entry.optional ? " · optional" : ""}{!entry.project.in_scope ? " · hidden" : ""}{entry.blockers.length ? ` · After ${entry.blockers.join(", ")}` : ""}</small>
-              </button>)}</details>
             </th>
             <td colSpan={weeks.length} className="timeline-track-cell"><div className="timeline-track outcome-timeline-track" style={{ height }}>
               {weeks.map((week, index) => <span key={week.start} aria-hidden="true" data-week-band={week.start}

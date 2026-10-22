@@ -4,6 +4,32 @@ const foundation = "00000000-0000-4000-8000-000000000002";
 const launch = "00000000-0000-4000-8000-000000000001";
 const retention = "00000000-0000-4000-8000-000000000003";
 
+test("sidebar backdrop dismisses without click-through and preserves inside interactions and focus", async ({ page, assignment }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+  const block = page.locator('[data-timeline-outcome="other:core"] [data-timeline-project="linear:a"]');
+  await block.click();
+  const drawer = page.getByRole("dialog", { name: "API foundation", exact: true });
+  await expect(drawer).toBeVisible();
+  const bounds = (await drawer.boundingBox())!;
+  await page.mouse.click(bounds.x + 2, bounds.y + 160);
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("heading", { name: "Scope", exact: true }).click();
+  await expect(drawer).toBeVisible();
+  // Selecting text or dragging out of the drawer must not accidentally dismiss it.
+  await page.mouse.move(bounds.x + 40, bounds.y + 160);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x - 20, bounds.y + 160);
+  await page.mouse.up();
+  await expect(drawer).toBeVisible();
+  const outcomesTab = page.getByRole("button", { name: /^Outcomes/ });
+  const tabBounds = (await outcomesTab.boundingBox())!;
+  await page.mouse.click(tabBounds.x + tabBounds.width / 2, tabBounds.y + tabBounds.height / 2);
+  await expect(drawer).toHaveCount(0);
+  await expect(block).toBeFocused();
+  await expect(page.getByRole("button", { name: /^Board/ })).toHaveAttribute("aria-current", "page");
+});
+
 test("outcome rows show every shared appearance and switching owner updates one charge immediately", async ({ page, assignment }) => {
   await assignment.shareProjects();
   await page.setViewportSize({ width: 1440, height: 1000 });
