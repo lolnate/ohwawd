@@ -92,7 +92,7 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
       extra: !!extra, startDate, leadDays, evaluatedAt, timezone: input.timezone,
       review: extra ? scopeChangeSummary(extra, issues.rows.filter((issue) => issue.project_id === row.project_id)) : null });
   });
-  return { calculationVersion: "v3", evaluatedAt, scoping, extraScopes: extraScopes.rows, weeklyAdjustments: weeklyAdjustments.rows, holidayWeeks,
+  return { calculationVersion: "v4", evaluatedAt, scoping, extraScopes: extraScopes.rows, weeklyAdjustments: weeklyAdjustments.rows, holidayWeeks,
     connection: connection.rows[0] ?? null, packages: packages.rows, streams: streams.rows, links: links.rows, outcomes: outcomes.rows,
     capacity: capacity.rows[0] ?? { cycle_anchor: null, cycle_days: 14, baseline: null, baseline_reason: "", reserve: 0, horizon: 26, scoping_lead_days: 14, holidays_enabled: true },
     observations: comparable, observedBaseline, effectiveBaseline: input.baseline,

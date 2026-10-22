@@ -19,7 +19,7 @@ The system SHALL import and display Linear project priority as read-only source 
 
 #### Scenario: User order differs from Linear priority
 - **WHEN** a lower-priority project precedes a higher-priority independent project in a stream
-- **THEN** their saved stream order governs selection for available WIP slots
+- **THEN** their saved stream order governs selection for the stream's next free cycle
 - **AND** neither priority can be edited locally
 
 ### Requirement: Assignment controls are lightweight

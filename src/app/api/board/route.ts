@@ -43,14 +43,15 @@ export async function PUT(request: Request): Promise<Response> {
         await transferProjectOwnership(client, body);
       } else if (body.type === "stream") {
         const name = typeof body.name === "string" ? body.name.trim() : "";
-        if (typeof body.id !== "string" || !name || name.length > 80 || !finite(body.allocation, 0, 1) || !Number.isInteger(body.wip) || !finite(body.wip, 1, 50)) throw new HttpError(400, "Enter a stream name, a 0–100% allocation, and a positive WIP limit.");
+        if (typeof body.id !== "string" || !name || name.length > 80 || !finite(body.allocation, 0, 1)) throw new HttpError(400, "Enter a stream name and a 0–100% allocation.");
+        if (body.wip !== undefined && body.wip !== 1) throw new HttpError(400, "Streams run one project at a time; WIP must be one.");
         const exists = await client.query("SELECT id FROM stream WHERE id=$1 AND active=true", [body.id]);
         if (!exists.rowCount) throw new HttpError(404, "Stream not found.");
         const duplicate = await client.query("SELECT id FROM stream WHERE active=true AND id<>$1 AND lower(name)=lower($2)", [body.id, name]);
         if (duplicate.rowCount) throw new HttpError(409, "Choose a unique stream name.");
         const total = await client.query<{ sum: number }>("SELECT COALESCE(SUM(allocation),0)::float AS sum FROM stream WHERE active=true AND id<>$1", [body.id]);
         if (total.rows[0].sum + body.allocation > 1.000001) throw new HttpError(400, "Allocations may total at most 100%.");
-        await client.query("UPDATE stream SET name=$2,allocation=$3,wip_limit=$4 WHERE id=$1", [body.id, name, body.allocation, body.wip]);
+        await client.query("UPDATE stream SET name=$2,allocation=$3,wip_limit=1 WHERE id=$1", [body.id, name, body.allocation]);
       } else if (body.type === "assignment") {
         await requireSequenceToken(client, body.sequenceToken);
         if (typeof body.streamId !== "string" || !Array.isArray(body.packageIds) || !body.packageIds.length ||

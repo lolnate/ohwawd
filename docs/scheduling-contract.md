@@ -1,6 +1,10 @@
 # Scheduling and scenario contract
 
-## Current calculation: v3
+## Current calculation: v4
+
+V4 forecasts execute at most one project per stream per cycle, regardless of outcome or saved legacy WIP limit. Carry unfinished work first; otherwise select the earliest eligible project in queue order, skipping blocked projects. Another project in that stream cannot start until the cycle after its predecessor finishes. Independent streams may run concurrently, unused budgets are not borrowed across streams, and moving a project recalculates its forecast. New streams have WIP one; older saved WIP limits above one cannot enable overlap. Older published revisions retain their frozen results; older editable drafts display a conversion notice and must be loaded and saved before publishing under v4.
+
+## Projected calendar introduced in v3, retained in v4
 
 Calendar labeling and projection requirements are maintained in [cycle calendar](../openspec/specs/cycle-calendar/spec.md), with design and verification in the [archived projection change](../openspec/changes/archive/2026-10-20-project-linear-cycle-calendar/).
 
@@ -10,9 +14,9 @@ The planning calendar extends beyond the latest imported boundary using the conn
 
 The extension covers the configured forecast horizon and at least 26 visible calendar weeks. Synthetic projected entries are never written to Linear or the Linear cache; the next refresh replaces them with actual IDs/names/dates and regenerates later assumptions. Week headers mark projected labels with an asterisk. Date calendars show them as view-only, while weekly availability remains editable by calendar date.
 
-V3 forecasts may use projected cycle capacity. Those packages and required outcomes are provisional and explicitly identify projected cycle dates. Allocation, WIP, dependencies, reserve, holiday and weekly-override math apply unchanged. V3 snapshots freeze the resolved calendar, cadence/provenance and output; published v0/v1/v2 results remain intact. Older editable drafts retain their planning inputs and transition explicitly when saved under v3.
+V3 forecasts may use projected cycle capacity. Those packages and required outcomes are provisional and explicitly identify projected cycle dates. V3 snapshots freeze the resolved calendar, cadence/provenance and output; published v0/v1/v2 results remain intact. Older editable drafts retain their planning inputs and transition explicitly when saved under the current version.
 
-## Capacity and timeline rules introduced in v2, retained in v3
+## Capacity and timeline rules introduced in v2, retained in v4
 
 The calendar requirements are maintained in [planning timeline](../openspec/specs/planning-timeline/spec.md) and [weekly capacity](../openspec/specs/weekly-capacity/spec.md). Design and acceptance evidence are in the [archived calendar change](../openspec/changes/archive/2026-10-20-month-week-planning-timeline/).
 
@@ -20,7 +24,7 @@ Stream timelines are month-first and subdivided into Monday-start calendar weeks
 
 V2 adds weekly availability. The live-board default is a labeled 50% planning preset for US Thanksgiving week, Christmas week and the following week. It can be disabled, and explicit date-based week overrides (0–100%) take precedence. Week assumptions are evaluated in the team's timezone and apply across cycle boundaries.
 
-For each Monday–Friday date belonging to an imported cycle, use explicit weekly availability first, then an enabled holiday preset, then cycle availability (default 100%). Average those values. For a cycle with no weekdays, use its calendar dates instead. Multiply baseline by that effective availability, subtract reserve once, then apply the existing stream allocation and WIP rules. Overlapping 50% week/cycle assumptions yield 50%, not 25%; a fortnight with one full week and one half week yields 75%.
+For each Monday–Friday date belonging to an imported cycle, use explicit weekly availability first, then an enabled holiday preset, then cycle availability (default 100%). Average those values. For a cycle with no weekdays, use its calendar dates instead. Multiply baseline by that effective availability, subtract reserve once, then apply the stream allocation. Overlapping 50% week/cycle assumptions yield 50%, not 25%; a fortnight with one full week and one half week yields 75%.
 
 V2 and later snapshots capture weekly overrides, enabled state and resolved holiday dates. Comparisons identify the changed assumptions and calculation versions. Published earlier results remain frozen. Loading pre-weekly editable drafts defaults to no weekly overrides and disabled holiday presets, preserving former capacity assumptions until deliberately changed.
 
@@ -38,7 +42,7 @@ Effective dependencies remain `(Linear edges − explicit waivers) ∪ local edg
 
 Source changes can introduce order conflicts. They preserve user order and identify the dependency path. Affected lanes have no unfinished-work forecast until repaired; unrelated valid lanes continue normally. Repair moves may reduce existing violations incrementally without introducing new ones. Dependency cycles remain invalid for forecasting.
 
-At each cycle, carry unfinished projects started in prior forecast cycles, then fill remaining WIP slots from the earliest eligible projects in queue order. Skip blocked heads for later independent work. Queue adjacency is not a dependency: WIP greater than one permits overlap and equal budget sharing. Capacity is conserved, unused budgets are not borrowed across streams, and new WIP slots open only in the next cycle. Editing the queue recalculates the run from the beginning.
+V1–V3 filled WIP slots from the earliest eligible projects in queue order, skipping blocked heads. Queue adjacency was not a dependency: a WIP limit above one permitted overlap and equal budget sharing. V4 replaces this with one execution slot per stream as described above.
 
 Moving to Needs assignment preserves selected demand without a stream. Deferred work consumes no future capacity and has no active queue position. Pause rationale is optional even for in-progress work; deferral does not change execution in Linear.
 
@@ -60,7 +64,7 @@ Legacy editable drafts are adapted when loaded and converted when saved. Queue s
 
 ## Historical calculation: v0
 
-The following contract is retained to explain published v0 snapshots. New snapshots use v3 and comparisons identify differing calculation versions. Published historical inputs and outputs remain immutable.
+The following contract is retained to explain published v0 snapshots. New snapshots use v4 and comparisons identify differing calculation versions. Published historical inputs and outputs remain immutable.
 
 ### Original v0 contract
 

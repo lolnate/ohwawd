@@ -16,29 +16,32 @@ const base = (packages: ForecastPackage[]): ForecastInput => ({
   horizon: 8, sourceAt: "2026-10-15T14:00:00Z", timezone: "UTC",
 });
 
-test("contract example: equal WIP split, redistribution, dependency unlock next cycle", () => {
+test("streams run concurrently but projects in one stream execute sequentially across outcomes", () => {
   const input = base([pkg("a1", "stream-a", 8), pkg("a2", "stream-a", 4), pkg("b1", "stream-b", 4)]);
-  input.dependencies = [{ predecessorId: "a1", successorId: "b1", source: "local" }];
-  input.outcomes = [{ id: "outcome", title: "Launch", neededBy: "2026-11-08", links: [{ projectId: "a1", requirement: "minimum" }, { projectId: "b1", requirement: "minimum" }] }];
   // Package IDs in the app are linear:<project ID>.
   input.packages.forEach((item) => { item.projectId = item.id; item.id = `linear:${item.id}`; });
+  input.outcomes = [
+    { id: "first", title: "First", neededBy: null, links: [{ projectId: "a1", requirement: "minimum" }] },
+    { id: "second", title: "Second", neededBy: null, links: [{ projectId: "a2", requirement: "minimum" }] },
+  ];
   input.dependencies = [{ predecessorId: "linear:a1", successorId: "linear:b1", source: "local" }];
   const result = forecast(input);
   const a1 = result.packages.find((item) => item.id === "linear:a1")!;
   const a2 = result.packages.find((item) => item.id === "linear:a2")!;
   const b1 = result.packages.find((item) => item.id === "linear:b1")!;
-  assert.deepEqual(a1.consumed, [3, 5]);
-  assert.deepEqual(a2.consumed, [3, 1]);
+  assert.deepEqual(a1.consumed, [6, 2]);
+  assert.deepEqual(a2.consumed, [, , 4]);
+  assert.equal(a2.start, 3);
   assert.equal(a1.finish, 2);
   assert.equal(b1.start, 3);
   assert.equal(b1.finish, 3);
   assert.equal(result.cycles[0].streams[1].idle, 4);
-  assert.equal(result.outcomes[0].finish, 3);
-  assert.equal(result.outcomes[0].endDate, "2026-11-08");
-  assert.equal(result.outcomes[0].target, "met");
+  assert.equal(result.outcomes[0].finish, 2);
+  assert.equal(result.outcomes[1].finish, 3);
+  assert.ok(result.cycles.every((cycle) => cycle.streams.every((stream) => stream.active.length <= 1)));
 });
 
-test("WIP one follows queue order independently of source priority and retired start fields", () => {
+test("legacy WIP two still follows queue order independently of source priority and retired start fields", () => {
   const a = pkg("a", "stream-a", 6);
   const b = pkg("b", "stream-a", 6);
   Object.assign(b, { preferred: 4, earliest: 8, priority: 0 });
@@ -46,10 +49,9 @@ test("WIP one follows queue order independently of source priority and retired s
   b.sequence = 2;
   const result = forecast(base([b, a]));
   assert.equal(result.packages.find((item) => item.id === "a")?.start, 1);
-  const one = base([b, a]); one.streams[0].wip = 1;
-  const serial = forecast(one);
-  assert.equal(serial.packages.find((item) => item.id === "a")?.finish, 1);
-  assert.equal(serial.packages.find((item) => item.id === "b")?.start, 2);
+  assert.equal(result.packages.find((item) => item.id === "a")?.finish, 1);
+  assert.equal(result.packages.find((item) => item.id === "b")?.start, 2);
+  assert.deepEqual(result.cycles[0].streams[0].active, ["a"]);
 });
 
 test("blocked queue head is skipped and an invalid lane does not stop valid independent streams", () => {
@@ -57,7 +59,6 @@ test("blocked queue head is skipped and an invalid lane does not stop valid inde
   const independent = pkg("independent", "stream-a", 6); independent.sequence = 2;
   const predecessor = pkg("prior", "stream-b", 8);
   const input = base([head, independent, predecessor]);
-  input.streams[0].wip = 1;
   input.dependencies = [{ predecessorId: "prior", successorId: "head", source: "linear" }];
   let result = forecast(input);
   assert.equal(result.packages.find((item) => item.id === "independent")!.start, 1);
@@ -66,6 +67,22 @@ test("blocked queue head is skipped and an invalid lane does not stop valid inde
   result = forecast(input);
   assert.equal(result.packages.find((item) => item.id === "head")!.start, null);
   assert.equal(result.packages.find((item) => item.id === "prior")!.finish, 2);
+});
+
+test("moving a project to another stream enables concurrency without splitting its capacity", () => {
+  const first = pkg("first", "stream-a", 9);
+  const second = pkg("second", "stream-a", 3);
+  first.sequence = 1; second.sequence = 2;
+  const input = base([first, second]);
+  let result = forecast(input);
+  assert.equal(result.packages.find((item) => item.id === "first")!.finish, 2);
+  assert.equal(result.packages.find((item) => item.id === "second")!.start, 3);
+  second.streamId = "stream-b";
+  result = forecast(input);
+  assert.equal(result.packages.find((item) => item.id === "second")!.start, 1);
+  assert.equal(result.packages.find((item) => item.id === "second")!.finish, 1);
+  assert.equal(result.cycles[0].streams[0].used, 6);
+  assert.equal(result.cycles[0].streams[1].used, 3);
 });
 
 test("unknown, unassigned, paused, and optional work explain minimum outcome", () => {

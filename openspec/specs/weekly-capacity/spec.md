@@ -23,7 +23,7 @@ Planners SHALL be able to save or remove an availability override from 0% throug
 - **THEN** the enabled holiday preset applies again
 
 ### Requirement: Weekly capacity maps to imported cycles
-Imported and cadence-projected cycle availability SHALL be the mean availability of its team-local Monday–Friday dates, using explicit week overrides, then enabled holiday defaults, then cycle availability. If no weekdays exist, its calendar dates SHALL be used. Baseline SHALL be multiplied by that mean; reserve SHALL be deducted once, followed by existing stream allocations and WIP rules.
+Imported and cadence-projected cycle availability SHALL be the mean availability of its team-local Monday–Friday dates, using explicit week overrides, then enabled holiday defaults, then cycle availability. If no weekdays exist, its calendar dates SHALL be used. Baseline SHALL be multiplied by that mean; reserve SHALL be deducted once, followed by stream allocations and one-project-per-stream scheduling.
 
 #### Scenario: Two-week cycle contains one holiday week
 - **WHEN** a two-week cycle has five normal working days and five days in a 50% holiday week

@@ -9,10 +9,13 @@ test("configurable stream lanes immediately follow Planning attention, followed 
   await expect(board.getByRole("heading", { name: "Outcome delivery" })).toHaveCount(0);
   const manager = board.locator(".stream-manager");
   await manager.locator("summary").first().click();
+  await expect(manager).toContainText("Each stream runs one project at a time");
+  await expect(manager.getByLabel("WIP limit")).toHaveCount(0);
   await manager.getByLabel("Name", { exact: true }).fill("New focus");
   await manager.getByRole("button", { name: "Add at 0%" }).click();
   await expect(board.locator("#project-streams > .stream-lane")).toHaveCount(3);
   await expect(board.getByRole("heading", { name: "New focus", exact: true })).toBeVisible();
+  await expect(board.locator("#project-streams")).toContainText("1 project at a time");
   expect((await assignment.board()).streams).toHaveLength(3);
   expect(await board.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
 });

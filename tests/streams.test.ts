@@ -40,7 +40,8 @@ test("stream lifecycle migrates work, updates the active draft, and preserves ol
   const oldDraft = await createScenario({ name: "Old stream plan" }, client);
   const activeDraft = await createScenario({ name: "Active plan" }, client);
 
-  const added = await inTransaction(database, () => addStream({ name: "Third", wip: 2, actor: "Owner", expectedScenarioVersion: activeDraft.editVersion }, client));
+  await assert.rejects(inTransaction(database, () => addStream({ name: "Overlapping", wip: 2, actor: "Owner", expectedScenarioVersion: activeDraft.editVersion }, client)), /one project at a time/);
+  const added = await inTransaction(database, () => addStream({ name: "Third", actor: "Owner", expectedScenarioVersion: activeDraft.editVersion }, client));
   const streamsAfterAdd = await database.query<{ id: string; allocation: string; position: number }>("SELECT id,allocation,position FROM stream WHERE active=true ORDER BY position");
   assert.equal(streamsAfterAdd.rows[2].id, added.streamId);
   assert.equal(streamsAfterAdd.rows[2].allocation, "0");

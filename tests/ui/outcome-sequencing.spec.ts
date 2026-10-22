@@ -41,10 +41,14 @@ test("outcome rows show every shared appearance and switching owner updates one 
   await expect(counted).toHaveClass(/counted-project/);
   const sibling = page.locator(`[data-timeline-outcome="${foundation}"] [data-timeline-project="linear:b"]`);
   const [firstBox, secondBox] = await Promise.all([counted.boundingBox(), sibling.boundingBox()]);
-  expect(Math.abs(firstBox!.y - secondBox!.y)).toBeGreaterThanOrEqual(30);
+  // Sequential projects may share one visual row; their time spans must not overlap.
+  expect(secondBox!.x >= firstBox!.x + firstBox!.width - 1 || Math.abs(firstBox!.y - secondBox!.y) >= 30).toBe(true);
   await expect(reference).toHaveClass(/shared-project/);
   await expect(reference).toHaveAttribute("title", /Shared · 0 pts here. Counted in Foundation · Core/);
   const original = await assignment.board();
+  const firstForecast = original.forecast.packages.find((item) => item.id === "linear:a")!;
+  const secondForecast = original.forecast.packages.find((item) => item.id === "linear:b")!;
+  expect(secondForecast.start).toBeGreaterThan(firstForecast.finish!);
   await reference.click();
   const drawer = page.getByRole("dialog", { name: "API foundation", exact: true });
   await expect(drawer).toBeVisible();

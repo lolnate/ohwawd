@@ -7,7 +7,7 @@ import { adaptLegacyPlanning } from "./legacy-planning";
 import { replaceOutcomeLinks } from "./outcome-ownership";
 import { clearIncompatibleOutcomeOwners } from "./sequence-store";
 
-export const calculationVersion = "v3";
+export const calculationVersion = "v4";
 
 type ScenarioClient = Pick<PoolClient, "query">;
 type BoardSnapshot = Awaited<ReturnType<typeof getBoard>>;
@@ -152,11 +152,13 @@ function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: R
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     streamConflicts: streamConflicts(row.draft_snapshot, registry),
-    conversionNotice: row.draft_snapshot.calculationVersion === "v3" ? null : row.draft_snapshot.calculationVersion === "v2"
-      ? "This draft predates projected cycles. Loading uses the current Linear cadence and marks projected dates provisional; save the board to capture the v3 plan."
+    conversionNotice: row.draft_snapshot.calculationVersion === "v4" ? null : row.draft_snapshot.calculationVersion === "v3"
+      ? "This draft predates one-project-per-stream scheduling. Loading recalculates its forecast sequentially; save the board to capture the v4 plan."
+      : row.draft_snapshot.calculationVersion === "v2"
+      ? "This draft predates projected cycles and sequential stream scheduling. Loading uses the current Linear cadence and marks projected dates provisional; save the board to capture the v4 plan."
       : row.draft_snapshot.calculationVersion === "v1"
-        ? "This draft predates weekly availability. Loading preserves its capacity with holiday defaults disabled and uses the v3 planning calendar; save the board to capture it."
-        : "This legacy draft uses numeric ranks and retired start/must-include controls. Loading adapts its sequence and Extra scope with holiday defaults disabled; save the board to store the v3 plan.",
+        ? "This draft predates weekly availability. Loading preserves its capacity with holiday defaults disabled and uses the v4 planning calendar; save the board to capture it."
+        : "This legacy draft uses numeric ranks and retired start/must-include controls. Loading adapts its sequence and Extra scope with holiday defaults disabled; save the board to store the v4 plan.",
     revisions,
   };
 }
@@ -423,7 +425,7 @@ export async function publishScenario(id: string, input: {
   const scenario = await loadScenario(database, id, true);
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
-  if (scenario.draft_snapshot.calculationVersion !== "v3") throw new HttpError(409, "Load and save this older draft to capture projected calendar assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
+  if (scenario.draft_snapshot.calculationVersion !== calculationVersion) throw new HttpError(409, "Load and save this older draft to capture current scheduling assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
   const rationale = typeof input.rationale === "string" ? input.rationale.trim() : "";
   const author = typeof input.author === "string" ? input.author.trim() : "";
   if (!rationale || rationale.length > 4000) throw new HttpError(400, "Publishing requires a rationale of at most 4000 characters.");
