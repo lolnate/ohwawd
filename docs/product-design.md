@@ -1,34 +1,34 @@
 # Oh, WAWD! — initial product and technical design
 
-Status: Sequencing Board assignment and month/week timeline revised through calculation v3, 20 October 2026.
+Status: Sequencing Board assignment and month/week timeline revised through calculation v4, 22 October 2026.
 
 The exact first-proof calculation and state rules are in [scheduling-contract.md](scheduling-contract.md). This document describes the product direction and staged delivery; the contract governs behavior when the two differ.
 
 ## Outcome-led sequencing and shared capacity
 
-Each stream's timeline now uses **Outcome** as its primary label column. An outcome is assigned to one stream and contains a sequence of linked project blocks. Compact mnemonic codes identify projects; tooltips and the project sidebar reveal full names. Outcome row labels show the title, counted points, project count and delivery status without a project-key fold-out. Overlapping cycle forecasts occupy separate sublanes, and unscheduled or deferred projects retain clickable explanations.
+Each stream's timeline now uses **Outcome** as its primary label column. An outcome is assigned to one stream and contains a sequence of linked project blocks. Compact mnemonic codes identify projects; tooltips and the project sidebar reveal full names. Outcome row labels show the title, counted points, project count and delivery status without a project-key fold-out. Time bars share a sublane when they do not overlap, and unscheduled or deferred projects retain clickable explanations.
 
 Each project has one capacity-owning outcome and stream. Solid blocks count points in that row. Outlined blocks in a separate shared band show the same forecast under every other linked outcome with **0 points counted here**. Shared dependencies still govern outcome delivery. Selected work with no outcome owner stays charged once in **Other selected work**, including after its owning link is removed. Stream and portfolio totals use unique work packages, never visual appearances.
 
 Select any project block to open its sidebar: scope, imported estimate basis, unestimated issues, linked outcomes, dependencies, Linear link, and the existing scope/placement controls. The **Count points toward outcome / stream** selector transfers the sole charge atomically and recalculates the board. Dependency navigation opens the related project in the same sidebar. Escape or Close restores focus to the opening block or a stable stream heading.
 
-**Manage work** contains outcome assignment and the existing drag/keyboard project queue. Assigning an outcome moves its owned work and claims selected ownerless linked work, preserving other outcomes' owners and deferred projects. Moving a project independently clears incompatible outcome ownership. Outcomes without a stream appear in an assignment section. Scenario save/load, dirty detection and comparisons retain these choices; published revisions remain frozen. This is an additive planning model change with unchanged v3 scheduling math.
+**Manage work** contains outcome assignment and the existing drag/keyboard project queue. Assigning an outcome moves its owned work and claims selected ownerless linked work, preserving other outcomes' owners and deferred projects. Moving a project independently clears incompatible outcome ownership. Outcomes without a stream appear in an assignment section. Scenario save/load, dirty detection and comparisons retain these choices; published revisions remain frozen. V4 schedules all capacity-owning projects sequentially within their stream, regardless of outcome.
 
 Database migration 5 (`outcome-capacity-ownership`) adds the placement and owner fields. Run the normal `npm run db:migrate` before starting the updated application. The one-time backfill infers outcome streams from current selected linked projects and chooses a linked owner in each project's existing stream, preserving streams, order, estimates and selection.
 
-## Current month/week timeline (v3)
+## Current month/week timeline (v4)
 
 View organization: the Board puts its configurable stream lanes directly after Planning attention, followed immediately by Manage streams. Needs assignment and the planning settings follow those primary lanes. Outcome delivery forecasts live at the top of the Outcomes tab alongside the outcome catalog, editing, and project linking. Blocker actions navigate between delivery forecasts and the relevant project controls on the Board, using the same loaded forecast data.
 
 Each stream's schedule uses month headers, compact Monday-start weeks, sticky outcome names, and secondary Linear cycle labels. Labels follow the visible Linear name (Cycle 46 / C46), not a differing internal ordinal. A desktop can view roughly a quarter at once and scroll farther ahead. Beyond imported dates, the calendar follows Linear's configured duration, start weekday, cooldown and timezone, retaining local boundary times across DST. Projected cycle labels have an asterisk; dates using projected capacity are provisional. Source refreshes replace assumptions with actual cycles. Unfinished work indicates continuation, blockers are identified by project codes, tooltips and the project sidebar, and cooldowns or unavailable cadence remain visibly unsupported.
 
-Yellow week bands show actual reduced availability. The default US holiday preset uses 50% for Thanksgiving week, Christmas week and the following week. Calendar availability controls allow disabling the preset or adding/removing a week-specific override; selecting a week header opens its editor. A 100% override restores an individual holiday week. Weekly availability replaces cycle availability on overlapping working dates, avoiding double reductions, and applies equally to projected cycles. All assumptions are saved with v3 scenarios; earlier published revisions remain frozen.
+Yellow week bands show actual reduced availability. The default US holiday preset uses 50% for Thanksgiving week, Christmas week and the following week. Calendar availability controls allow disabling the preset or adding/removing a week-specific override; selecting a week header opens its editor. A 100% override restores an individual holiday week. Weekly availability replaces cycle availability on overlapping working dates, avoiding double reductions, and applies equally to projected cycles. All assumptions are saved with current scenarios; earlier published revisions remain frozen.
 
 The controls are labeled **Weekly availability and holidays** for date-based week changes, and **Linear cycles and cycle-wide overrides** for imported cycle dates plus availability/reserve overrides covering entire cycles. The cycle panel links to the weekly editor and explains that weekly availability takes precedence on overlapping dates.
 
 ## Current assignment and scope workflow (introduced in v1)
 
-Open **Manage work** in a stream to access its ordered project queue. Drag a project to an insertion target, another stream, Needs assignment, or Deferred. Arrow buttons, Alt + arrow keys on a focused drag handle, and Location / Place before controls provide equivalent keyboard and touch workflows. Linear priority is read-only context; saved stream order controls scheduling. Dependencies constrain valid placement and forecast starts. WIP can allow overlap, and blocked queue heads can be skipped for independent eligible work.
+Open **Manage work** in a stream to access its ordered project queue. Drag a project to an insertion target, another stream, Needs assignment, or Deferred. Arrow buttons, Alt + arrow keys on a focused drag handle, and Location / Place before controls provide equivalent keyboard and touch workflows. Linear priority is read-only context; saved stream order controls scheduling. Dependencies constrain valid placement and forecast starts. Each stream executes one project at a time; blocked queue heads can be skipped for independent eligible work.
 
 Project controls contain location and an optional pause note when deferred. Numeric priority rank, Preferred start, Hard not-before, and Must include are retired. Deferral excludes future demand without changing Linear execution status.
 
@@ -77,7 +77,7 @@ The reference contains organization-specific project details. We will not copy t
 | Linear project | Execution container with status, dates, issues, and URL | Linear; cached here |
 | Planning item | Work not yet represented by a Linear project | Oh, WAWD! |
 | Work package | One schedulable piece of project or planning-item effort, with a capacity-owning team and a planning stream | Oh, WAWD! |
-| Stream | A configurable focus lane with a stable ID, name, WIP limit, and team-capacity allocation | Oh, WAWD! |
+| Stream | A focus lane with a stable ID, name, one active project, and team-capacity allocation | Oh, WAWD! |
 | Team capacity pool | A team's cycle throughput, calendar, and estimate scale; separate from the streams used to plan its work | Linear observations; Oh, WAWD! assumptions |
 | Dependency | A finish-to-start requirement between work packages; may cross streams | Oh, WAWD! |
 | Target | A broad delivery date, such as a January launch, attached to outcomes or milestones | Oh, WAWD! |
@@ -107,7 +107,7 @@ Needs assignment           [selected project I] [unplanned outcome]
 Deferred                   [paused project J]
 ```
 
-The board starts with five parallel streams, but the workspace can add or retire streams. They are focus lanes, not a required serial chain or a proxy for headcount. A lane has a configurable focus limit, initially one active package; a planner can overlap work with an explicit capacity split and a visible WIP warning. The Needs assignment shelf holds newly imported candidates and selected work without a stream. Selected unassigned work has visible demand, but no credible delivery date until it is assigned. The separate Deferred shelf holds paused work and consumes no forecast capacity; moving work marked “must include” there requires an explicit override.
+The board starts with five parallel streams, but the workspace can add or retire streams. They are focus lanes, not a required serial chain or a proxy for headcount. Each lane executes one project at a time while other streams can execute concurrently. The Needs assignment shelf holds newly imported candidates and selected work without a stream. Selected unassigned work has visible demand, but no credible delivery date until it is assigned. The separate Deferred shelf holds paused work and consumes no forecast capacity.
 
 The header answers four questions without opening a detail view: what target is being discussed, whether linked outcomes fit, how much capacity is available and selected, and what most threatens the target. The point total shown above is valid only in the initial single-team context. When more teams are present, the header shows each team's points and capacity utilization separately, plus one overall outcome risk verdict; it never sums unlike point scales. The timeline shows only the useful planning horizon, with week/month zoom. A target is a vertical line; milestone markers are distinct from project bars. Bar width represents forecast cycles, not importance or a precise daily completion date. A project card/drawer shows linked outcomes, Linear status and URL, work packages, estimate basis, dependencies, and the assumptions behind its forecast.
 

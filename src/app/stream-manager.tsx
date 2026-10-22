@@ -29,7 +29,7 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
 
 export default function StreamManager({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
   const [data, setData] = useState<StreamData | null>(null);
-  const [newStream, setNewStream] = useState({ name: "", wip: 1 });
+  const [newStream, setNewStream] = useState({ name: "" });
   const [restoreNames, setRestoreNames] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<RetirementPreview | null>(null);
   const [migrations, setMigrations] = useState<Record<string, string>>({});
@@ -79,7 +79,7 @@ export default function StreamManager({ refreshKey, onChanged }: { refreshKey: n
     event.preventDefault();
     void run(async () => {
       await request("/api/streams", "POST", { ...newStream, actor: "Owner", expectedScenarioVersion });
-      setNewStream({ name: "", wip: 1 });
+      setNewStream({ name: "" });
     }, "Stream added with 0% allocation.");
   }
 
@@ -106,10 +106,10 @@ export default function StreamManager({ refreshKey, onChanged }: { refreshKey: n
 
   return <details className="board-settings stream-manager">
     <summary>Manage streams <span>{active.length} active · {retired.length} retired</span></summary>
-    <p>Add focus lanes, change their display order, or retire one with an explicit package migration preview. Published revisions remain unchanged.</p>
+    <p>Add focus lanes, change their display order, or retire one with an explicit package migration preview. Each stream runs one project at a time; published revisions remain unchanged.</p>
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
-    <div className="stream-manager-grid"><section><h3>Active streams</h3><div className="stream-registry-list">{active.map((stream, index) => <div className="stream-registry-row" key={stream.id}><div><strong>{stream.name}</strong><small>{Math.round(stream.allocation * 100)}% allocation · WIP {stream.wip_limit} · {stream.package_count} package{stream.package_count === 1 ? "" : "s"}</small></div><div className="actions"><button type="button" className="quiet" aria-label={`Move ${stream.name} up`} disabled={busy || index === 0} onClick={() => reorder(index, -1)}>↑</button><button type="button" className="quiet" aria-label={`Move ${stream.name} down`} disabled={busy || index === active.length - 1} onClick={() => reorder(index, 1)}>↓</button><button type="button" className="text-button danger-text" disabled={busy || active.length <= 1} onClick={() => previewRetirement(stream)}>Retire</button></div></div>)}</div></section>
-      <section><h3>Add stream</h3><form className="stream-add-form" onSubmit={add}><label>Name<input required maxLength={80} value={newStream.name} onChange={(event) => setNewStream({ ...newStream, name: event.target.value })} placeholder="New focus stream" /></label><label>WIP limit<input required type="number" min="1" max="50" value={newStream.wip} onChange={(event) => setNewStream({ ...newStream, wip: Number(event.target.value) })} /></label><button disabled={busy || !newStream.name.trim()}>Add at 0%</button></form>
+    <div className="stream-manager-grid"><section><h3>Active streams</h3><div className="stream-registry-list">{active.map((stream, index) => <div className="stream-registry-row" key={stream.id}><div><strong>{stream.name}</strong><small>{Math.round(stream.allocation * 100)}% allocation · 1 project at a time · {stream.package_count} package{stream.package_count === 1 ? "" : "s"}</small></div><div className="actions"><button type="button" className="quiet" aria-label={`Move ${stream.name} up`} disabled={busy || index === 0} onClick={() => reorder(index, -1)}>↑</button><button type="button" className="quiet" aria-label={`Move ${stream.name} down`} disabled={busy || index === active.length - 1} onClick={() => reorder(index, 1)}>↓</button><button type="button" className="text-button danger-text" disabled={busy || active.length <= 1} onClick={() => previewRetirement(stream)}>Retire</button></div></div>)}</div></section>
+      <section><h3>Add stream</h3><form className="stream-add-form" onSubmit={add}><label>Name<input required maxLength={80} value={newStream.name} onChange={(event) => setNewStream({ ...newStream, name: event.target.value })} placeholder="New focus stream" /></label><button disabled={busy || !newStream.name.trim()}>Add at 0%</button></form>
       {!!retired.length && <><h3>Retired streams</h3><div className="stream-registry-list">{retired.map((stream) => <div className="stream-registry-row" key={stream.id}><label>Restore name<input maxLength={80} value={restoreNames[stream.id] ?? stream.name} onChange={(event) => setRestoreNames((current) => ({ ...current, [stream.id]: event.target.value }))} /></label><div><small>{stream.retirement_reason || "No retirement reason recorded"}</small><button type="button" className="secondary" disabled={busy || !(restoreNames[stream.id] ?? stream.name).trim()} onClick={() => void run(() => request(`/api/streams/${encodeURIComponent(stream.id)}`, "POST", { action: "restore", name: restoreNames[stream.id] ?? stream.name, actor: "Owner", expectedScenarioVersion }), `${restoreNames[stream.id] ?? stream.name} restored at 0% allocation.`)}>Restore</button></div></div>)}</div></>}</section></div>
     {preview && <section className="retirement-preview"><div className="section-head"><div><h3>Retire {preview.retiring.name}</h3><p>{Math.round(preview.retiring.allocation * 100)}% allocation returns to headroom. Selected and deferred state is preserved.</p></div><button type="button" className="quiet" disabled={busy} onClick={() => { setPreview(null); setReason(""); setNotice(""); }}>Cancel</button></div>
       <div className="retirement-impact"><span><strong>{preview.packages.length}</strong> packages</span><span><strong>{preview.outcomes.length}</strong> linked outcomes</span><span><strong>{preview.dependencies.length}</strong> dependency edges</span><span><strong>{preview.draftReferences.length}</strong> affected drafts</span></div>

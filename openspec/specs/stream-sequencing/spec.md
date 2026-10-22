@@ -105,17 +105,21 @@ If sync or rebase introduces a dependency that conflicts with saved order, the s
 - **AND** the planner can reorder first and retry
 
 ### Requirement: Scheduling selects eligible work by queue order
-The scheduler SHALL carry unfinished work started in earlier forecast cycles, then fill free WIP slots with eligible projects in saved queue order. Blocked projects SHALL be skipped in favor of later eligible work. Queue adjacency SHALL NOT create a dependency. Existing capacity conservation, equal active-work budget sharing, and next-cycle dependency unlocking SHALL remain in effect.
+The scheduler SHALL carry unfinished work from earlier cycles before selecting one eligible project in saved queue order per free stream. Projects in the same stream SHALL NOT overlap, regardless of outcome ownership or legacy WIP limit. Blocked projects SHALL be skipped in favor of later eligible work. Queue adjacency SHALL NOT create a dependency. Capacity conservation and next-cycle dependency unlocking SHALL remain in effect; independent streams MAY work concurrently.
 
-#### Scenario: WIP one honors sequence
-- **WHEN** independent A and B are eligible in that order in a stream with WIP one
-- **THEN** A receives the next free WIP slot even if B has higher Linear priority
-- **AND** B waits for a later cycle's free slot
+#### Scenario: Stream honors sequence
+- **WHEN** independent A and B are eligible in that order in a stream
+- **THEN** A receives the next free cycle even if B has higher Linear priority
+- **AND** B waits until a cycle after A finishes
 
-#### Scenario: WIP allows overlap
-- **WHEN** a stream has WIP two and its first two projects are eligible
-- **THEN** both can start in the same cycle and share the stream budget
-- **AND** the queue does not force serial completion
+#### Scenario: Legacy WIP does not allow overlap across outcomes
+- **WHEN** a stream has a saved WIP limit of two and its first two eligible projects belong to different outcomes
+- **THEN** only the first project starts and consumes the stream budget
+- **AND** the second project cannot start until the cycle after the first finishes
+
+#### Scenario: Different streams remain concurrent
+- **WHEN** two independent projects belong to different streams with available capacity
+- **THEN** they can start in the same cycle
 
 #### Scenario: Blocked head does not idle independent work
 - **WHEN** A is first but dependency-blocked and later B is independently eligible

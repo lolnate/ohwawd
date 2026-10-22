@@ -183,13 +183,13 @@ export async function addStream(input: { name?: unknown; wip?: unknown; actor?: 
   const draft = await requireDraftVersion(database, input.expectedScenarioVersion);
   const name = text(input.name, "Stream name", 80);
   const actor = "Owner";
-  if (!Number.isInteger(input.wip) || (input.wip as number) < 1 || (input.wip as number) > 50) throw new HttpError(400, "WIP must be an integer from 1 to 50.");
+  if (input.wip !== undefined && input.wip !== 1) throw new HttpError(400, "Streams run one project at a time; WIP must be one.");
   if ((await database.query("SELECT id FROM stream WHERE active=true AND lower(name)=lower($1)", [name])).rowCount) throw new HttpError(409, "Choose a unique active stream name.");
   const streams = await orderedActiveStreams(database, true);
   const id = randomUUID();
-  await database.query(`INSERT INTO stream(id,name,position,wip_limit,allocation,active) VALUES($1,$2,$3,$4,0,true)`, [id, name, streams.length + 1, input.wip]);
+  await database.query(`INSERT INTO stream(id,name,position,wip_limit,allocation,active) VALUES($1,$2,$3,1,0,true)`, [id, name, streams.length + 1]);
   const version = await saveActiveDraft(database, draft);
-  await recordEvent(database, id, "added", actor, "", { name, wip: input.wip, position: streams.length + 1 });
+  await recordEvent(database, id, "added", actor, "", { name, wip: 1, position: streams.length + 1 });
   return { streamId: id, activeScenarioVersion: version };
 }
 

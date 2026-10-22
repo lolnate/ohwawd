@@ -112,33 +112,25 @@ export function forecast(input: ForecastInput): ForecastResult {
     for (const stream of [...input.streams].sort((a, b) => a.id.localeCompare(b.id))) {
       const budget = Math.floor(available * stream.allocation + 1e-9);
       const carried = input.packages.filter((item) => item.streamId === stream.id && remaining.has(item.id) && packages.get(item.id)!.start !== null);
-      const slots = Math.max(0, stream.wip - carried.length);
       const eligible = input.packages.filter((item) => item.streamId === stream.id && remaining.has(item.id) && packages.get(item.id)!.start === null &&
         input.dependencies.filter((edge) => !edge.waived && edge.successorId === item.id).every((edge) => { const prior = packages.get(edge.predecessorId); return prior && prior.finish !== null && prior.finish < cycle; }));
       eligible.sort((a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
-      const active = [...carried, ...eligible.slice(0, slots)];
+      // A stream has one execution slot, including when a saved legacy WIP limit is higher.
+      // A finish in this cycle does not open the slot until the next cycle.
+      const active = carried.length ? carried.slice(0, 1) : eligible.slice(0, 1);
       if (linearCycle.projected) for (const item of active) {
         packages.get(item.id)!.calendarProjected = true;
         packages.get(item.id)!.provisional = true;
       }
       for (const item of active) if (packages.get(item.id)!.start === null) packages.get(item.id)!.start = cycle;
-      let left = budget;
-      let unfinished = active.filter((item) => remaining.get(item.id)! > 0);
-      while (left > 0 && unfinished.length) {
-        const share = Math.max(1, Math.floor(left / unfinished.length));
-        let spent = 0;
-        for (const item of unfinished) {
-          const use = Math.min(share, remaining.get(item.id)!, left - spent);
-          remaining.set(item.id, remaining.get(item.id)! - use);
-          const result = packages.get(item.id)!;
-          result.consumed[cycle - 1] = points(milli(result.consumed[cycle - 1] || 0) + use);
-          spent += use;
-        }
-        left -= spent;
-        unfinished = unfinished.filter((item) => remaining.get(item.id)! > 0);
+      const item = active[0];
+      const used = item ? Math.min(budget, remaining.get(item.id)!) : 0;
+      if (item) {
+        remaining.set(item.id, remaining.get(item.id)! - used);
+        packages.get(item.id)!.consumed[cycle - 1] = points(used);
       }
       for (const item of active) if (remaining.get(item.id) === 0) { packages.get(item.id)!.finish = cycle; remaining.delete(item.id); }
-      row.streams.push({ id: stream.id, budget: points(budget), used: points(budget - left), idle: points(left), active: active.map((item) => item.id) });
+      row.streams.push({ id: stream.id, budget: points(budget), used: points(used), idle: points(budget - used), active: active.map((item) => item.id) });
     }
     cycles.push(row);
     if (remaining.size === 0) break;
@@ -148,7 +140,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     result.reason = blockers.length ? `Waiting for ${blockers.map((edge) => source.get(edge.predecessorId)?.name || edge.predecessorId).join(", ")}.` :
       !futureCycles.length ? "No upcoming Linear cycles were imported for this team." :
         futureCycles.length < input.horizon ? `Beyond imported Linear calendar after ${linearCycleLabel(futureCycles.at(-1)!)}; add upcoming cycles in Linear.` :
-          "Beyond horizon at current capacity, allocation, and WIP.";
+          "Beyond horizon at current capacity, allocation, and stream sequence.";
   }
   const endFor = (cycle: number) => cycle === 0 ? localDate(input.sourceAt, input.timezone) : cycles[cycle - 1]?.end || null;
   const outcomes: OutcomeForecast[] = input.outcomes.map((outcome) => {
