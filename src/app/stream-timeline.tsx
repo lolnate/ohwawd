@@ -84,6 +84,8 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
           }
           const sharedTop = 16 + ownedEnds.length * 36 + (sharedEnds.length ? 22 : 0);
           const height = Math.max(72, sharedEnds.length ? sharedTop + sharedEnds.length * 36 + 10 : 26 + ownedEnds.length * 36);
+          const unscheduled = entries.filter((entry) => !entry.span);
+          const trackHeight = height + (unscheduled.length ? unscheduled.length * 32 + 5 : 0);
           const countedPoints = entries.filter((entry) => entry.counted).reduce((sum, entry) => sum + (entry.projection?.demand ?? 0), 0);
           const outcomeForecast = forecast.outcomes.find((outcome) => outcome.id === row.id);
           return <tr key={row.id} data-timeline-outcome={row.id}>
@@ -91,7 +93,7 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
               <span>{countedPoints.toLocaleString()} pts counted here · {entries.length} projects</span>
               {outcomeForecast && <span>{outcomeForecast.endDate ? `Delivery ${shortCalendarDate(outcomeForecast.endDate)}` : outcomeForecast.status.replaceAll("_", " ")}{outcomeForecast.status === "provisional" ? " · provisional" : ""}</span>}
             </th>
-            <td colSpan={weeks.length} className="timeline-track-cell"><div className="timeline-track outcome-timeline-track" style={{ height }}>
+            <td colSpan={weeks.length} className="timeline-track-cell"><div className="timeline-track outcome-timeline-track" style={{ height: trackHeight }}>
               {weeks.map((week, index) => <span key={week.start} aria-hidden="true" data-week-band={week.start}
                 className={`timeline-week-band ${week.availability < 1 ? "reduced-week" : ""} ${week.projected ? "projected-calendar" : ""} ${week.coverage === "none" ? "no-calendar" : week.coverage === "partial" ? "partial-calendar" : ""}`}
                 style={{ left: `${index / weeks.length * 100}%`, width: `${100 / weeks.length}%` }} />)}
@@ -103,9 +105,10 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
                 <span>{codes.get(entry.project.id)}{entry.counted ? ` · ${entry.projection?.demand ?? 0} pts` : " · Shared ↗"}{entry.blockers.length ? ` ← ${sequencing.dependencies.filter((edge) => edge.successorId === entry.project.id).map((edge) => codes.get(edge.predecessorId) ?? "?").join(", ")}` : ""}{entry.optional ? " · opt" : ""}{entry.partial ? " · Continues →" : ""}</span>
               </button>)}
               {!entries.length && <span className="calendar-row-reason">No linked projects yet</span>}
-            </div>{entries.some((entry) => !entry.span) && <div className="outcome-unscheduled">{entries.filter((entry) => !entry.span).map((entry) => <button key={entry.project.id} type="button" data-timeline-project={entry.project.id} data-counted={entry.counted} className={`unscheduled-project${entry.counted ? "" : " shared-project"}`} title={entry.detail} onClick={() => onOpenProject(entry.project)}>
+              {!!unscheduled.length && <div className="outcome-unscheduled">{unscheduled.map((entry) => <button key={entry.project.id} type="button" data-timeline-project={entry.project.id} data-counted={entry.counted} className={`unscheduled-project${entry.counted ? "" : " shared-project"}`} title={entry.detail} onClick={() => onOpenProject(entry.project)}>
               <b>{codes.get(entry.project.id)}</b> · {entry.reason}{entry.counted ? "" : " · 0 pts here"}{entry.optional ? " · optional" : ""}{entry.blockers.length ? ` · After ${entry.blockers.join(", ")}` : ""}
-            </button>)}</div>}</td>
+            </button>)}</div>}
+            </div></td>
           </tr>;
         })}</tbody>
       </table>
