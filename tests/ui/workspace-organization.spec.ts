@@ -49,6 +49,29 @@ test("Outcome delivery belongs to Outcomes and shares editing, links, deletion a
   await expect(page.locator("#outcome-catalog")).toContainText("No outcomes yet");
 });
 
+test("new outcomes and their project links are created together in the outcome modal", async ({ page, assignment }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Outcomes/ }).click();
+  const catalog = page.locator("#outcome-catalog");
+  await catalog.getByRole("button", { name: "Add outcome", exact: true }).click();
+  const modal = page.getByRole("dialog", { name: "Add outcome", exact: true });
+  await expect(modal).toBeVisible();
+  await modal.getByLabel("Outcome title", { exact: true }).fill("Onboarding complete");
+  const apiFoundation = modal.getByRole("checkbox", { name: /API foundation/ });
+  await apiFoundation.check();
+  await expect(apiFoundation).toBeChecked();
+  await modal.getByLabel("API foundation requirement").selectOption("optional");
+  await modal.getByRole("button", { name: "Create outcome", exact: true }).click();
+  await expect(modal).toHaveCount(0);
+  const outcome = catalog.locator(".outcome-card").filter({ has: page.getByRole("heading", { name: "Onboarding complete", exact: true }) });
+  await expect(outcome).toContainText("API foundation");
+  await expect(outcome).toContainText("optional");
+  const board = await assignment.board();
+  const created = board.outcomes.find((item) => item.title === "Onboarding complete");
+  expect(created).toBeTruthy();
+  expect(board.links).toContainEqual({ outcome_id: created!.id, project_id: "a", requirement: "optional" });
+});
+
 test("planning blockers open Outcomes and Resolve blocker returns to the right project scope editor", async ({ page, assignment }) => {
   await assignment.requireProject("a");
   await assignment.setDemand("a", null);

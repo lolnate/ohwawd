@@ -13,6 +13,13 @@
   box-shadow: 0 24px 80px #10251f59;
 }
 .project-picker[open] { display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
+.create-outcome-modal[open] { display: block; overflow-y: auto; }
+.create-outcome-body { display: block; }
+.create-outcome-modal .project-picker-results { overflow: visible; }
+.create-outcome-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 14px 22px; border-bottom: 1px solid #e1e8e2; }
+.create-outcome-fields > label:first-child, .create-outcome-fields > label:last-child { grid-column: 1 / -1; }
+.create-outcome-fields .form-row { display: contents; }
+.create-outcome-fields .form-row label { min-width: 0; }
 .project-picker::backdrop { background: #10231fc2; backdrop-filter: blur(3px); }
 .project-picker-head { display: flex; justify-content: space-between; gap: 20px; padding: 20px 22px 14px; border-bottom: 1px solid #e1e8e2; }
 .project-picker-head h2 { margin: 2px 0 5px; }
@@ -49,6 +56,8 @@
 @media (max-width: 600px) {
   .project-picker { width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .project-picker-head, .project-picker-filters, .project-picker-actions { padding-inline: 14px; }
+  .create-outcome-fields { grid-template-columns: 1fr; padding-inline: 14px; }
+  .create-outcome-fields > label:first-child, .create-outcome-fields > label:last-child { grid-column: auto; }
   .project-picker-head { gap: 8px; }
   .project-picker-head .quiet { padding-inline: 9px; }
   .project-picker-summary { grid-template-columns: 1fr; padding-inline: 14px; }

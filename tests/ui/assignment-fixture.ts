@@ -1,6 +1,7 @@
 import { test as base, expect } from "@playwright/test";
 import { PGlite } from "@electric-sql/pglite";
 import type { PoolClient } from "pg";
+import { randomUUID } from "node:crypto";
 import { schemaSql } from "../../src/lib/db";
 import { getBoard } from "../../src/lib/board";
 import { saveImport } from "../../src/lib/import";
@@ -77,7 +78,13 @@ export const test = base.extend<{ assignment: Controls }>({
               projects: current.packages.map((item) => ({ ...item, id: item.project_id, package_id: item.id, description: "", issue_count: 1,
                 unestimated_open_issues: item.project_id === "d" ? 1 : 0, estimated_open_points: 5 })), outcomes: current.outcomes, links: current.links, streams: current.streams };
           } else if (path === "/api/streams") json = request.method() === "POST" ? await addStream(body, client) : await listStreams(client);
-          else if (path.startsWith("/api/outcomes/")) {
+          else if (path === "/api/outcomes" && request.method() === "POST") {
+            const id = randomUUID();
+            await database.query("INSERT INTO outcome(id,title,description,owner,success_signal,needed_by) VALUES($1,$2,$3,$4,$5,$6)",
+              [id, body.title, body.description, body.owner, body.successSignal, body.neededBy || null]);
+            for (const link of body.links || []) await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES($1,$2,$3)", [id, link.projectId, link.requirement]);
+            json = { id };
+          } else if (path.startsWith("/api/outcomes/")) {
             const id = path.split("/")[3];
             if (path.endsWith("/links") && request.method() === "PUT") {
               await replaceOutcomeLinks(client, id, body.links);
