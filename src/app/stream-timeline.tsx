@@ -64,15 +64,21 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
             const projection = forecast.packages.find((item) => item.id === project.id);
             const predecessors = [...new Set(sequencing.dependencies.filter((edge) => edge.successorId === project.id).map((edge) => edge.predecessorId))];
             const blockers = predecessors.map((id) => sequencing.packages.find((item) => item.id === id)?.name ?? "Unavailable project");
-            const start = projection?.start ? forecast.cycles[projection.start - 1]?.start ?? null : null;
-            const finalCycle = projection?.finish ? forecast.cycles[projection.finish - 1] : forecast.cycles.at(-1);
+            // All appearances use the owning package's primary-stream simulation.
+            // An unfinished package may occupy a slot through zero-capacity cycles;
+            // those cycles are not simulated progress and must not extend its bar.
+            const firstProgress = projection?.consumed.findIndex((points) => points > 0) ?? -1;
+            const lastProgress = projection?.consumed.reduce((last, points, index) => points > 0 ? index : last, -1) ?? -1;
+            const partial = projection?.finish === null && firstProgress >= 0;
+            const startCycle = partial ? firstProgress : projection?.start ? projection.start - 1 : -1;
+            const start = forecast.cycles[startCycle]?.start ?? null;
+            const finalCycle = projection?.finish ? forecast.cycles[projection.finish - 1] : forecast.cycles[lastProgress];
             const end = start && finalCycle ? addCalendarDays(finalCycle.end, 1) : null;
             const span = project.selected && start && end && weeks.length ? timelineSpan(start, end, weeks[0].start, weeks.length) : null;
-            const partial = !!start && projection?.finish === null;
             const reason = !project.selected ? "Deferred · not counted" : projection?.finish === 0 ? "Complete before the next forecast cycle" : projection?.reason || "No forecast date yet";
             const counted = project.selected && project.stream_id === streamId && (!row.outcome || project.capacity_outcome_id === row.id);
             const optional = links.some((link) => link.outcome_id === row.id && link.project_id === project.project_id && link.requirement === "optional");
-            const detail = `${project.name} (${codes.get(project.id)}): ${counted ? `${projection?.demand ?? 0} pts counted here` : `Shared · 0 pts here. Counted in ${countedLocation(project)}`}. ${span ? `Starts ${start}; ${partial ? `continues beyond the simulated calendar. ${reason}` : `finishes at cycle end ${finalCycle!.end}`}` : reason}${blockers.length ? `. After ${blockers.join(", ")}` : ""}${optional ? ". Optional for this outcome" : ""}${!project.in_scope ? ". Hidden from source view" : ""}${projection?.calendarProjected ? ". Provisional date using projected cycles" : ""}`;
+            const detail = `${project.name} (${codes.get(project.id)}): ${counted ? `${projection?.demand ?? 0} pts counted here` : `Shared · 0 pts here. Counted in ${countedLocation(project)}`}. ${span ? `Starts ${start}; ${partial ? `simulated progress through ${finalCycle!.end}; continues beyond the simulated calendar without a forecast finish. ${reason}` : `finishes at cycle end ${finalCycle!.end}`}` : reason}${blockers.length ? `. After ${blockers.join(", ")}` : ""}${optional ? ". Optional for this outcome" : ""}${!project.in_scope ? ". Hidden from source view" : ""}${projection?.calendarProjected ? ". Provisional date using projected cycles" : ""}`;
             return { project, projection, span, partial, reason, counted, optional, detail, blockers, lane: 0 };
           });
           const ownedEnds: number[] = [], sharedEnds: number[] = [];
