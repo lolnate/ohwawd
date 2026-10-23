@@ -15,3 +15,10 @@ Read it before designing or modifying UI. Follow these conventions alongside the
 - At narrow widths where the sidebar fills the screen, Close and Escape remain available even when there is no exposed backdrop.
 
 The project details sidebar (`src/app/project-drawer.tsx`) implements this convention.
+
+## Centered settings overlays
+
+- Workspace-level settings can use a centered modal opened from the signed-in header. Opening it preserves the active workspace view and its local context.
+- Centered modals follow the same backdrop, drag-out protection, Close, Escape, focus containment, and focus-restoration conventions as overlay sidebars above.
+- Contextual actions open the relevant settings section and focus its target field. General entry focuses the modal heading. If the original opener is unavailable on dismissal, restore focus to the stable header entry point.
+- On narrow screens, the modal becomes full-screen with internally scrolling content and a reachable header and Close action. Section navigation wraps and fields stack without page-level horizontal overflow.

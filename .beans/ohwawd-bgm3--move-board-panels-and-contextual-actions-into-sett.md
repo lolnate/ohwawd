@@ -1,0 +1,38 @@
+---
+# ohwawd-bgm3
+title: Move Board panels and contextual actions into Settings
+status: todo
+type: task
+priority: normal
+tags:
+    - settings
+    - board
+created_at: 2026-10-23T14:36:17Z
+updated_at: 2026-10-23T14:36:17Z
+parent: ohwawd-0nj1
+blocked_by:
+    - ohwawd-7amk
+---
+
+Complete the relocation by replacing inline Board editors and DOM reveal targets with typed Settings-open requests for OpenSpec task 3.1.
+
+## References
+- openspec/changes/add-workspace-settings/proposal.md
+- openspec/changes/add-workspace-settings/design.md (decisions 4–5, entry-point table)
+- openspec/changes/add-workspace-settings/specs/workspace-settings/spec.md (Board actions and focus/dismissal)
+- openspec/changes/add-workspace-settings/specs/planning-timeline/spec.md
+- openspec/changes/add-workspace-settings/tasks.md (3.1)
+- docs/ui-ux-conventions.md
+
+## Scope
+Wire Board, workspace, and timeline to the completed Settings editors, then remove the three old Board panels and their obsolete local state/imports. Keep cycle-wide overrides, stream management, dependencies, and project Extra scope in their existing homes.
+
+## Acceptance / verification
+- [ ] Planning attention baseline setup and project Review stream capacity actions open Capacity assumptions with baseline focused.
+- [ ] Cycle-calendar weekly link opens the weekly section and focuses the week selector; remaining Board reveal actions still work.
+- [ ] Timeline pointer/keyboard week selection opens the weekly section for the exact Monday-start team-local week and shows current override/preset/cycle fallback. Reopening the same week works repeatedly.
+- [ ] Close returns focus to the initiating timeline/action control when available, otherwise the header gear; project details handoff closes the drawer before opening Settings with no stacked modals.
+- [ ] Remove inline Capacity assumptions, Scope readiness, and Weekly availability and holidays editors, plus Board-only drafts and removed-target logic. No duplicate editor remains.
+- [ ] Update tests/ui/planning-timeline.spec.ts, tests/ui/workspace-organization.spec.ts, and affected tests/ui/cycle-calendar-projection.spec.ts cases alongside integration; cover target focus, live capacity/band changes, same-week reopening, and retained Board controls. Run those cases and npm run typecheck.
+
+Blocked by completed Settings editor/data lifecycle. Ship together with that task so no contextual action targets removed content.
