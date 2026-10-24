@@ -2,6 +2,8 @@
 
 [docs/ui-ux-conventions.md](docs/ui-ux-conventions.md) is the project reference for agents to understand and apply our UI/UX design conventions. Read it before designing or changing UI, and follow it alongside the relevant OpenSpec requirements. When a new project-wide interaction convention is agreed, document it there so future agent work stays consistent.
 
+[docs/visual-theme.md](docs/visual-theme.md) defines the **Neon Velocity** visual identity, semantic color tokens, typography, component treatments and accessibility rules. Read it before visual design work, respect its implementation status, and keep new visual decisions consistent with that reference. [docs/theme-preview.html](docs/theme-preview.html) is a standalone visual study, not application functionality.
+
 ## Planning and Task Tracking
 
 This project uses **OpenSpec** for specification-driven development and **Beans** for task tracking.

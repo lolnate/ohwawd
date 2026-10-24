@@ -4,6 +4,10 @@ This document records the shared UI/UX conventions for Oh, WAWD! It is a referen
 
 Read it before designing or modifying UI. Follow these conventions alongside the relevant OpenSpec requirements and existing component patterns. Add conventions here as project-wide design decisions are established; keep feature-specific requirements and technical designs in OpenSpec.
 
+## Visual identity and theme
+
+[Neon Velocity](visual-theme.md) is the project's visual-design reference: a neon-1980s motorsport and orbital-future direction with precise tokens, typography, component recipes and accessibility requirements. Read its implementation status before applying it. Use its semantic roles rather than inventing component-specific palettes; interaction conventions in this document continue to apply. A standalone [theme preview](theme-preview.html) illustrates the direction with example data.
+
 ## Overlay sidebars and drawers
 
 - **Clicking or tapping outside an overlay sidebar closes it.** The dimmed backdrop is a dismissal target.
