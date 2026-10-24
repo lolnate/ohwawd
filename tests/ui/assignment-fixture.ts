@@ -16,7 +16,9 @@ import { assignOutcomeToStream, replaceOutcomeLinks, transferProjectOwnership } 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
   setDemand: (projectId: string, points: number | null) => Promise<void>; requireProject: (projectId: string) => Promise<void>; pauseUnassigned: () => Promise<void>;
   configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void>;
-  shareProjects: () => Promise<void>; changeOwner: (outcomeId: string) => Promise<void> };
+  shareProjects: () => Promise<void>; changeOwner: (outcomeId: string) => Promise<void>;
+  setCapacity: (baseline: number | null, coreAllocation?: number) => Promise<void>;
+  setWeekAvailability: (weekStart: string, availability: number) => Promise<void> };
 export const test = base.extend<{ assignment: Controls }>({
   assignment: async ({ page }, use) => {
     const browserErrors: string[] = [];
@@ -114,6 +116,11 @@ export const test = base.extend<{ assignment: Controls }>({
       await use({ board, time: (value) => { evaluatedAt = new Date(value); }, invalidateNextMove: () => { invalidateNextMove = true; },
         addSourceConflict: async () => { await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','linear')"); },
         setDemand: async (projectId, points) => { await database.query("UPDATE linear_issue_cache SET estimate=$2 WHERE project_id=$1", [projectId, points]); },
+        setCapacity: async (baseline, coreAllocation = 0.5) => {
+          await database.query("UPDATE capacity_profile SET baseline=$1 WHERE workspace_id=1", [baseline]);
+          await database.query("UPDATE stream SET allocation=CASE WHEN id='core' THEN $1::numeric ELSE 1-$1::numeric END", [coreAllocation]);
+        },
+        setWeekAvailability: (weekStart, availability) => saveWeeklyAvailability(client, { weekStart, availability }),
         requireProject: async (projectId) => {
           await database.query("DELETE FROM outcome_project_link");
           await database.query("INSERT INTO outcome_project_link(outcome_id,project_id) VALUES('00000000-0000-4000-8000-000000000001',$1)", [projectId]);
