@@ -1,0 +1,24 @@
+.workspace-settings-trigger{display:inline-flex;align-items:center;justify-content:center;padding:8px}
+.workspace-settings-trigger svg{width:20px;height:20px}
+.workspace-settings{width:calc(100% - 48px);max-width:960px;height:min(640px,90dvh);max-height:90dvh;margin:auto;padding:0;border:1px solid #cbdad4;border-radius:16px;background:#f8fbf9;color:#183a32;box-shadow:0 24px 80px #102c3540;overflow:hidden}
+.workspace-settings::backdrop{background:#10243199}
+.workspace-settings[open]{display:flex;flex-direction:column}
+.workspace-settings-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:24px;border-bottom:1px solid #dbe5df;flex-shrink:0}
+.workspace-settings-header h2{margin:0 0 6px}
+.workspace-settings-header p{margin:0;font-size:.88rem}
+.workspace-settings-header button{flex-shrink:0}
+.workspace-settings-body{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:0;flex:1;overflow:auto}
+.workspace-settings-nav{display:flex;flex-direction:column;gap:6px;padding:16px;border-right:1px solid #dbe5df}
+.workspace-settings-nav button{background:transparent;color:#35594e;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.workspace-settings-nav button[aria-current]{background:#dcefe6;color:#145c44;box-shadow:inset 3px 0 #238464}
+.workspace-settings-content{min-width:0;padding:24px;overflow-wrap:anywhere}
+.workspace-settings-content h3{margin-top:0}
+.workspace-settings-notice{padding:16px;border:1px solid #dbe5df;border-radius:10px;background:#eef5f0;font-size:.88rem}
+@media(max-width:760px){
+  .workspace-settings{width:100%;max-width:none;height:100dvh;max-height:100dvh;border:0;border-radius:0}
+  .workspace-settings-header{padding:20px 16px}
+  .workspace-settings-body{display:flex;flex-direction:column}
+  .workspace-settings-nav{flex-direction:row;flex-wrap:wrap;flex-shrink:0;border-right:0;border-bottom:1px solid #dbe5df;padding:12px;gap:6px}
+  .workspace-settings-nav button{flex:1 1 140px;font-size:.82rem}
+  .workspace-settings-content{padding:20px 16px}
+}

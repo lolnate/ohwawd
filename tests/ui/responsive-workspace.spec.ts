@@ -58,6 +58,13 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 412, height: 915 }
       await tab.click();
       await expect(tab).toHaveAttribute("aria-current", "page");
       await expectContained(page);
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+      await expect(settings.getByRole("button", { name: "Close Settings" })).toBeInViewport();
+      expect(await settings.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await expectContained(page);
+      await settings.getByRole("button", { name: "Close Settings" }).click();
+      await expect(tab).toHaveAttribute("aria-current", "page");
       if (viewport.width <= 760) {
         const box = await tab.boundingBox();
         expect(box).not.toBeNull();

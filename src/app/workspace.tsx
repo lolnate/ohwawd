@@ -8,6 +8,7 @@ import StatusFilter from "./status-filter";
 import OutcomeProjectPicker from "./outcome-project-picker";
 import OutcomeDelivery from "./outcome-delivery";
 import CreateOutcomeModal, { type OutcomeDraft } from "./create-outcome-modal";
+import WorkspaceSettings from "./workspace-settings";
 
 type Team = { id: string; name: string; key: string };
 type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
@@ -34,6 +35,7 @@ function SyncReport({ report }: { report: ImportResult["report"] }) {
 
 export default function App() {
   const [activeView, setActiveView] = useState<"board" | "outcomes" | "projects" | "scenarios">("board");
+  const [showSettings, setShowSettings] = useState(false);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State | null>(null);
@@ -221,7 +223,11 @@ export default function App() {
   if (!signedIn) return <main className="shell auth"><div className="brand">Oh, WAWD!</div><h1>Your private planning space</h1><p>Sign in as the workspace owner.</p><form onSubmit={login}><label>Owner password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error" role="alert">{error}</p>}</main>;
 
   return <main className="shell workspace-shell">
-    <header className="app-header"><div className="app-brand"><div className="brand-mark">W</div><div><div className="brand">Oh, WAWD!</div><p>What are we doing, and when?</p></div></div><nav className="app-tabs" aria-label="Workspace views">{([['board','Board'],['outcomes','Outcomes'],['projects','Linear projects'],['scenarios','Scenarios']] as const).map(([id, label]) => <button key={id} className={activeView === id ? "app-tab active" : "app-tab"} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}>{label}{id === "outcomes" && state?.outcomes.length ? <span>{state.outcomes.length}</span> : null}{id === "projects" && state?.projects.length ? <span>{state.projects.length}</span> : null}</button>)}</nav><div className="header-actions"><span className="source-freshness">{state?.connection ? `${state.connection.team_name} · ${new Date(state.connection.last_imported_at).toLocaleDateString()}` : "Linear not connected"}</span><button className="quiet" onClick={() => void run(async () => { await api("/api/session", "DELETE"); setSignedIn(false); setState(null); })}>Sign out</button></div></header>
+    <header className="app-header"><div className="app-brand"><div className="brand-mark">W</div><div><div className="brand">Oh, WAWD!</div><p>What are we doing, and when?</p></div></div><nav className="app-tabs" aria-label="Workspace views">{([['board','Board'],['outcomes','Outcomes'],['projects','Linear projects'],['scenarios','Scenarios']] as const).map(([id, label]) => <button key={id} className={activeView === id ? "app-tab active" : "app-tab"} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}>{label}{id === "outcomes" && state?.outcomes.length ? <span>{state.outcomes.length}</span> : null}{id === "projects" && state?.projects.length ? <span>{state.projects.length}</span> : null}</button>)}</nav><div className="header-actions"><span className="source-freshness">{state?.connection ? `${state.connection.team_name} · ${new Date(state.connection.last_imported_at).toLocaleDateString()}` : "Linear not connected"}</span>
+      <button id="workspace-settings-button" type="button" className="quiet workspace-settings-trigger" aria-label="Settings" title="Settings" aria-haspopup="dialog" onClick={() => setShowSettings(true)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.6v2.8L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.6v-2.8L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg>
+      </button>
+      <button className="quiet" onClick={() => void run(async () => { await api("/api/session", "DELETE"); setSignedIn(false); setState(null); })}>Sign out</button></div></header>
     <section className="view-heading"><div><p className="eyebrow">{activeView === "board" ? "Sequencing and forecast" : activeView === "outcomes" ? "Product intent" : activeView === "projects" ? "Execution source" : "Decision history"}</p><h1>{activeView === "board" ? "Sequencing board" : activeView === "outcomes" ? "Outcomes" : activeView === "projects" ? "Linear projects" : "Decision scenarios"}</h1><p>{activeView === "board" ? "See target risk, capacity, and parallel work without leaving the planning surface." : activeView === "outcomes" ? "Create, edit, and connect desired results to the work required for delivery." : activeView === "projects" ? "Import, search, review, and curate the Linear work available to planning." : "Save alternatives, publish decisions, and compare what changed the forecast."}</p></div></section>
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
     <section className="workspace-view" hidden={activeView !== "projects"}><details className="panel source-panel" open={!state?.connection}><summary><div><strong>Linear source</strong><small>{state?.connection ? `${state.connection.team_name} · connected as ${state.connection.viewer_name} · last imported ${new Date(state.connection.last_imported_at).toLocaleString()}` : "Connect an API key to preview one team."}</small></div><span className="tag">Read only</span></summary>
@@ -267,6 +273,7 @@ export default function App() {
       {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
       {showCreateOutcome && state && <CreateOutcomeModal draft={newOutcome} projects={state.projects} busy={busy} onChange={setNewOutcome} onSave={createOutcome} onCancel={() => setShowCreateOutcome(false)} />}
     </section></section>
+    {showSettings && <WorkspaceSettings connected={!!state?.connection} onClose={() => setShowSettings(false)} />}
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;
 }
