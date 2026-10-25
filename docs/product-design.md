@@ -36,7 +36,20 @@ Target date choices classify saved targets using the connected team's timezone (
 
 The default sort is **Name A–Z**, with **Needed by** (earliest first, missing last) and **Newest created** also available. Results announce **N of M outcomes**. **Clear filters** resets search and facets while retaining sort. Facet choices come from the full saved catalog; disappearing selections remain explicit unavailable/zero-result choices. Query state survives view switches and successful data refreshes within the signed-in page session; sign-out or full page reload resets it. Browsing sends no planning writes and remains available when delivery forecasts fail. Loading, initial-load failure with retry, loaded-empty, zero matches and stale last-good results are distinct states.
 
-Implementation staging: `ohwawd-sk0r` supplies the browse surface and explicit Inspect/Edit/Links/Delete callbacks, retaining the existing detail/edit controls on demand outside the compact rows. The read/edit sidebar, filtered mutation notices, overlay handoffs and focus-restoration refinements remain tracked by `ohwawd-5eqp`; ship the complete replacement after that integration and `ohwawd-vart` verification.
+Implementation staging: `ohwawd-sk0r` supplies the verified browse surface. Its current Inspect/Edit/Links/Delete callbacks and existing detail/create/link surfaces are transitional. The approved design below replaces them; completed query and browsing work remain valid prerequisites.
+
+### Approved outcome workspace design — awaiting implementation
+
+The accepted October 25 UX review establishes **one persistent outcome sidebar** with **Details** and **Projects** sections for adding, viewing, editing and managing links. The source of truth is [redesign-outcome-catalog](../openspec/changes/redesign-outcome-catalog/design.md), Decisions 1 and 5–7; [the UX review](outcomes-ux-review.md) records the rationale and considered alternatives.
+
+- Catalog and delivery outcome titles open saved Details. One primary **Add outcome** at the Outcomes heading opens blank Details with title focused; a loaded-empty catalog retains contextual creation. Repeated Edit/Links/Delete row actions, duplicated section-header Add controls and the inline editor are removed. Delivery forecasts and Resolve blocker actions remain.
+- Details shows complete metadata with read-only stream assignment; Projects shows every direct link and its Required/Optional and hidden/unavailable state. Edit details and Manage projects enter editing within their section, without another dialog.
+- Internal navigation preserves both drafts, edit modes and project search/status context. Existing outcomes use **Save details / Cancel details** and **Save links / Cancel links**, each affecting only its own section. New outcomes use **Create outcome** to persist initial details and links together, then show saved Details in the same sidebar.
+- Close, Escape and valid backdrop dismissal discard all unsubmitted work; reopening starts from saved values. Submitted writes can finish after dismissal. Errors stay contextual, and a successful write followed by refresh failure offers refresh-only retry.
+- Search, facets, sort and page context remain intact. Saved outcomes leaving the query stay open with **Outside current filters** and explicit Clear filters; drafts never change catalog membership. A creation finishing after dismissal offers View outcome using its returned ID.
+- Confirmed Delete outcome lives at the bottom of clean saved Details, away from save controls. It is unavailable while either section has unsaved changes or a write is pending. Dismissal/deletion restore meaningful focus. The desktop sidebar becomes full-screen on narrow layouts.
+
+Remaining implementation chain: `ohwawd-5eqp` (persistent shell/Details) → `ohwawd-q087` (creation/Projects) → `ohwawd-xlk3` (page entry points, deletion and filtered context) → `ohwawd-vart` (cross-feature verification). Each implementation Bean owns its tests and documentation. These are approved requirements, not a claim that the new sidebar is already available.
 
 ## Current assignment and scope workflow (introduced in v1)
 

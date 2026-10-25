@@ -2,46 +2,52 @@
 
 ## Context
 
-See `proposal.md` for motivation. The screenshot matches the current `#outcome-catalog` in `src/app/workspace.tsx`: a `.card-list` of `.outcome-card` articles with notes, success signal, every linked project, inline editing, and repeated actions.
+See `proposal.md` for motivation and `docs/outcomes-ux-review.md` for the accepted UX rationale. The compact searchable catalog and saved-data query contract are implemented. The remaining work replaces the current inline inspection/editor, creation modal and link picker with one persistent outcome sidebar.
 
 - The workspace owns saved outcome data, mutation callbacks, selected view, and refresh fan-out. Views stay mounted behind `hidden`, so local catalog state can survive tab changes without storage.
-- `GET /api/state` already returns the complete outcome catalog, project names, all links, active streams and outcome creation timestamps. Its outcome query omits `stream_id`, and the client Outcome type omits `created_at`. Neither omission requires a schema change.
+- `GET /api/state` now supplies the catalog's complete saved metadata, direct links, stream assignment, date-only target, creation timestamp and resolved timezone. The completed query/browse Beans remain valid prerequisites.
 - `OutcomeDelivery` is a separate panel above the catalog, fed by the Board forecast. It exposes Edit/Links/Delete callbacks that currently target the inline catalog editor. The catalog should not acquire a dependency on that forecast request.
-- `CreateOutcomeModal` already creates an outcome and project links together. `OutcomeProjectPicker` uses shared `OutcomeProjectFields` for existing links. Preserve these behaviors and their API validation.
+- Creation already saves an outcome and initial links in one transaction and returns its ID. Existing metadata and link updates use separate transactional endpoints. Reuse `OutcomeProjectFields` and outcome fields while replacing their separate overlay containers; preserve validation and ownership behavior.
 - `docs/ui-ux-conventions.md` defines modal sidebar dismissal, pointer-origin protection, focus containment/restoration and narrow-screen behavior. The project drawer is an implementation reference, not a component to overload with outcome-specific data.
 - The independent `add-workspace-settings` change also touches workspace layout and modal ownership. These changes share integration points but neither functionally blocks the other; reconcile workspace callbacks and overlay mounting when implementing.
 
 ## Goals / Non-Goals
 
-**Goals:** scan many outcome definitions, locate an outcome by meaningful criteria, inspect details without growing list rows, and retain context through normal catalog actions.
+**Goals:** scan and locate outcome definitions, use one stable workspace for all outcome actions, preserve drafts across internal navigation, and retain catalog context across inspection and mutations.
 
-**Non-goals:** replace or filter Outcome delivery, change Board stream assignment, infer outcome completion from project status, create custom outcome lifecycle statuses, add saved/shared filter views, add pagination/virtualization, or redesign the outcome creation/project-link selection forms.
+**Non-goals:** replace or filter delivery forecasts, change Board stream assignment, infer outcome completion from project status, add outcome lifecycle statuses, saved/shared filters, pagination/virtualization, autosave, unsaved-change confirmations, or a combined transactional update API. Reuse field/selection semantics rather than redesigning them.
 
 ## Decisions
 
 ### 1. One compact list with details on demand
 
-Use a dedicated `OutcomeCatalog` component with semantic list/article markup and a shared desktop CSS-grid column layout. Each row has an outcome-title button, Owner, Stream, Needed by, Projects, and actions. Individual metadata groups carry accessible labels; desktop column headings are visual aids, not a falsely labeled ARIA grid. The title's accessible name is always complete.
+Use the dedicated `OutcomeCatalog` component with semantic list/article markup and a shared desktop CSS-grid column layout. Each row has an outcome-title button, Owner, Stream, Needed by and Projects. Remove the repeated Edit/Links/Delete actions and their column; the title opens the outcome workspace. Individual metadata groups carry accessible labels; desktop column headings are visual aids, not a falsely labeled ARIA grid. The title's accessible name is always complete.
 
 Default rows do not render notes, success signals or individual project names. They show `No owner`, `Needs assignment`, `No target`, and `No projects` explicitly instead of unexplained blanks. The Projects cell displays direct required/optional counts, including `0 required · 2 optional` for optional-only outcomes. These are link counts, not dependency-expanded forecast scope or capacity totals.
 
 Suggested layout:
 
 ```text
-Outcome catalog                                      [+ Add outcome]
+Outcomes                                             [+ Add outcome]
+Outcome delivery · Outcome catalog
+… delivery forecasts and Resolve blocker actions …
+
+Outcome catalog
 [Search outcomes or linked projects…             ] [Sort: Name A–Z ▾]
 [Owner: All ▾] [Stream: All ▾] [Projects: All ▾] [Target date: All ▾]
 12 of 38 outcomes · [Clear filters]
 ────────────────────────────────────────────────────────────────────
-Outcome                     Owner    Stream    Needed by   Projects   Actions
-Clients manage their users  Eng.     Core      Jan 18, 2027 2 required Edit Links Delete
-Launch the internal preview Brad    Delivery  Nov 2, 2026  2 required Edit Links Delete
+Outcome                     Owner    Stream    Needed by   Projects
+Clients manage their users  Eng.     Core      Jan 18, 2027 2 required
+Launch the internal preview Brad    Delivery  Nov 2, 2026  2 required
 …
 ```
 
-Name A–Z is the default. On desktop aim for approximately 8–10 ordinary rows within an 800px-high catalog viewport, with 64–88px typical row height and at most two title lines; exceptionally long data can grow the row rather than overlap it. Full titles remain available through the button's name, title tooltip and sidebar. At narrow widths titles wrap fully and metadata/actions stack, preserving one outcome per list item.
+Name A–Z is the default. On desktop aim for approximately 8–10 ordinary rows within an 800px-high catalog viewport, with 64–88px typical row height and at most two title lines; exceptionally long data can grow the row rather than overlap it. Full titles remain available through the button's name, title tooltip and sidebar. At narrow widths titles wrap fully and metadata stacks, preserving one outcome per list item.
 
 Use normal page scrolling for the entire filtered result set: no capped list scroller, page-size controls, or infinite-scroll sentinel. Keep Outcome delivery above the catalog. Add `Outcome delivery` / `Outcome catalog` section links at the top of the Outcomes view; selecting one scrolls to its section and focuses its heading with the established sticky-header offset. Board blocker navigation continues to target delivery.
+
+Place one primary Add outcome at the Outcomes heading. The loaded-empty catalog may offer a contextual Add outcome as well. Delivery outcome titles open the same sidebar; remove its repeated Edit/Links/Delete actions and duplicated header Add action, retaining Resolve blocker and forecast information.
 
 Alternatives: slimmer cards still repeat long lists; an editable data grid adds unnecessary navigation/editing machinery; replacing delivery with catalog rows would mix definition browsing with forecasting and broaden this request.
 
@@ -81,35 +87,64 @@ Show `N of M outcomes`, where M is the entire loaded catalog and N is the matchi
 
 An empty loaded workspace offers Add outcome. A nonempty catalog with zero matches explains that filters found no outcomes and offers Clear filters. A failed initial load shows a retryable error rather than `No outcomes yet`; a failed refresh retains last-good results with visible stale-data feedback. A delivery-forecast failure does not empty or disable catalog browsing.
 
-### 5. Outcome sidebar and existing actions
+### 5. One persistent outcome workspace
 
-Add a focused `OutcomeDetailsDrawer` using native dialog and the established sidebar conventions. The title button opens read mode with full title, notes, owner, success signal, needed-by date, assigned stream, and every direct linked project with required/optional and hidden/unavailable labels. Imported project names can link to their cached Linear URLs. Do not add an outcome-row project-key disclosure.
+Use one focused outcome-sidebar component backed by native dialog, following `docs/ui-ux-conventions.md`. Keep its dialog instance, header and Close control mounted across Details/Projects switches and the new-to-saved transition. Mount the controller outside filtered rows and hidden workspace sections. Do not stack or hand off outcome dialogs.
 
-Row actions remain explicit: Edit, Links and Delete, with outcome-specific accessible names. Edit opens the same drawer in edit mode and focuses Outcome title. Move the existing inline outcome form there without changing validation or payloads. Stream is read-only context in this editor; stream assignment continues on Board. Cancel edit returns to read mode using saved values. Close/Escape/backdrop dismiss the drawer and discard unsubmitted edits without autosaving or introducing a confirmation flow. Background refreshes must not overwrite an active draft.
+Details inspection shows full title, notes, owner, success signal, needed-by date and assigned stream. Projects inspection shows every direct linked project with Required/Optional and hidden/unavailable labels and cached Linear links where available. Stream assignment remains read-only; Board owns that edit. Details has Edit details; Projects has Manage projects. Both enter explicit editing in the same section.
 
-Keep the existing create-with-projects modal and project-link picker. Put overlay controllers outside filtered rows and outside hidden workspace sections. Allow one outcome overlay at a time. Links from a row or delivery opens the picker directly. Links from the read-only sidebar hands off to the picker; Save or Cancel returns to the read-only outcome sidebar with current saved links. Do not expose that handoff while an outcome edit draft is active. Preserve the original outside opener across the handoff for final focus restoration; do not stack dialogs.
+```text
+Outcome / New outcome                             [Close]
+────────────────────────────────────────────────────────
+[Details · unsaved] [Projects]
+Saved information or selected section's editor
+Inline pending / saved / rejected / refresh-failed status
+[Cancel details]                           [Save details]
+New mode instead uses:                   [Create outcome]
+```
 
-Delivery's Edit callback opens this editor directly even when its outcome is excluded by catalog filters. Links and Delete retain their existing behavior. Preserve existing deletion confirmation and ensure only the selected outcome is removed. Successful writes use the current workspace reload fan-out to update catalog, Board and delivery. Inline modal errors retain inputs and the current context; successful persistence followed by failed refresh is reported as saved-but-not-refreshed, not as an unsaved write.
+| Entry/action | State and focus |
+| --- | --- |
+| Add outcome | New outcome; Details editing; title focused; empty metadata and link drafts. |
+| Catalog or delivery title | Saved outcome; Details inspection; heading focused. Resolve by stable ID regardless of catalog membership. |
+| Edit details / Manage projects | Edit the selected section; focus title / project search respectively. |
+| Details ↔ Projects | Stay in the same dialog; retain both drafts, edit modes and project search/status context. Section buttons remain keyboard operable with programmatic selected state and an associated section heading. |
+| Save details / Save links | Save only that section; return it to inspection with success feedback. Preserve the other section's unsaved draft and mode. |
+| Cancel details / Cancel links | Reset only that section to current saved values and return it to inspection. Keep the other draft intact. |
+| Create outcome | Validate both sections, reveal and focus any invalid field in its section, then POST metadata and initial links once. On persistence success, transition to saved Details in the same dialog using the returned ID. |
+| Close / Escape / valid backdrop click | Discard all unsubmitted drafts and dismiss. Reopening starts from saved values. A new-mode Cancel, if rendered, has the same dismissal meaning. |
 
-Keep mutation ownership at workspace/controller level so dismissing a sidebar does not abort a submitted write or skip refresh. Serialize conflicting writes and guard opening/request generations: completion from an older outcome must not close or reset a newer outcome's draft. The current `run()` helper catches errors and resolves normally, so modal callbacks must expose an explicit success/failure result rather than interpreting a resolved promise as a successful save.
+Store metadata and a complete link map at opening scope, not inside section components that unmount on navigation. Derive dirty indicators per section; while dirty explain `Changes stay while switching sections. Closing discards unsaved changes.` Background refreshes update saved snapshots but never overwrite dirty drafts. No autosave or discard confirmation is introduced. While a submission is pending, freeze the submitted section (both sections for creation) to avoid ambiguous in-flight edits; navigation and Close remain available.
+
+Reuse existing project selection/search/status/requirement controls within Projects. A newly selected project defaults to Minimum required. Preserve zero-link and optional-only creation, and explain that Optional work does not determine first delivery. The complete link map, counts and submission include hidden/unavailable links independently of displayed/search-matching rows. Show unavailable links explicitly with an unlink control during editing; never remove them implicitly or invent missing names. If server validation rejects a remaining unavailable link, keep the draft and show the error.
+
+Place Delete outcome at the bottom of saved Details away from Save, available only when both sections have no unsubmitted changes and no write is pending. Preserve existing confirmation, selected-ID targeting and capacity-ownership cleanup. Remove creation/link overlay containers and obsolete inline editors once the integrated sidebar serves all entry points.
+
+**Persistence ownership:** retain the transactional POST for creation and separate existing metadata/link PUTs. Do not present a global Save for existing outcomes or issue a sequential pair disguised as an atomic edit. Keep mutation ownership at workspace/controller level and serialize conflicting writes. Use explicit rejected, saved, and saved-but-refresh-failed outcomes; the current `run()` helper catches errors and resolves normally, so a resolved callback alone is not proof of persistence.
+
+Close does not abort a submitted write or skip refresh. Capture the submitted payload and opening/request generation so an older completion cannot close, reset, populate or steal focus from a newer opening. A dismissed successful creation offers View outcome from a notice. Surface failures after dismissal in the workspace without reopening the old sidebar. On successful persistence, update the saved section from the accepted payload or authoritative reload and clear its dirty state; a failed follow-up reload offers refresh-only retry without repeating the mutation. Retain a just-created outcome snapshot keyed by the returned ID if reload fails, rather than treating absence from stale data as external deletion. Catalog, Board and delivery refresh through the existing fan-out; last-good results remain explicitly stale on refresh failure.
+
+Alternatives: keeping three containers with matching styles preserves the original navigation/draft problem. A single combined Save outcome is simpler superficially but requires a combined transactional update endpoint or partial-success recovery; separate, accurately labeled save scopes fit existing APIs and limit this change's architecture.
 
 ### 6. Mutations do not silently change the user's filters
 
-- **Edited outcome no longer matches:** update the underlying result set and counts, keep the sidebar open in read mode for the saved outcome, and show `This outcome is outside the current filters`. Do not pin an extra result row or reset the query.
-- **Created outcome does not match:** keep filters/sort intact; the creation notice offers View outcome and Clear filters. Capture the existing POST response's outcome ID to target inspection without requiring the new row to be visible.
-- **Links change search or project coverage:** recompute membership and counts from refreshed saved links. Preserve inspection context across the picker handoff.
+- **Edited outcome no longer matches:** update results/counts from saved data, keep the sidebar open and show `Outside current filters` with an explicit Clear filters action. Return only the saved section to inspection; preserve the other draft. Do not pin an extra result or reset the query.
+- **Created outcome does not match:** transition directly to its saved Details in the same sidebar, retaining query/sort. Show the outside-filters explanation and Clear filters. If creation finishes after dismissal, offer View outcome and Clear filters in the notice using the returned ID.
+- **Links change search or project coverage:** recompute membership/counts from saved links without leaving Projects or resetting its search/status context. Never filter catalog results using drafts.
 - **Deletion:** close overlays for the deleted ID. Restore focus to the next visible outcome's title at its former result index, then the previous row, then the catalog heading if no result remains. Removing the owning outcome retains existing server-side capacity-ownership cleanup.
-- **Ordinary dismissal:** restore the original opener when still visible; otherwise focus the catalog heading. Actions launched from delivery restore their delivery opener where possible. Dismissal must not activate controls beneath the backdrop.
+- **Ordinary dismissal:** restore the original opener without scrolling the underlying page when still visible; otherwise focus the catalog heading. Actions launched from delivery restore their title opener, then delivery heading as fallback. Preserve page position except when necessary to reveal a fallback. Dismissal must not activate controls beneath the backdrop.
 
-The selected outcome is tracked by stable ID, independently of its result index or whether its row still matches. External disappearance of that ID closes its overlay with feedback and a valid focus fallback rather than rendering stale fields.
+The selected outcome is tracked by stable ID, independently of its result index or whether its row still matches. Confirmed external disappearance on a successful refresh closes its overlay with feedback and a valid focus fallback. A failed refresh or a just-created ID missing from stale results is not evidence of deletion.
 
 ### 7. Accessibility, responsive behavior and verification
 
-Use labeled search/select controls, accessible result announcements without moving focus while typing, logical document order and outcome-specific action names. Rows themselves are not click-only containers; the title and actions are actual buttons. Retain full underlying accessible titles when visual wrapping is limited. Do not hide owner, stream, target or project coverage solely because the viewport narrows.
+Use labeled search/select controls, accessible result announcements without moving focus while typing, logical document order and full outcome-title button names. Rows themselves are not click-only containers. Do not hide owner, stream, target or project coverage solely because the viewport narrows. The sidebar is modal with inert background and contained focus; all dismissal methods remain available during saves. Backdrop dismissal requires pointer start and end outside, protecting drag-out interactions.
+
+Use a readable right-hand sidebar on desktop and full-screen presentation on narrow layouts. Keep header, Close and relevant save actions reachable around one clear scrolling body; avoid nested small scrolling panes. Preserve section selection, dirty indicators and all save/error status on mobile. Maintain semantic tokens, real focus outlines, reduced-motion behavior and non-color state cues from `docs/visual-theme.md`.
 
 Add focused `tests/outcome-catalog.test.ts` for matching, owner normalization, direct-link partitions, stable tie-breaks, date boundaries, missing data and immutable inputs. Extend the existing real-database assignment fixture with multiple owners/streams, no-project/optional-only/required outcomes, hidden/shared projects, long text, null dates and many catalog rows. Use browser tests in `tests/ui/outcome-catalog.spec.ts` for combined filters, counts/reset/sort, reaching the last row, details/edit/create/link/delete context and failures. Update existing workspace organization and responsive cases to use the new catalog/editor paths instead of `.outcome-card` selectors.
 
-Each implementation Bean owns its relevant tests and documentation. Final integration runs typecheck, unit/database tests and the affected catalog/workspace/outcome/creation/responsive browser suites, with visual inspection at 1440px, 768px and 390px. Use existing tooling; no lint configuration or new dependency is required. Read installed Next.js guides before writing application code.
+Each implementation Bean owns its relevant tests and documentation. Cover same-dialog section/create transitions, cross-section draft preservation and section Cancel/save scopes, hidden-section validation, rejected writes versus refresh failures, late completion after dismissal/new opening, filtered membership/focus, deletion/external removal, and backdrop/Escape/drag-out behavior. Final integration runs typecheck, unit/database tests and affected catalog/workspace/outcome/creation/responsive/theme browser suites, with visual inspection at 1440px, 768px and 390px. Use existing tooling; no lint configuration or new dependency is required. Read installed Next.js guides before writing application code. A lightweight planner walkthrough should check whether Save, Cancel and Close consequences are understood; record actual observations without asserting unmeasured usability improvements.
 
 ## Risks / Trade-offs
 
@@ -118,9 +153,12 @@ Each implementation Bean owns its relevant tests and documentation. Final integr
 - [Past-target date mistaken for forecast risk] → Label it Past target date and leave target fit/status in Outcome delivery.
 - [Editing removes the opener from the result set] → Independent overlay state, unchanged filters and explicit heading/neighbor focus fallbacks.
 - [Growing delivery panel makes catalog hard to reach] → Direct section navigation above both panels without changing blocker destinations.
-- [Overlay handoffs discard a draft or trap focus] → One overlay at a time, links handoff only from read mode, saved outside-opener reference, and keyboard/backdrop tests.
+- [Internal section switches discard drafts] → Own both drafts and project-search state at opening scope; test navigation, isolated Save/Cancel and Close/reopen.
+- [Two save scopes are misunderstood] → Explicit Save details/Save links labels, per-section dirty/saved/error status and one atomic Create outcome action for new records.
+- [Refresh failure encourages duplicate writes] → Distinguish persistence from refresh, retain accepted/created snapshots and offer refresh-only retry.
+- [Old requests reset newer openings] → Captured payloads and generation checks with controller-owned submissions and late-completion tests.
 - [Settings and catalog both touch workspace] → Coordinate local integration against the latest workspace controller; share conventions, not mutable draft state. No dependency on Settings implementation is required.
 
 ## Migration Plan
 
-Implement linked Beans in order: query/data contract, compact browse UI, outcome detail/action integration, and final cross-view verification. Ship the UI replacement and editor callback changes together. Existing persisted outcome data and published scenarios require no migration. Rollback restores catalog rendering against the same APIs and stored values. Keep the OpenSpec change active until all implementation Beans are complete, then reconcile `tasks.md`, validate and archive normally.
+The query/data contract and compact browse UI are verified complete. Implement the remaining linked Beans in order: persistent sidebar/Details foundation, unified creation and Projects, catalog/delivery entry-point and context integration, then cross-feature verification. Intermediate foundations may coexist with legacy entry points during development, but ship the completed replacement with all entry points routed to the shared sidebar and obsolete containers removed. Existing persisted data and published scenarios require no migration. Rollback restores the prior UI against unchanged APIs and stored values. Keep this change active until all associated work is complete, then reconcile `tasks.md`, validate and archive through the normal workflow.

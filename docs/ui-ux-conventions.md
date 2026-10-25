@@ -20,6 +20,19 @@ Read it before designing or modifying UI. Follow these conventions alongside the
 
 The project details sidebar (`src/app/project-drawer.tsx`) implements this convention.
 
+## Multi-section editing overlays
+
+The Settings overlay and approved outcome-sidebar design share this interaction model:
+
+- Keep one overlay open while switching its internal sections. Section navigation preserves each draft and its editing context; it does not save or discard changes.
+- Use explicit section-scoped save and cancel labels when sections persist independently. Saving or cancelling one section leaves other sections' unsubmitted changes intact. Identify sections containing unsaved changes.
+- Closing through Close, Escape or backdrop discards unsubmitted drafts without autosave or a new discard-confirmation step. Explain this behavior while changes are unsaved. Reopening starts from saved data.
+- Keep dismissal available during submitted writes. Dismissal does not cancel persistence; an earlier request must not close, reset or steal focus from a newer opening.
+- Distinguish rejected writes from successful persistence followed by a refresh failure. Retain drafts on rejection, and offer refresh-only retry after persistence succeeds.
+- Keep section controls, Close, relevant save actions, and dirty/pending/saved/error feedback accessible at narrow widths. Preserve the surrounding page's browsing context.
+
+Outcome-specific sections, creation behavior, validation and save boundaries are defined in the active [Outcome Catalog design](../openspec/changes/redesign-outcome-catalog/design.md), Decisions 5–7. That sidebar is planned, not yet implemented.
+
 ## Centered settings overlays
 
 - Workspace-level settings can use a centered modal opened from the signed-in header. Opening it preserves the active workspace view and its local context.
