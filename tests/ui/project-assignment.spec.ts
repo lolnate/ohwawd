@@ -105,10 +105,13 @@ test("edit one extra budget and refresh scope attention across midnight", async 
   await expect(web.getByLabel("Extra scope points")).toBeVisible();
   await expect(web.getByLabel("Extra scope points")).toBeFocused();
   await expect(web.getByText(/Forecast:/)).toBeVisible();
-  await page.locator("#scoping-settings > summary").click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Scope readiness", exact: true }).click();
   await page.getByLabel("Scope projects (days before start)").fill("21");
   await page.getByRole("button", { name: "Save scoping window" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings", exact: true }).getByRole("status")).toContainText("Scoping window saved");
   expect((await assignment.board()).capacity.scoping_lead_days).toBe(21);
+  await page.keyboard.press("Escape");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
 });
 });

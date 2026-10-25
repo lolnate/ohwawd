@@ -36,10 +36,11 @@ test("projected cycles enable provisional delivery and retain editable weekly ho
   await expect(editor.getByLabel("Week availability %")).toHaveValue("50");
   await editor.getByLabel("Week availability %").fill("100");
   await editor.getByRole("button", { name: "Save week availability" }).click();
-  await expect(page.locator("#sequencing-board").getByRole("status")).toContainText("Week availability saved");
+  await expect(page.getByRole("dialog", { name: "Settings", exact: true }).getByRole("status")).toContainText("Week availability saved");
   const after = await assignment.board();
   expect(after.forecast.cycles.find((cycle) => cycle.name === "Cycle 50")!.projected).toBe(true);
   expect(after.forecast.cycles.find((cycle) => cycle.name === "Cycle 50")!.available).toBe(20);
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /^Outcomes/ }).click();
   await expect(page.locator("#outcome-delivery")).toContainText("projected cycles");
   await expect(page.locator("#outcome-delivery")).toContainText("provisional");

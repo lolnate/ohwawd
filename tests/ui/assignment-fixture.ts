@@ -12,13 +12,16 @@ import { HttpError } from "../../src/lib/security";
 import { saveHolidayPreset, saveWeeklyAvailability } from "../../src/lib/weekly-capacity-store";
 import { addStream, listStreams } from "../../src/lib/streams";
 import { assignOutcomeToStream, replaceOutcomeLinks, transferProjectOwnership } from "../../src/lib/outcome-ownership";
+import { saveCapacityProfile } from "../../src/lib/capacity-store";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
   setDemand: (projectId: string, points: number | null) => Promise<void>; requireProject: (projectId: string) => Promise<void>; pauseUnassigned: () => Promise<void>;
   configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void>;
   shareProjects: () => Promise<void>; changeOwner: (outcomeId: string) => Promise<void>;
   setCapacity: (baseline: number | null, coreAllocation?: number) => Promise<void>;
-  setWeekAvailability: (weekStart: string, availability: number) => Promise<void> };
+   setWeekAvailability: (weekStart: string, availability: number) => Promise<void>;
+   observeCapacity: () => Promise<void>; setCycleAvailability: (availability: number) => Promise<void>;
+   setExtraScope: (projectId: string, points: number) => Promise<void> };
 export const test = base.extend<{ assignment: Controls }>({
   assignment: async ({ page }, use) => {
     const browserErrors: string[] = [];
@@ -68,7 +71,8 @@ export const test = base.extend<{ assignment: Controls }>({
               } else if (body.type === "extraScope") await saveExtraScope(client, body);
               else if (body.type === "ownership") await transferProjectOwnership(client, body);
               else if (body.type === "outcomeAssignment") await assignOutcomeToStream(client, body);
-              else if (body.type === "scoping") await saveScopingWindow(client, body.leadDays);
+               else if (body.type === "capacity") await saveCapacityProfile(client, body);
+               else if (body.type === "scoping") await saveScopingWindow(client, body.leadDays);
               else if (body.type === "weeklyAvailability") await saveWeeklyAvailability(client, body);
               else if (body.type === "holidayPreset") await saveHolidayPreset(client, body.enabled);
               else throw new Error(`Unmocked board mutation ${body.type}`);
@@ -120,7 +124,12 @@ export const test = base.extend<{ assignment: Controls }>({
           await database.query("UPDATE capacity_profile SET baseline=$1 WHERE workspace_id=1", [baseline]);
           await database.query("UPDATE stream SET allocation=CASE WHEN id='core' THEN $1::numeric ELSE 1-$1::numeric END", [coreAllocation]);
         },
-        setWeekAvailability: (weekStart, availability) => saveWeeklyAvailability(client, { weekStart, availability }),
+         setWeekAvailability: (weekStart, availability) => saveWeeklyAvailability(client, { weekStart, availability }),
+         observeCapacity: async () => {
+           for (const [index, points] of [18, 20, 22].entries()) await database.query("INSERT INTO cycle_observation(linear_id,team_id,starts_at,ends_at,completed_at,cycle_days,completed_points) VALUES($1,'team','2026-10-01','2026-10-08','2026-10-08',7,$2)", [`observed-${index}`, points]);
+         },
+         setCycleAvailability: async (availability) => { await database.query("INSERT INTO linear_cycle_adjustment(linear_cycle_id,availability) SELECT linear_id,$1 FROM linear_cycle_cache ON CONFLICT(linear_cycle_id) DO UPDATE SET availability=$1", [availability]); },
+         setExtraScope: (projectId, points) => saveExtraScope(client, { packageId: `linear:${projectId}`, points, notes: "" }),
         requireProject: async (projectId) => {
           await database.query("DELETE FROM outcome_project_link");
           await database.query("INSERT INTO outcome_project_link(outcome_id,project_id) VALUES('00000000-0000-4000-8000-000000000001',$1)", [projectId]);

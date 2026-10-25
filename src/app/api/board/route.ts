@@ -5,6 +5,7 @@ import { placeProjects, requireSequenceToken, rejectNewOrderConflicts } from "@/
 import { saveExtraScope, saveScopingWindow } from "@/lib/scope-store";
 import { saveHolidayPreset, saveWeeklyAvailability } from "@/lib/weekly-capacity-store";
 import { assignOutcomeToStream, transferProjectOwnership } from "@/lib/outcome-ownership";
+import { saveCapacityProfile } from "@/lib/capacity-store";
 
 const finite = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
@@ -64,17 +65,7 @@ export async function PUT(request: Request): Promise<Response> {
         // stream_id is scalar, so assigning here moves existing assignments rather than duplicating them.
         await assignPackagesToStream(client, body.streamId, body.packageIds);
       } else if (body.type === "capacity") {
-        if ((body.baseline !== null && !finite(body.baseline, 0, 100000)) || !finite(body.reserve, 0, 100000) || !Number.isInteger(body.horizon) || !finite(body.horizon, 1, 104) || typeof body.reason !== "string" || body.reason.length > 1000) throw new HttpError(400, "Enter a baseline, reserve, and horizon.");
-        const team = await client.query<{ cycle_duration: number | null }>("SELECT cycle_duration FROM linear_connection WHERE workspace_id=1");
-        const cycleDays = team.rows[0]?.cycle_duration ? team.rows[0].cycle_duration * 7 : 14;
-        if (body.baseline !== null && !body.reason.trim()) throw new HttpError(400, "Explain the provisional baseline or override.");
-        if (body.baseline === null) {
-          const observed = await client.query("SELECT 1 FROM cycle_observation WHERE cycle_days=$1 ORDER BY completed_at DESC LIMIT 3", [cycleDays]);
-          if ((observed.rowCount ?? 0) < 3) throw new HttpError(400, "Fewer than three comparable completed cycles; enter a provisional baseline.");
-        }
-        await client.query(`INSERT INTO capacity_profile(workspace_id,cycle_days,baseline,baseline_reason,reserve,horizon) VALUES(1,$1,$2,$3,$4,$5)
-          ON CONFLICT(workspace_id) DO UPDATE SET cycle_anchor=NULL,cycle_days=$1,baseline=$2,baseline_reason=$3,reserve=$4,horizon=$5`,
-        [cycleDays, body.baseline, body.reason.trim(), body.reserve, body.horizon]);
+        await saveCapacityProfile(client, body);
       } else if (body.type === "adjustment") {
         if (!Array.isArray(body.cycleIds) || !body.cycleIds.length || body.cycleIds.length > 15 || body.cycleIds.some((id: unknown) => typeof id !== "string") || new Set(body.cycleIds).size !== body.cycleIds.length) throw new HttpError(400, "Select one or more upcoming Linear cycles.");
         const found = await client.query(`SELECT c.linear_id FROM linear_cycle_cache c JOIN linear_connection l ON l.team_id=c.team_id

@@ -18,7 +18,7 @@ test("Settings opens over every signed-in view, focuses its heading, and resets 
       await nav.getByRole("button", { name: section, exact: true }).click();
       await expect(dialog.getByRole("heading", { name: section, exact: true })).toBeVisible();
       await expect(dialog.getByRole("heading", { level: 3 })).toHaveCount(1);
-      await expect(dialog.getByRole("textbox")).toHaveCount(0);
+      await expect(dialog.locator("form")).toBeVisible();
     }
     await dialog.getByRole("button", { name: "Close Settings" }).click();
     await expect(dialog).toHaveCount(0);
@@ -102,11 +102,13 @@ test("dismissal falls back to the current header gear when the captured opener i
 
 test("Settings is available before Linear connection without fabricated evidence", async ({ page, assignment }) => {
   await page.route("**/api/state", (route) => route.fulfill({ json: { connection: null, projects: [], outcomes: [], links: [], streams: [], timezone: "UTC" } }));
+  const board = await assignment.board();
+  await page.route("**/api/board", (route) => route.fulfill({ json: { ...board, connection: null, linearCycles: [], planningCycles: [], futureCycleIds: [], observations: [], observedBaseline: null } }));
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   await expect(dialog).toContainText("Imported capacity evidence is not available");
-  await expect(dialog).toContainText("Editing in Settings is not available yet");
+  await expect(dialog.getByRole("button", { name: "Save capacity", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Close Settings" }).click();
   expect((await assignment.board()).capacity.baseline).toBe(20);
 });

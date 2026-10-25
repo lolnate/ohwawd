@@ -105,7 +105,9 @@ test("cycle-wide controls explain their scope and link to the separate weekly av
   await expect(cycles.getByRole("heading", { name: "Whole-cycle capacity override" })).toBeVisible();
   await cycles.getByRole("button", { name: "Weekly availability and holidays", exact: true }).click();
   const weekly = page.locator("#calendar-availability");
+  await expect(page.getByRole("dialog", { name: "Settings", exact: true })).toBeVisible();
   await expect(weekly.getByLabel("Week starting (Monday)")).toBeVisible();
+  await expect(weekly.getByLabel("Week starting (Monday)")).toBeFocused();
   await expect(weekly).toContainText(/week override/i);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
   expect((await assignment.board()).capacity.holidays_enabled).toBe(true);

@@ -26,3 +26,5 @@ The project details sidebar (`src/app/project-drawer.tsx`) implements this conve
 - Centered modals follow the same backdrop, drag-out protection, Close, Escape, focus containment, and focus-restoration conventions as overlay sidebars above.
 - Contextual actions open the relevant settings section and focus its target field. General entry focuses the modal heading. If the original opener is unavailable on dismissal, restore focus to the stable header entry point.
 - On narrow screens, the modal becomes full-screen with internally scrolling content and a reachable header and Close action. Section navigation wraps and fields stack without page-level horizontal overflow.
+- Settings drafts survive section switches within one opening. Explicit save actions apply to their section; closing discards unsubmitted edits. A submitted save can finish after dismissal and still refresh planning views.
+- Report successful persistence separately from a failed follow-up refresh. Offer a refresh retry without submitting the saved edit again.

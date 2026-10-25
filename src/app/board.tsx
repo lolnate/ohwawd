@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import type { ForecastResult, PackageForecast } from "@/lib/forecast";
 import { planningCycleLabel as linearCycleLabel, type PlanningCycle } from "@/lib/cycles";
 import type { CalendarProjection } from "@/lib/cycle-projection";
@@ -10,9 +10,9 @@ import { readApiResponse } from "./client-api";
 import ProjectPlanCard, { type BoardProject as Package } from "./project-plan-card";
 import { placementError, type QueueState, type Placement, type OrderConflict } from "@/lib/sequencing";
 import { teamLocalDate, millisecondsUntilNextTeamDate, type ExtraScope, type ScopeReadiness } from "@/lib/project-scope";
-import { type WeeklyAvailability, type PlanningWeek } from "@/lib/planning-calendar";
+import { type WeeklyAvailability } from "@/lib/planning-calendar";
 import StreamTimeline from "./stream-timeline";
-import CalendarAvailability from "./calendar-availability";
+import type { SettingsTarget } from "./workspace-settings";
 import ProjectDrawer from "./project-drawer";
 
 type Stream = { id: string; name: string; allocation: number; wip_limit: number };
@@ -34,18 +34,17 @@ export type BoardState = {
 };
 const fmt = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 
-export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenProjects, onStateChange, focusProject }: {
+export default function Board({ refreshKey, updatedState, onChanged, onOpenOutcomes, onOpenProjects, onOpenSettings, onStateChange, focusProject }: {
   refreshKey: number; onChanged?: () => void; onOpenOutcomes?: () => void; onOpenProjects?: () => void;
   onStateChange?: (state: BoardState | null, error: string) => void; focusProject?: { id: string; request: number } | null;
+  onOpenSettings: (target: SettingsTarget) => void;
+  updatedState?: BoardState | null;
 }) {
   const [state, setState] = useState<BoardState | null>(null);
-  const [capacity, setCapacity] = useState({ baseline: "", reserve: "0", horizon: 26, reason: "" });
   const [streamDrafts, setStreamDrafts] = useState<Record<string, { name: string; allocation: string }>>({});
   const [adjustment, setAdjustment] = useState({ selectedCycleIds: [] as string[], availability: "100", reserve: "" });
   const [dependency, setDependency] = useState({ predecessorId: "", successorId: "" });
-  const [leadDays, setLeadDays] = useState(14);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [editingWeek, setEditingWeek] = useState<PlanningWeek | null>(null);
   const [drawerProjectId, setDrawerProjectId] = useState<string | null>(null);
   const [placementFocus, setPlacementFocus] = useState<{ id: string; saved: boolean } | null>(null);
   const [renamingStreamId, setRenamingStreamId] = useState<string | null>(null);
@@ -72,6 +71,12 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
   }, [placementFocus, busy, state, drawerProjectId]);
   useEffect(() => { onStateChange?.(state, state ? "" : error); }, [state, error, onStateChange]);
   useEffect(() => {
+    if (!updatedState) return;
+    // The successful settings response is authoritative even when a later read fails.
+    ++loadGeneration.current;
+    setState(updatedState); setError("");
+  }, [updatedState]);
+  useEffect(() => {
     if (!state || !focusProject || handledFocusRequest.current === focusProject.request) return;
     handledFocusRequest.current = focusProject.request;
     const item = state.packages.find((candidate) => candidate.id === focusProject.id);
@@ -85,9 +90,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
       if (generation !== loadGeneration.current) return;
       setError("");
       setState(data);
-      setLeadDays(data.capacity.scoping_lead_days ?? 14);
       setAdjustment((old) => ({ ...old, selectedCycleIds: [] }));
-      setCapacity({ baseline: data.capacity.baseline?.toString() || "", reserve: data.capacity.reserve.toString(), horizon: data.capacity.horizon, reason: data.capacity.baseline_reason });
       setStreamDrafts(Object.fromEntries(data.streams.map((item: Stream) => [item.id, { name: item.name, allocation: (item.allocation * 100).toString() }])));
     } catch (failure) {
       if (generation === loadGeneration.current) throw failure;
@@ -184,16 +187,18 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
       project?.querySelector<HTMLElement>(scope ? ".extra-scope-editor input" : "summary, button, input, select")?.focus();
     });
   };
-  const packageResolution = (item: Package, projection?: PackageForecast) => {
+  const packageResolution = (item: Package, projection?: PackageForecast): { label: string; run: (opener?: HTMLElement) => void } => {
     const reason = projection?.reason || "";
+    const capacityResolution = { label: "Review stream capacity", run: (opener?: HTMLElement) => onOpenSettings({ section: "capacity", focusField: true, opener }) };
     if (!item.in_scope || item.needs_review || item.cross_team || /source scope|outside the imported team/i.test(reason)) return { label: "Review in Linear projects", run: () => onOpenProjects?.() };
     if (!item.selected) return { label: "Review deferred plan", run: () => revealPackage(item) };
     if (!item.stream_id || /assignment/i.test(reason)) return { label: "Assign to a stream", run: () => openPanel("unassigned-work") };
+    if (/capacity|baseline/i.test(reason)) return capacityResolution;
     if (/cycle|calendar/i.test(reason)) return { label: "Review cycle calendar", run: () => openPanel("cycle-calendar-settings") };
     if (/sequence|precede/i.test(reason)) return { label: "Review stream order", run: () => revealPackage(item) };
     if (/Waiting for|dependency/i.test(reason)) return { label: "Review dependencies", run: () => openPanel("dependency-settings") };
     if (/estimate|allowance|scope/i.test(reason)) return { label: "Review extra scope", run: () => revealPackage(item, true) };
-    return { label: "Review stream capacity", run: () => openPanel("capacity-settings") };
+    return capacityResolution;
   };
   const card = (item: Package, embedded = false) => {
     const projection = packageForecast.get(item.id) as PackageForecast | undefined;
@@ -201,7 +206,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
     const resolution = packageResolution(item, projection);
     return <ProjectPlanCard key={item.id} item={item} embedded={embedded} streams={state.streams} sequencing={state.sequencing} projection={projection}
       extra={state.extraScopes.find((entry) => entry.package_id === item.id)} readiness={state.scoping.find((entry) => entry.packageId === item.id)}
-      unknown={unknown.map((issue) => issue.identifier)} busy={busy} cycleText={cycleText} resolution={embedded ? { label: resolution.label, run: () => { setDrawerProjectId(null); window.requestAnimationFrame(resolution.run); } } : resolution}
+      unknown={unknown.map((issue) => issue.identifier)} busy={busy} cycleText={cycleText} resolution={embedded ? { label: resolution.label, run: () => { const opener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; setDrawerProjectId(null); window.requestAnimationFrame(() => resolution.run(opener)); } } : resolution}
       onOpenProjects={embedded ? () => { setDrawerProjectId(null); onOpenProjects?.(); } : onOpenProjects} onSave={save} onMove={moveProject} onDragStart={startDrag} onDragEnd={() => setDragging(null)} />;
   };
   const dropTarget = (streamId: string | null, selected: boolean, beforeId: string | null, label: string) => {
@@ -227,7 +232,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
   const totalAllocation = state.streams.reduce((sum, item) => sum + item.allocation, 0);
   const blockedOutcomes = result.outcomes.filter((outcome) => ["blocked", "setup_required", "beyond_horizon"].includes(outcome.status));
   const scopeAttention = state.scoping.filter((entry) => (entry.status === "needs_scoping" || !!entry.review) && selected.some((item) => item.id === entry.packageId));
-  const setupAction = (message: string) => /baseline/i.test(message) ? { label: "Set capacity baseline", target: "capacity-settings" } : /cycle/i.test(message) ? { label: "Review Linear cycles", target: "cycle-calendar-settings" } : { label: "Review stream allocation", target: `stream-settings-${state.streams[0]?.id || ""}` };
+  const setupAction = (message: string) => /baseline/i.test(message) ? { label: "Set capacity baseline", run: () => onOpenSettings({ section: "capacity", focusField: true }) } : /cycle/i.test(message) ? { label: "Review Linear cycles", run: () => openPanel("cycle-calendar-settings") } : { label: "Review stream allocation", run: () => openPanel(`stream-settings-${state.streams[0]?.id || ""}`) };
   const streamSection = <div className="stream-list" id="project-streams">{state.streams.map((stream) => {
     const plan = streamDrafts[stream.id] || { name: stream.name, allocation: (stream.allocation * 100).toString() };
     const members = selected.filter((item) => item.stream_id === stream.id).sort((a, b) => (a.sequence_position ?? Infinity) - (b.sequence_position ?? Infinity) || a.id.localeCompare(b.id));
@@ -243,7 +248,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
       anchorDate={teamLocalDate(planningCycles[0]?.startsAt ?? state.evaluatedAt, state.timezone)} weeklyAdjustments={state.weeklyAdjustments ?? []} holidays={state.holidayWeeks ?? []}
       calendarProjection={state.calendarProjection}
       cycleAdjustments={state.adjustments.map((item) => ({ cycleId: item.linear_cycle_id, availability: item.availability }))} sequencing={state.sequencing}
-      onEditWeek={setEditingWeek} onOpenProject={(project) => setDrawerProjectId(project.id)} />}
+      onEditWeek={(week) => onOpenSettings({ section: "availability", week, focusField: true })} onOpenProject={(project) => setDrawerProjectId(project.id)} />}
     <details className="lane-packages" id={`stream-work-${stream.id}`} ref={(element) => { if (element && state.sequenceConflicts.some((conflict) => conflict.streamId === stream.id)) element.open = true; }}><summary>Manage work <span>{members.length}</span></summary><div className="stream-assignment"><div className="assignment-intro"><h4>Assign work to {stream.name}</h4><p>Assign outcomes to show their project sequences. Shared projects stay counted under their current owner until you explicitly change ownership in project details. Individual project moves change their capacity stream.</p></div><div className="assignment-columns"><section><h5>By outcome</h5><div className="assignment-list">{state.outcomes.map((outcome) => {
       const outcomeProjectIds = new Set(state.links.filter((link) => link.outcome_id === outcome.id).map((link) => link.project_id));
       const packages = state.packages.filter((item) => outcomeProjectIds.has(item.project_id));
@@ -272,7 +277,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
     <section className={`action-center${result.ready && !unassigned.length && !blockedOutcomes.length && !scopeAttention.length && !state.sequenceConflicts.length ? " ready" : ""}`} aria-labelledby="next-actions-title"><div className="compact-section-head"><div><p className="eyebrow">Planning attention</p><h3 id="next-actions-title">{unassigned.length ? `Assign ${unassigned.length} selected project${unassigned.length === 1 ? "" : "s"}` : result.setup.length || result.errors.length ? "Finish forecast setup" : state.sequenceConflicts.length ? "Resolve stream order" : blockedOutcomes.length ? `Resolve ${blockedOutcomes.length} blocked outcome${blockedOutcomes.length === 1 ? "" : "s"}` : scopeAttention.length ? "Review upcoming project scope" : "Plan is ready to review"}</h3></div><span>{result.setup.length + result.errors.length + unassigned.length + blockedOutcomes.length + scopeAttention.length + state.sequenceConflicts.length} open</span></div>
       <div className="action-list">
         {!!unassigned.length && <button className="action-item" onClick={() => openPanel("unassigned-work")}><span><strong>Needs assignment</strong><small>Selected work cannot receive a credible date until it has a stream.</small></span><b>{unassigned.length} waiting</b></button>}
-        {result.setup.map((message) => { const action = setupAction(message); return <button className="action-item" key={message} onClick={() => openPanel(action.target)}><span><strong>{message}</strong><small>{action.label}</small></span><b>Configure</b></button>; })}
+        {result.setup.map((message) => { const action = setupAction(message); return <button className="action-item" key={message} onClick={action.run}><span><strong>{message}</strong><small>{action.label}</small></span><b>Configure</b></button>; })}
         {result.errors.map((message) => <button className="action-item error-action" key={message} onClick={() => openPanel("dependency-settings")}><span><strong>{message}</strong><small>Review dependency constraints.</small></span><b>Resolve</b></button>)}
         {state.sequenceConflicts.map((conflict) => <button className="action-item error-action" key={conflict.key} onClick={() => document.getElementById(`stream-${conflict.streamId}`)?.scrollIntoView({ block: "center", behavior: "smooth" })}><span><strong>Resolve stream order</strong><small>{conflict.message}</small></span><b>Reorder</b></button>)}
         {scopeAttention.map((entry) => { const item = state.packages.find((candidate) => candidate.id === entry.packageId)!;
@@ -288,7 +293,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
     <div className="board-shelves priority-shelf"><div>{dropTarget(null, true, null, "Drop into Needs assignment")}
       <details id="unassigned-work" className="stream-lane lane-packages" open={unassigned.length > 0}><summary>Needs assignment <span className="count">{unassigned.length}</span></summary><p>Selected demand stays visible; a required outcome has no credible date until assigned.</p>{queue(unassigned, null, true)}{!unassigned.length && <p className="empty">No selected work waiting for a stream.</p>}</details></div></div>
     <div className="board-config-row"><details id="cycle-calendar-settings" className="board-settings" aria-label="Linear cycle calendar"><summary>Linear cycles and cycle-wide overrides <span>{futureCycles.length} imported · {projectedCount} projected</span></summary><div className="section-head"><h3>Linear cycle calendar</h3><button type="button" className="secondary" disabled={busy || !state.connection} onClick={() => void refreshCycles()}>Refresh Linear cycles</button></div>
-      <p>View the cycle dates imported from Linear and override availability or reserve for entire cycles. For holidays or changes to specific weeks, use <button className="text-button" onClick={() => openPanel("calendar-availability")}>Weekly availability and holidays</button>. Week settings take precedence over cycle availability on overlapping dates.</p>
+      <p>View the cycle dates imported from Linear and override availability or reserve for entire cycles. For holidays or changes to specific weeks, use <button className="text-button" onClick={() => onOpenSettings({ section: "availability", focusField: true })}>Weekly availability and holidays</button> in Settings. Week settings take precedence over cycle availability on overlapping dates.</p>
       <p>{state.connection?.team_name || "Connected team"} · {state.connection?.cycles_enabled ? `${state.connection.cycle_duration ?? "?"} week cycle${state.connection.cycle_duration === 1 ? "" : "s"}` : "Cycles are not enabled in Linear"} · {currentCycle ? `currently ${linearCycleLabel(currentCycle)} (${cycleRange(currentCycle)}) · ` : "between cycles · "}{futureCycles.length} upcoming imported{state.connection?.upcoming_cycle_count ? ` (Linear configured for ${state.connection.upcoming_cycle_count})` : ""}</p>
       {state.calendarProjection?.reason && <p className="warning">{state.calendarProjection.reason}</p>}
       {!!calendarCycles.length ? <CycleCalendar cycles={calendarCycles} timezone={state.timezone} sourceAt={state.cycleAnchorAt} selectedIds={adjustment.selectedCycleIds} onToggle={(id) => setAdjustment((old) => ({ ...old, selectedCycleIds: old.selectedCycleIds.includes(id) ? old.selectedCycleIds.filter((value) => value !== id) : [...old.selectedCycleIds, id] }))} /> : <p className="warning">No dated cycles are available. Sync the Linear calendar and cycle configuration.</p>}
@@ -300,22 +305,7 @@ export default function Board({ refreshKey, onChanged, onOpenOutcomes, onOpenPro
         {!!state.adjustments.filter((item) => !state.futureCycleIds.includes(item.linear_cycle_id)).length && <p className="warning">Some saved exceptions refer to cycles no longer upcoming in Linear. They remain saved but are excluded from the forecast.</p>}
         {!!state.legacyAdjustments.length && <p className="warning">{state.legacyAdjustments.length} old relative-cycle exception{state.legacyAdjustments.length === 1 ? "" : "s"} could not be matched to a Linear cycle. Select the intended weeks above to reapply them.</p>}
       </div>
-    </details>
-    <details id="capacity-settings" className="board-settings"><summary>Capacity assumptions</summary><form onSubmit={(event: FormEvent) => { event.preventDefault(); void save({ type: "capacity", baseline: capacity.baseline === "" ? null : Number(capacity.baseline), reserve: Number(capacity.reserve), horizon: capacity.horizon, reason: capacity.reason }, "Capacity profile saved."); }}>
-      <p>Cycle dates and numbers come from Linear. Leave the baseline blank to use the median of at least three comparable completed cycles.</p>
-      <p className="meta">{state.observedBaseline === null ? `${state.observations.length} comparable completed cycles; a provisional manual baseline is required.` : `Observed median: ${fmt(state.observedBaseline)} points/cycle from ${state.observations.length} cycles.`} Effective baseline: {state.effectiveBaseline === null ? "unset" : `${fmt(state.effectiveBaseline)} points/cycle`}{state.capacity.baseline !== null ? " · manual override" : " · Linear observations"}</p>
-      {state.observations.map((item) => <p className="meta" key={item.linear_id}>{item.starts_at.slice(0, 10)} – {item.ends_at.slice(0, 10)}: {fmt(item.completed_points)} completed points</p>)}
-      <div className="board-fields"><label>Manual baseline (optional)<input type="number" min="0" step="0.001" value={capacity.baseline} onChange={(event) => setCapacity({ ...capacity, baseline: event.target.value })} placeholder={state.observedBaseline === null ? "Required" : `Median ${fmt(state.observedBaseline)}`} /></label><label>Reserve points/cycle<input type="number" min="0" step="0.001" required value={capacity.reserve} onChange={(event) => setCapacity({ ...capacity, reserve: event.target.value })} /></label><label>Forecast horizon (cycles)<input type="number" min="1" max="104" required value={capacity.horizon} onChange={(event) => setCapacity({ ...capacity, horizon: Number(event.target.value) })} /></label></div>
-      <label>Manual baseline source / override reason<input value={capacity.reason} onChange={(event) => setCapacity({ ...capacity, reason: event.target.value })} placeholder="Required when entering a manual baseline" /></label><button disabled={busy}>Save capacity</button></form>
-      <p className="meta">Forecast horizon: {state.capacity.horizon} cycles. {futureCycles.length} upcoming cycles are synced from Linear; {projectedCount} projected cycles extend the planning calendar. Dates using projected capacity are provisional.</p>
-      {planningCycles.length < state.capacity.horizon && <p className="warning">Only {planningCycles.length} forecast cycles are available. {state.calendarProjection?.reason || "Sync the Linear cycle configuration to extend the calendar."}</p>}
     </details></div>
-    <details className="board-settings" id="scoping-settings"><summary>Scope readiness</summary><form className="scope-window" onSubmit={(event) => { event.preventDefault(); void save({ type: "scoping", leadDays }, "Scoping window saved."); }}>
-      <label>Scope projects (days before start)<input type="number" min="0" max="365" step="1" required value={leadDays} onChange={(event) => setLeadDays(Number(event.target.value))} /></label>
-      <button className="secondary" disabled={busy}>Save scoping window</button>
-    </form><p>Default: 14 calendar days before forecast start. Needs scoping is a reminder; provisional forecasts remain available.</p></details>
-    <CalendarAvailability enabled={state.capacity.holidays_enabled ?? true} overrides={state.weeklyAdjustments ?? []} holidays={state.holidayWeeks ?? []}
-      selectedWeek={editingWeek} busy={busy} onSave={save} />
     <div className="board-shelves"><div>{dropTarget(null, false, null, "Drop into Deferred")}<details id="deferred-work" className="stream-lane deferred lane-packages"><summary>Deferred <span className="count">{deferred.length}</span></summary><p>Paused work consumes no future capacity. In-progress work must also be paused in Linear separately.</p>{queue(deferred, null, false)}{!deferred.length && <p className="empty">No deferred work.</p>}</details></div></div>
     <span id="dependency-settings" className="anchor-target" />
     <details className="board-settings"><summary>Dependencies</summary><p>“Blocked by” means the predecessor must finish in a previous cycle. Local links stay in Oh, WAWD!.</p><div className="board-fields"><label>Blocking package<select value={dependency.predecessorId} onChange={(event) => setDependency({ ...dependency, predecessorId: event.target.value })}><option value="">Choose…</option>{state.packages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Blocked package<select value={dependency.successorId} onChange={(event) => setDependency({ ...dependency, successorId: event.target.value })}><option value="">Choose…</option>{state.packages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><button disabled={busy || !dependency.predecessorId || !dependency.successorId} onClick={() => void save({ type: "dependency", action: "add", ...dependency }, "Dependency saved.")}>Add dependency</button><ul className="dependency-list">{state.dependencies.map((edge) => <li key={`${edge.source}:${edge.predecessor_id}:${edge.successor_id}`}><span>{state.packages.find((item) => item.id === edge.predecessor_id)?.name || edge.predecessor_id} → {state.packages.find((item) => item.id === edge.successor_id)?.name || edge.successor_id} · {edge.source}{edge.waived ? ` · waived: ${edge.waiver_reason}` : ""}</span>{edge.source === "local" && <button className="text-button" disabled={busy} onClick={() => void save({ type: "dependency", action: "remove", predecessorId: edge.predecessor_id, successorId: edge.successor_id }, "Dependency removed.")}>Remove</button>}{edge.source === "linear" && !edge.waived && <button className="text-button" disabled={busy} onClick={() => { const reason = window.prompt("Reason for waiving this Linear dependency in the forecast?"); if (reason) void save({ type: "dependency", action: "waive", predecessorId: edge.predecessor_id, successorId: edge.successor_id, reason }, "Linear dependency waived in this plan."); }}>Waive</button>}{edge.source === "linear" && edge.waived && <button className="text-button" disabled={busy} onClick={() => void save({ type: "dependency", action: "restore", predecessorId: edge.predecessor_id, successorId: edge.successor_id }, "Linear dependency restored.")}>Restore</button>}</li>)}</ul></details>

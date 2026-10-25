@@ -35,7 +35,7 @@ Alternatives considered: a fifth view fits the navigation model but displaces th
 
 ### 2. A roomy, restrained layout with three sections
 
-Suggested desktop starting point: approximately 960px maximum width, 24px viewport gutters, a bounded height of about `90dvh`, rounded light surface, subtle border/shadow, and dim backdrop. Use the existing typography and green accent colors. A persistent header contains `Settings`, short planning-assumptions copy, and Close. A roughly 220px left section navigation sits beside a scrollable editor area. Keep observation details secondary to effective capacity and editable fields.
+Suggested desktop starting point: approximately 960px maximum width, 24px viewport gutters, a bounded height of about `90dvh`, rounded raised dark surface, subtle border/shadow, and dim backdrop. Use the approved Neon Velocity typography, semantic surfaces, and cyan interaction accents from `docs/visual-theme.md`. This supersedes the original pre-theme light/green treatment. A persistent header contains `Settings`, short planning-assumptions copy, and Close. A roughly 220px left section navigation sits beside a scrollable editor area. Keep observation details secondary to effective capacity and editable fields.
 
 Section navigation uses ordinary buttons in a labeled navigation region with an indicated current section, matching the application's existing view-button convention. Do not introduce ARIA tabs without implementing their associated keyboard contract. Show one editor at a time, keeping all section drafts in the opening's state. The three sections retain their requested names.
 
@@ -52,6 +52,8 @@ Persist through the existing four `PUT /api/board` mutation types. Keep existing
 Keep the Settings controller and mutation lifecycle mounted at workspace level while signed in; the visible dialog can close independently. Dismissal discards unsubmitted drafts but does not abort a submitted mutation. A completion still invokes workspace refresh. Reopening during an in-flight write shows pending state and waits for its settled saved state before enabling conflicting edits. Guard request generations so a late load or prior opening cannot replace newer data or a new opening's fields.
 
 On successful mutations, invoke the existing workspace reload fan-out to refresh Board, its published Outcomes forecast, and ScenarioPanel readiness/dirty state. Account for failures in this follow-up refresh separately from mutation failure: a persisted write must not be labeled unsaved merely because refresh failed. Show a retryable refresh error when applicable. Reopening and scenario activation read canonical saved values, not cached drafts.
+
+Hand the successful mutation's recomputed board snapshot to Board and Outcomes immediately, invalidating older Board reads before the normal refresh fan-out. This keeps the saved forecast visible even if a subsequent background read fails. Capacity persistence/validation is shared through `src/lib/capacity-store.ts`, following the existing scope/weekly stores, so the API and database-backed UI fixtures exercise the same behavior.
 
 Alternatives considered: lifting all Board state would broaden the refactor unnecessarily; a new Settings endpoint would duplicate existing validation and persistence. Reusing the current API confines the change to UI ownership and integration.
 
@@ -81,11 +83,11 @@ The weekly editor uses the latest saved override or enabled preset when present,
 
 ### 6. Focused behavioral verification
 
-Add `tests/ui/workspace-settings.spec.ts` using the assignment fixture for saving and computed effects, and extend existing workspace/timeline cases to expect Settings. Cover all three sections, load/save failures and retry, section-draft preservation, discard/reopen, repeated week selection, contextual focus, modal dismissal including drag-out, and refresh after saving over a non-Board view. Exercise scenario dirty state and reopening after scenario activation through existing scenario helpers where available.
+Use `tests/ui/workspace-settings.spec.ts` for the overlay shell and `tests/ui/settings-editors.spec.ts` with the assignment fixture for saving and computed effects; extend existing workspace/timeline cases to expect Settings. Cover all three sections, load/save failures and retry, section-draft preservation, discard/reopen, repeated week selection, contextual focus, modal dismissal including drag-out, and refresh after saving over a non-Board view. Exercise scenario dirty state and reopening after scenario activation through existing scenario helpers where available.
 
 Use keyboard and pointer assertions for focus containment/restoration and inert background behavior. Inspect desktop and narrow-screen screenshots during implementation; geometric containment and control reachability assertions provide stable automated checks without introducing a visual-baseline framework. Read the relevant installed Next.js guides before implementation as required by `AGENTS.md`.
 
-Required implementation checks: `npm run typecheck`, `npm test`, and `npm run test:ui -- tests/ui/workspace-settings.spec.ts tests/ui/workspace-organization.spec.ts tests/ui/planning-timeline.spec.ts tests/ui/cycle-calendar-projection.spec.ts tests/ui/responsive-workspace.spec.ts`. Expand only for changed behavior or unresolved failures. The package has no lint script; use its configured checks rather than adding tooling.
+Required implementation checks: `npm run typecheck`, `npm test`, and `npm run test:ui -- tests/ui/settings-editors.spec.ts tests/ui/workspace-settings.spec.ts tests/ui/workspace-organization.spec.ts tests/ui/planning-timeline.spec.ts tests/ui/cycle-calendar-projection.spec.ts tests/ui/responsive-workspace.spec.ts`. Expand only for changed behavior or unresolved failures. The package has no lint script; use its configured checks rather than adding tooling.
 
 ## Risks / Trade-offs
 

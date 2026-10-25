@@ -14,6 +14,14 @@
 .workspace-settings-nav button[aria-current]{background:var(--color-selection-bg);color:var(--color-action);box-shadow:inset 3px 0 var(--color-action)}
 .workspace-settings-content{min-width:0;padding:24px;overflow-wrap:anywhere}
 .workspace-settings-content h3{margin-top:0}
+.workspace-settings-content fieldset{border:0;margin:0;padding:0;min-width:0}
+.workspace-settings-content form{margin:16px 0}
+.workspace-settings-content .board-fields{grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+.workspace-settings-content .board-check{align-items:flex-start}
+.workspace-settings-content input[type=checkbox]{flex:0 0 auto;margin-top:3px}
+.settings-evidence{padding:14px 16px;margin:16px 0;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-control)}
+.settings-evidence p:last-child{margin-bottom:0}
+.settings-evidence summary{cursor:pointer;color:var(--color-action);margin-bottom:8px}
 .workspace-settings-notice{padding:16px;border:1px solid var(--color-border);border-radius:var(--radius-control);background:var(--color-surface);font-size:.88rem}
 @media(max-width:760px){
   .workspace-settings{width:100%;max-width:none;height:100dvh;max-height:100dvh;border:0;border-radius:0}

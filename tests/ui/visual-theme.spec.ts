@@ -63,9 +63,11 @@ for (const width of [1440, 768, 390]) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(settings).toHaveCSS("background-color", "rgb(17, 28, 48)");
+    await expect(settings.getByLabel("Manual baseline (optional)")).toBeVisible();
     for (const section of ["Capacity assumptions", "Scope readiness", "Weekly availability and holidays"]) {
       await settings.getByRole("navigation").getByRole("button", { name: section, exact: true }).click();
       await expectReadableText(settings);
+      await page.screenshot({ path: testInfo.outputPath(`settings-${section.split(" ")[0].toLowerCase()}-${width}.png`), animations: "disabled" });
     }
     await settings.getByRole("button", { name: "Close Settings" }).hover();
     await expectReadableText(settings);

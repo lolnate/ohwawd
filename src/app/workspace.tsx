@@ -8,7 +8,7 @@ import StatusFilter from "./status-filter";
 import OutcomeProjectPicker from "./outcome-project-picker";
 import OutcomeDelivery from "./outcome-delivery";
 import CreateOutcomeModal, { type OutcomeDraft } from "./create-outcome-modal";
-import WorkspaceSettings from "./workspace-settings";
+import WorkspaceSettings, { type SettingsRequest, type SettingsTarget } from "./workspace-settings";
 
 type Team = { id: string; name: string; key: string };
 type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
@@ -36,12 +36,14 @@ function SyncReport({ report }: { report: ImportResult["report"] }) {
 
 export default function App() {
   const [activeView, setActiveView] = useState<"board" | "outcomes" | "projects" | "scenarios">("board");
-  const [showSettings, setShowSettings] = useState(false);
+  const [settingsRequest, setSettingsRequest] = useState<SettingsRequest | null>(null);
+  const settingsRequestId = useRef(0);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State | null>(null);
   const [boardVersion, setBoardVersion] = useState(0);
   const [deliveryBoard, setDeliveryBoard] = useState<BoardState | null>(null);
+  const [boardUpdate, setBoardUpdate] = useState<BoardState | null>(null);
   const [deliveryError, setDeliveryError] = useState("");
   const [boardFocus, setBoardFocus] = useState<{ id: string; request: number } | null>(null);
   const [key, setKey] = useState("");
@@ -68,6 +70,11 @@ export default function App() {
     setDeliveryBoard(board); setDeliveryError(error);
   }, []);
 
+  function openSettings(target: SettingsTarget = { section: "capacity" }) {
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSettingsRequest({ ...target, id: ++settingsRequestId.current, opener: target.opener === undefined ? active : target.opener });
+  }
+
   const reload = useCallback(async () => {
     const generation = ++reloadGeneration.current;
     try {
@@ -81,6 +88,17 @@ export default function App() {
       if (generation === reloadGeneration.current) throw failure;
     }
   }, []);
+
+  const settingsChanged = useCallback(async (board: BoardState) => {
+    setDeliveryBoard(board); setBoardUpdate(board);
+    try { await reload(); }
+    catch (reason) {
+      // The planning write succeeded even if the separate workspace read failed.
+      setBoardVersion((version) => version + 1);
+      setError("Settings were saved, but workspace views could not be refreshed.");
+      throw reason;
+    }
+  }, [reload]);
 
   useEffect(() => {
     api<{ authenticated: boolean }>("/api/session").then(async ({ authenticated }) => {
@@ -225,7 +243,7 @@ export default function App() {
 
   return <main className="shell workspace-shell">
     <header className="app-header"><div className="app-brand"><div className="brand-mark">W</div><div><div className="brand">Oh, WAWD!</div><p>What are we doing, and when?</p></div></div><nav className="app-tabs" aria-label="Workspace views">{([['board','Board'],['outcomes','Outcomes'],['projects','Linear projects'],['scenarios','Scenarios']] as const).map(([id, label]) => <button key={id} className={activeView === id ? "app-tab active" : "app-tab"} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}>{label}{id === "outcomes" && state?.outcomes.length ? <span>{state.outcomes.length}</span> : null}{id === "projects" && state?.projects.length ? <span>{state.projects.length}</span> : null}</button>)}</nav><div className="header-actions"><span className="source-freshness">{state?.connection ? `${state.connection.team_name} · ${new Date(state.connection.last_imported_at).toLocaleDateString()}` : "Linear not connected"}</span>
-      <button id="workspace-settings-button" type="button" className="quiet workspace-settings-trigger" aria-label="Settings" title="Settings" aria-haspopup="dialog" onClick={() => setShowSettings(true)}>
+      <button id="workspace-settings-button" type="button" className="quiet workspace-settings-trigger" aria-label="Settings" title="Settings" aria-haspopup="dialog" onClick={() => openSettings()}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.6v2.8L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.6v-2.8L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg>
       </button>
       <button className="quiet" onClick={() => void run(async () => { await api("/api/session", "DELETE"); setSignedIn(false); setState(null); })}>Sign out</button></div></header>
@@ -256,8 +274,8 @@ export default function App() {
       {!visibleProjects.length && <p className="empty">{state?.projects.length ? "No projects match these filters." : "Projects will appear here after import."}</p>}</div>
     </section></section>
     <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} onOpenBoard={() => setActiveView("board")} refreshKey={boardVersion} /></section>
-    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")}
-      onOpenOutcomes={openOutcomeDelivery} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
+    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} updatedState={boardUpdate} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")}
+      onOpenOutcomes={openOutcomeDelivery} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}>
       <OutcomeDelivery board={deliveryBoard} error={deliveryError} busy={busy} onAdd={startAddingOutcome} onEdit={startEditingOutcome} onManageLinks={startLinking} onDelete={deleteOutcome} onResolveProject={resolveOutcomeProject} />
       <section className="panel outcomes-panel" id="outcome-catalog"><div className="section-head"><div><h2>Outcome catalog</h2><p>Describe the change you need, even before there is a Linear project.</p></div><span className="count">{state?.outcomes.length ?? 0}</span></div>
@@ -274,7 +292,7 @@ export default function App() {
       {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
       {showCreateOutcome && state && <CreateOutcomeModal draft={newOutcome} projects={state.projects} busy={busy} onChange={setNewOutcome} onSave={createOutcome} onCancel={() => setShowCreateOutcome(false)} />}
     </section></section>
-    {showSettings && <WorkspaceSettings connected={!!state?.connection} onClose={() => setShowSettings(false)} />}
+    <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;
 }

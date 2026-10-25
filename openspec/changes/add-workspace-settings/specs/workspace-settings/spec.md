@@ -101,7 +101,7 @@ Settings SHALL have a labeled modal, contained keyboard focus, an accessible Clo
 - **AND** a successful completion still refreshes the workspace and appears on reopening
 
 ### Requirement: Settings fits desktop and narrow screens
-Settings SHALL use the application's typography, green accents, light surfaces, borders, spacing, and form styling. At desktop widths it SHALL be a bounded centered overlay with section navigation beside its content. At narrow widths it SHALL become a full-screen surface with wrapping section navigation, stacked fields, internal vertical scrolling, and a reachable header and Close action. It SHALL NOT create page-level horizontal overflow.
+Settings SHALL use the application's Neon Velocity typography, cyan accents, dark semantic surfaces, borders, spacing, and form styling. At desktop widths it SHALL be a bounded centered overlay with section navigation beside its content. At narrow widths it SHALL become a full-screen surface with wrapping section navigation, stacked fields, internal vertical scrolling, and a reachable header and Close action. It SHALL NOT create page-level horizontal overflow.
 
 #### Scenario: Use Settings on a phone
 - **WHEN** Settings is used at a 390-pixel-wide viewport
