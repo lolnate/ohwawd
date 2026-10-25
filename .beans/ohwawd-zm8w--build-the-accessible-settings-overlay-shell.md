@@ -8,17 +8,17 @@ tags:
     - settings
     - ux
 created_at: 2026-10-23T14:35:40Z
-updated_at: 2026-10-24T16:21:01Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-0nj1
 ---
 
 Deliver the workspace-owned modal shell and global entry point for OpenSpec task 1.1.
 
 ## References
-- openspec/changes/add-workspace-settings/proposal.md
-- openspec/changes/add-workspace-settings/design.md (decisions 1–2)
-- openspec/changes/add-workspace-settings/specs/workspace-settings/spec.md (entry point, navigation, dismissal, responsive requirements)
-- openspec/changes/add-workspace-settings/tasks.md (1.1)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/proposal.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/design.md (decisions 1–2)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/specs/workspace-settings/spec.md (entry point, navigation, dismissal, responsive requirements)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/tasks.md (1.1)
 - docs/ui-ux-conventions.md
 
 ## Scope

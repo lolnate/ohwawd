@@ -7,7 +7,7 @@ priority: normal
 tags:
     - settings
 created_at: 2026-10-23T14:36:00Z
-updated_at: 2026-10-25T13:35:00Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-0nj1
 blocked_by:
     - ohwawd-zm8w
@@ -16,12 +16,12 @@ blocked_by:
 Populate the Settings shell with the three real planning-assumption editors and reliable persistence for OpenSpec task 2.1.
 
 ## References
-- openspec/changes/add-workspace-settings/proposal.md
-- openspec/changes/add-workspace-settings/design.md (decisions 3–4 and verification)
-- openspec/changes/add-workspace-settings/specs/workspace-settings/spec.md
-- openspec/changes/add-workspace-settings/specs/project-scope-readiness/spec.md
-- openspec/changes/add-workspace-settings/specs/weekly-capacity/spec.md
-- openspec/changes/add-workspace-settings/tasks.md (2.1)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/proposal.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/design.md (decisions 3–4 and verification)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/specs/workspace-settings/spec.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/specs/project-scope-readiness/spec.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/specs/weekly-capacity/spec.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/tasks.md (2.1)
 
 ## Scope
 Extract/adapt the current capacity, scope-window, and CalendarAvailability form content for Settings. Reuse GET/PUT /api/board and workspace reload fan-out. Keep saved evidence separate from per-opening drafts and keep mutation ownership alive outside the visible dialog. The following integration Bean removes the inline Board copies and redirects contextual actions; ship both together.

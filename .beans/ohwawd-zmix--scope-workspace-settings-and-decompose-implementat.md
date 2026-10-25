@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-23T14:27:35Z
-updated_at: 2026-10-23T14:37:26Z
+updated_at: 2026-10-25T18:25:56Z
 ---
 
 Define the requested Settings experience with OpenSpec and create linked, dependency-aware implementation Beans.
@@ -17,7 +17,7 @@ Define the requested Settings experience with OpenSpec and create linked, depend
 
 User selected the centered overlay presentation. Keep stream controls and cycle-wide overrides on Board; preserve contextual week editing and existing planning/scenario semantics.
 
-Artifacts: openspec/changes/add-workspace-settings/{proposal.md,design.md,tasks.md,specs/}. Implementation epic ohwawd-0nj1 contains dependency chain ohwawd-zm8w → ohwawd-7amk → ohwawd-bgm3 → ohwawd-mrzq. Initial strict OpenSpec validation passed.
+Artifacts: openspec/changes/archive/2026-10-25-add-workspace-settings/{proposal.md,design.md,tasks.md,specs/}. Implementation epic ohwawd-0nj1 contains dependency chain ohwawd-zm8w → ohwawd-7amk → ohwawd-bgm3 → ohwawd-mrzq. Initial strict OpenSpec validation passed.
 
 ## Summary of Changes
 

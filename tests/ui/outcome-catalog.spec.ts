@@ -57,11 +57,14 @@ test("query survives view switches and saved-data refresh, including disappearin
   await page.getByRole("button", { name: /^Board/ }).click();
   await page.getByRole("button", { name: /^Outcomes/ }).click();
   await expect(catalog.getByRole("status")).toHaveText("1 of 55 outcomes · Filters active");
-  await catalog.getByRole("button", { name: "Links for Catalog launch", exact: true }).click();
+  await catalog.getByRole("button", { name: "Catalog launch", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Projects", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Manage projects", exact: true }).click();
   await assignment.clearCatalogOwner();
   await page.getByRole("dialog").getByLabel("API foundation requirement").selectOption("minimum");
   await page.getByRole("dialog").getByRole("button", { name: "Save links", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toContainText("Links saved.");
+  await page.getByRole("dialog").getByRole("button", { name: "Close outcome" }).click();
   await expect(catalog.getByRole("status")).toHaveText("0 of 55 outcomes · Filters active");
   await expect(catalog.getByLabel("Owner", { exact: true })).toHaveValue("owner:engineering");
   await expect(catalog.getByLabel("Owner", { exact: true }).locator("option:checked")).toHaveText("Unavailable owner: engineering");
@@ -107,7 +110,9 @@ test("definitions load independently of forecast failure; loading and retryable 
   await catalog.getByLabel("Search outcomes", { exact: true }).fill("Catalog launch");
   await expect(catalog.getByRole("status")).toHaveText("1 of 55 outcomes · Filters active");
   // A successful write followed by a failed definitions read retains the last good catalog.
-  await catalog.getByRole("button", { name: "Links for Catalog launch", exact: true }).click();
+  await catalog.getByRole("button", { name: "Catalog launch", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Projects", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Manage projects", exact: true }).click();
   await page.getByRole("dialog").getByLabel("API foundation requirement").selectOption("minimum");
   await page.route("**/api/state", (route) => route.fulfill({ status: 503, json: { error: "Refresh unavailable" } }));
   await page.getByRole("dialog").getByRole("button", { name: "Save links", exact: true }).click();

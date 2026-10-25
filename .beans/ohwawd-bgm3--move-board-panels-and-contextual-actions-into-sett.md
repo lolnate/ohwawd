@@ -8,7 +8,7 @@ tags:
     - settings
     - board
 created_at: 2026-10-23T14:36:17Z
-updated_at: 2026-10-25T13:39:31Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-0nj1
 blocked_by:
     - ohwawd-7amk
@@ -17,11 +17,11 @@ blocked_by:
 Complete the relocation by replacing inline Board editors and DOM reveal targets with typed Settings-open requests for OpenSpec task 3.1.
 
 ## References
-- openspec/changes/add-workspace-settings/proposal.md
-- openspec/changes/add-workspace-settings/design.md (decisions 4–5, entry-point table)
-- openspec/changes/add-workspace-settings/specs/workspace-settings/spec.md (Board actions and focus/dismissal)
-- openspec/changes/add-workspace-settings/specs/planning-timeline/spec.md
-- openspec/changes/add-workspace-settings/tasks.md (3.1)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/proposal.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/design.md (decisions 4–5, entry-point table)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/specs/workspace-settings/spec.md (Board actions and focus/dismissal)
+- openspec/changes/archive/2026-10-25-add-workspace-settings/specs/planning-timeline/spec.md
+- openspec/changes/archive/2026-10-25-add-workspace-settings/tasks.md (3.1)
 - docs/ui-ux-conventions.md
 
 ## Scope

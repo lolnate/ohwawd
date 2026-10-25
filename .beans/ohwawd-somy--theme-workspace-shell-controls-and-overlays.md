@@ -5,14 +5,14 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-23T20:04:32Z
-updated_at: 2026-10-25T13:05:46Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-t1qd
 blocked_by:
     - ohwawd-0t83
 ---
 
-OpenSpec: openspec/changes/establish-neon-velocity-theme/design.md (Decisions 2–4 and 6)
-Requirements: openspec/changes/establish-neon-velocity-theme/specs/visual-theme/spec.md
+OpenSpec: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/design.md (Decisions 2–4 and 6)
+Requirements: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/specs/visual-theme/spec.md
 References: docs/visual-theme.md and docs/ui-ux-conventions.md
 
 - [x] Migrate authentication, header/navigation, panels, actions, fields, selection and semantic feedback to shared tokens

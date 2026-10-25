@@ -5,13 +5,13 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-23T16:10:00Z
-updated_at: 2026-10-24T16:32:44Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-2ods
 ---
 
 OpenSpec: redesign-outcome-catalog
-Requirements: openspec/changes/redesign-outcome-catalog/specs/outcome-catalog/spec.md
-Design: openspec/changes/redesign-outcome-catalog/design.md (Decisions 2–4)
+Requirements: openspec/changes/archive/2026-10-25-redesign-outcome-catalog/specs/outcome-catalog/spec.md
+Design: openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md (Decisions 2–4)
 
 Bounded scope: expose persisted outcome stream_id, date-only needed_by, existing created_at and resolved workspace/team timezone through the workspace state contract; implement a pure indexed catalog-query model. No database migration or forecast dependency.
 

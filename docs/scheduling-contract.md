@@ -2,6 +2,8 @@
 
 ## Current calculation: v4
 
+**Planned successor:** [implement-outcome-first-board](../openspec/changes/implement-outcome-first-board/design.md) defines v5 outcome-priority scheduling, explicit roadmap membership and compatibility rules. It is specification/planning work; the current runtime contract below remains v4 until its implementation Beans are delivered and verified. Manual outcome completion will remain a workspace business fact independent of scheduling and scenario activation.
+
 V4 forecasts execute at most one project per stream per cycle, regardless of outcome or saved legacy WIP limit. Carry unfinished work first; otherwise select the earliest eligible project in queue order, skipping blocked projects. Another project in that stream cannot start until the cycle after its predecessor finishes. Independent streams may run concurrently, unused budgets are not borrowed across streams, and moving a project recalculates its forecast. New streams have WIP one; older saved WIP limits above one cannot enable overlap. Older published revisions retain their frozen results; older editable drafts display a conversion notice and must be loaded and saved before publishing under v4.
 
 ## Projected calendar introduced in v3, retained in v4

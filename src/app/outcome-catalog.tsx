@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { indexCatalog, queryCatalog, type CatalogFilters, type CatalogOutcome, type CatalogSort } from "@/lib/outcome-catalog";
 import { millisecondsUntilNextTeamDate, teamLocalDate } from "@/lib/project-scope";
 
@@ -13,10 +13,10 @@ export function focusOutcomeSection(section: "delivery" | "catalog") {
   heading?.focus({ preventScroll: true });
 }
 
-export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onInspect, onEdit, onLinks, onDelete, children }: {
+export type CatalogContext = { ids: string[]; clear: () => void };
+export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onInspect, onContext }: {
   data: Data | null; error: string; busy: boolean; onRetry: () => void; onAdd: () => void;
-  onInspect: (outcome: CatalogOutcome) => void; onEdit: (outcome: CatalogOutcome) => void;
-  onLinks: (outcome: CatalogOutcome) => void; onDelete: (outcome: CatalogOutcome) => void; children?: ReactNode;
+  onInspect: (outcome: CatalogOutcome) => void; onContext: (context: CatalogContext) => void;
 }) {
   const [filters, setFilters] = useState<CatalogFilters>(defaults);
   const [sort, setSort] = useState<CatalogSort>("name");
@@ -37,13 +37,15 @@ export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onIn
   }, [timezone]);
   const index = useMemo(() => indexCatalog(data ?? { outcomes: [], projects: [], links: [], streams: [] }), [data]);
   const rows = useMemo(() => queryCatalog(index, filters, sort, teamLocalDate(now, timezone)), [index, filters, sort, now, timezone]);
+  const clear = useCallback(() => setFilters(defaults), []);
+  useEffect(() => { onContext({ ids: rows.map((row) => row.id), clear }); }, [rows, clear, onContext]);
   const restricted = !!filters.search.trim() || filters.owner !== "all" || filters.stream !== "all" || filters.projects !== "all" || filters.targetDate !== "all";
   function change<K extends keyof CatalogFilters>(key: K, value: CatalogFilters[K]) { setFilters((current) => ({ ...current, [key]: value })); }
   const missingOwner = filters.owner !== "all" && filters.owner !== "none" && !index.owners.some((option) => option.value === filters.owner);
   const missingStream = filters.stream !== "all" && filters.stream !== "unassigned" && !index.streams.some((stream) => stream.id === filters.stream);
 
   return <section className="panel outcomes-panel" id="outcome-catalog" aria-labelledby="outcome-catalog-title">
-    <div className="section-head"><div><h2 id="outcome-catalog-title" tabIndex={-1}>Outcome catalog</h2><p>Browse saved outcomes and their directly linked work.</p></div><button type="button" className="secondary" disabled={busy || !data} onClick={onAdd}>Add outcome</button></div>
+    <div className="section-head"><div><h2 id="outcome-catalog-title" tabIndex={-1}>Outcome catalog</h2><p>Browse saved outcomes and their directly linked work.</p></div></div>
     {error && <div className="error" role="alert"><p>{data ? "Could not refresh outcomes. Showing the last successfully loaded catalog." : "Could not load outcomes."} {error}</p><button type="button" className="secondary" disabled={busy} onClick={onRetry}>Retry catalog load</button></div>}
     {!data ? !error && <p role="status">Loading outcomes…</p> : <>
       <div className="catalog-search-sort">
@@ -57,17 +59,16 @@ export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onIn
         <label>Target date<select aria-label="Target date" value={filters.targetDate} onChange={(event) => change("targetDate", event.target.value as CatalogFilters["targetDate"])}><option value="all">All dates</option><option value="past">Past target date</option><option value="next30">Next 30 days</option><option value="none">No target</option></select></label>
       </div>
       <div className="catalog-results"><p role="status" aria-live="polite">{rows.length} of {index.rows.length} outcomes{restricted ? " · Filters active" : ""}</p>{restricted && <button type="button" className="text-button" onClick={() => setFilters(defaults)}>Clear filters</button>}</div>
-      {!!rows.length && <><div className="catalog-columns" aria-hidden="true"><span>Outcome</span><span>Owner</span><span>Stream</span><span>Needed by</span><span>Projects</span><span>Actions</span></div>
+      {!!rows.length && <><div className="catalog-columns" aria-hidden="true"><span>Outcome</span><span>Owner</span><span>Stream</span><span>Needed by</span><span>Projects</span></div>
         <ul className="catalog-list">{rows.map((row) => <li key={row.id}><article className="catalog-row" id={`outcome-${row.id}`}>
           <h3><button type="button" className="catalog-title" title={row.title} onClick={() => onInspect(row)}>{row.title}</button></h3>
           <div className="catalog-cell"><span className="catalog-cell-label">Owner</span><span>{row.owner.trim() || "No owner"}</span></div>
           <div className="catalog-cell"><span className="catalog-cell-label">Stream</span><span>{index.streams.find((stream) => stream.id === row.stream_id)?.name ?? (row.stream_id ? "Unavailable stream" : "Needs assignment")}</span></div>
           <div className="catalog-cell"><span className="catalog-cell-label">Needed by</span>{row.needed_by ? <time dateTime={row.needed_by}>{row.needed_by}</time> : <span>No target</span>}</div>
           <div className="catalog-cell"><span className="catalog-cell-label">Projects</span><span>{row.requiredProjectCount + row.optionalProjectCount ? `${row.requiredProjectCount} required · ${row.optionalProjectCount} optional` : "No projects"}</span></div>
-          <div className="catalog-row-actions"><button type="button" className="text-button" disabled={busy} aria-label={`Edit ${row.title}`} onClick={() => onEdit(row)}>Edit</button><button type="button" className="text-button" disabled={busy} aria-label={`Links for ${row.title}`} onClick={() => onLinks(row)}>Links</button><button type="button" className="text-button danger" disabled={busy} aria-label={`Delete ${row.title}`} onClick={() => onDelete(row)}>Delete</button></div>
         </article></li>)}</ul></>}
       {!rows.length && <p className="empty">{index.rows.length ? "No outcomes match these filters. Clear filters to browse all outcomes." : "No outcomes yet. Add an outcome to start the plan."}</p>}
+      {!index.rows.length && <button type="button" disabled={busy} onClick={onAdd}>Add outcome</button>}
     </>}
-    {children}
   </section>;
 }

@@ -2,7 +2,7 @@
 
 **Design intent:** accelerate to the future.
 
-**Status:** implemented across the current application. Runtime adoption and verification are tracked in [establish-neon-velocity-theme](../openspec/changes/establish-neon-velocity-theme/proposal.md). All workspace views and current overlays use the shared dark palette. The [visual preview](theme-preview.html) remains a standalone design reference with illustrative data, not a working planning screen.
+**Status:** implemented across the current application. Runtime adoption and verification are recorded in the archived [establish-neon-velocity-theme](../openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/proposal.md); normative requirements are in [visual-theme](../openspec/specs/visual-theme/spec.md). All workspace views and current overlays use the shared dark palette. The [visual preview](theme-preview.html) remains a standalone design reference with illustrative data, not a working planning screen.
 
 Implementation epic: **ohwawd-t1qd — Adopt Neon Velocity visual theme**. Its linked tasks cover tokens, shared controls, planning graphics, remaining views and accessibility/regression verification.
 

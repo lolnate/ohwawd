@@ -5,15 +5,15 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-23T20:04:32Z
-updated_at: 2026-10-25T13:05:46Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-t1qd
 blocked_by:
     - ohwawd-lw34
 ---
 
-OpenSpec: openspec/changes/establish-neon-velocity-theme/design.md (Decision 7 and Migration Plan)
-Requirements: openspec/changes/establish-neon-velocity-theme/specs/visual-theme/spec.md
-Checklist: openspec/changes/establish-neon-velocity-theme/tasks.md
+OpenSpec: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/design.md (Decision 7 and Migration Plan)
+Requirements: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/specs/visual-theme/spec.md
+Checklist: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/tasks.md
 Reference: docs/visual-theme.md
 
 - [x] Run configured TypeScript, build, unit/database and affected UI suites after each implementation unit has landed its own tests/documentation

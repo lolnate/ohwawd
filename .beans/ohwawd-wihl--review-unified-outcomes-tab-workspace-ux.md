@@ -5,12 +5,12 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T16:52:57Z
-updated_at: 2026-10-25T16:58:02Z
+updated_at: 2026-10-25T18:25:56Z
 ---
 
 Use the requested ux-designer agent to audit outcome creation, inspection, editing, and project linking and suggest a coherent shared overlay/sidebar experience while preserving outcome search and filters.
 
-References: docs/ui-ux-conventions.md; docs/visual-theme.md; openspec/changes/redesign-outcome-catalog/design.md; openspec/changes/redesign-outcome-catalog/specs/outcome-catalog/spec.md. Related implementation: ohwawd-5eqp. This task produces design recommendations for review.
+References: docs/ui-ux-conventions.md; docs/visual-theme.md; openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md; openspec/changes/archive/2026-10-25-redesign-outcome-catalog/specs/outcome-catalog/spec.md. Related implementation: ohwawd-5eqp. This task produces design recommendations for review.
 
 - [x] Inspect existing interaction surfaces and outstanding catalog design
 - [x] Obtain UX-designer analysis and concrete workflow recommendations

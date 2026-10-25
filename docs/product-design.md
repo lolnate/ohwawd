@@ -36,11 +36,11 @@ Target date choices classify saved targets using the connected team's timezone (
 
 The default sort is **Name A–Z**, with **Needed by** (earliest first, missing last) and **Newest created** also available. Results announce **N of M outcomes**. **Clear filters** resets search and facets while retaining sort. Facet choices come from the full saved catalog; disappearing selections remain explicit unavailable/zero-result choices. Query state survives view switches and successful data refreshes within the signed-in page session; sign-out or full page reload resets it. Browsing sends no planning writes and remains available when delivery forecasts fail. Loading, initial-load failure with retry, loaded-empty, zero matches and stale last-good results are distinct states.
 
-Implementation staging: `ohwawd-sk0r` supplies the verified browse surface. Its current Inspect/Edit/Links/Delete callbacks and existing detail/create/link surfaces are transitional. The approved design below replaces them; completed query and browsing work remain valid prerequisites.
+The catalog and outcome workspace use the same saved-data contract. All outcome management is title-driven through the persistent sidebar; no inline editor or separate creator/link dialog remains.
 
-### Approved outcome workspace design — awaiting implementation
+### Unified outcome workspace
 
-The accepted October 25 UX review establishes **one persistent outcome sidebar** with **Details** and **Projects** sections for adding, viewing, editing and managing links. The source of truth is [redesign-outcome-catalog](../openspec/changes/redesign-outcome-catalog/design.md), Decisions 1 and 5–7; [the UX review](outcomes-ux-review.md) records the rationale and considered alternatives.
+The accepted October 25 UX review establishes **one persistent outcome sidebar** with **Details** and **Projects** sections for adding, viewing, editing and managing links. The normative source is [outcome-catalog](../openspec/specs/outcome-catalog/spec.md); the [archived design](../openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md), Decisions 1 and 5–7, and [UX review](outcomes-ux-review.md) record the rationale and considered alternatives.
 
 - Catalog and delivery outcome titles open saved Details. One primary **Add outcome** at the Outcomes heading opens blank Details with title focused; a loaded-empty catalog retains contextual creation. Repeated Edit/Links/Delete row actions, duplicated section-header Add controls and the inline editor are removed. Delivery forecasts and Resolve blocker actions remain.
 - Details shows complete metadata with read-only stream assignment; Projects shows every direct link and its Required/Optional and hidden/unavailable state. Edit details and Manage projects enter editing within their section, without another dialog.
@@ -49,9 +49,11 @@ The accepted October 25 UX review establishes **one persistent outcome sidebar**
 - Search, facets, sort and page context remain intact. Saved outcomes leaving the query stay open with **Outside current filters** and explicit Clear filters; drafts never change catalog membership. A creation finishing after dismissal offers View outcome using its returned ID.
 - Confirmed Delete outcome lives at the bottom of clean saved Details, away from save controls. It is unavailable while either section has unsaved changes or a write is pending. Dismissal/deletion restore meaningful focus. The desktop sidebar becomes full-screen on narrow layouts.
 
-Remaining implementation chain: `ohwawd-5eqp` (persistent shell/Details) → `ohwawd-q087` (creation/Projects) → `ohwawd-xlk3` (page entry points, deletion and filtered context) → `ohwawd-vart` (cross-feature verification). Each implementation Bean owns its tests and documentation. These are approved requirements, not a claim that the new sidebar is already available.
+Implementation: `src/app/outcome-workspace.tsx` owns captured submissions outside the dialog lifetime and keeps both section drafts within each opening. Accepted snapshots update catalog membership before refresh; failures retain last-good data and offer refresh-only retry. `tests/ui/outcome-workspace.spec.ts` verifies persistence boundaries and context recovery alongside catalog/workspace/responsive/theme regression suites.
 
 ## Current assignment and scope workflow (introduced in v1)
+
+The planned successor is [implement-outcome-first-board](../openspec/changes/implement-outcome-first-board/proposal.md), derived from the [Board validation and confirmed clarifications](board-design-validation.md). Its [design](../openspec/changes/implement-outcome-first-board/design.md) specifies outcome rank, explicit roadmap membership, immediate-prerequisite connectors and manual completion in the existing outcome sidebar. Implementation epic **ohwawd-5q71** tracks delivery; the current Board workflow described here has not yet been replaced.
 
 Open **Manage work** in a stream to access its ordered project queue. Drag a project to an insertion target, another stream, Needs assignment, or Deferred. Arrow buttons, Alt + arrow keys on a focused drag handle, and Location / Place before controls provide equivalent keyboard and touch workflows. Linear priority is read-only context; saved stream order controls scheduling. Dependencies constrain valid placement and forecast starts. Each stream executes one project at a time; blocked queue heads can be skipped for independent eligible work.
 

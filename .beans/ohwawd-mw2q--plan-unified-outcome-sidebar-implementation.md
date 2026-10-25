@@ -5,12 +5,12 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T17:01:56Z
-updated_at: 2026-10-25T17:07:08Z
+updated_at: 2026-10-25T18:25:56Z
 ---
 
 Incorporate the approved UX review into OpenSpec change redesign-outcome-catalog, document the interaction design, and decompose remaining implementation into linked Beans.
 
-References: docs/outcomes-ux-review.md; openspec/changes/redesign-outcome-catalog/proposal.md; openspec/changes/redesign-outcome-catalog/design.md; openspec/changes/redesign-outcome-catalog/specs/outcome-catalog/spec.md.
+References: docs/outcomes-ux-review.md; openspec/changes/archive/2026-10-25-redesign-outcome-catalog/proposal.md; openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md; openspec/changes/archive/2026-10-25-redesign-outcome-catalog/specs/outcome-catalog/spec.md.
 
 - [x] Revise proposal, design and acceptance scenarios for the approved persistent outcome sidebar
 - [x] Align design documentation and create/update bounded implementation Beans with dependencies

@@ -22,8 +22,9 @@ export default function OutcomeProjectFields({ projects, saved, draft, onChange,
     (!statuses.length || statuses.includes(project.status)) &&
     project.name.toLocaleLowerCase().includes(normalizedSearch),
   );
-  const selected = projects.filter((project) => !!draft[project.id]);
-  const changes = projects.flatMap((project) => {
+  const completeProjects = [...projects, ...[...new Set([...Object.keys(saved), ...Object.keys(draft)])].filter((id) => !projects.some((project) => project.id === id)).map((id) => ({ id, name: "Unavailable project", status: "Unavailable", in_scope: false }))];
+  const selected = completeProjects.filter((project) => !!draft[project.id]);
+  const changes = completeProjects.flatMap((project) => {
     const before = saved[project.id];
     const after = draft[project.id];
     if (before === after) return [];
@@ -43,6 +44,7 @@ export default function OutcomeProjectFields({ projects, saved, draft, onChange,
     </div>
     <p className="meta project-picker-count">Showing {visibleProjects.length} of {projects.filter((project) => project.in_scope || !!saved[project.id] || !!draft[project.id]).length} available projects.</p>
     <div className="project-picker-results">
+      {Object.keys(draft).filter((id) => !projects.some((project) => project.id === id)).map((id) => <div className="project-picker-row" key={id}><span>Unavailable project · {id} · {draft[id] === "minimum" ? "Required" : "Optional"}</span><button type="button" className="text-button" aria-label={`Remove unavailable project ${id}`} onClick={() => { const next = { ...draft }; delete next[id]; onChange(next); }}>Remove link</button></div>)}
       {visibleProjects.map((project) => {
         const before = saved[project.id];
         const after = draft[project.id];

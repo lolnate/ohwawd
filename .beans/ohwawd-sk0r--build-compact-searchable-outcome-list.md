@@ -5,15 +5,15 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-23T16:10:00Z
-updated_at: 2026-10-25T16:37:39Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-2ods
 blocked_by:
     - ohwawd-t9oa
 ---
 
 OpenSpec: redesign-outcome-catalog
-Requirements: openspec/changes/redesign-outcome-catalog/specs/outcome-catalog/spec.md
-Design: openspec/changes/redesign-outcome-catalog/design.md (Decisions 1–4 and 7)
+Requirements: openspec/changes/archive/2026-10-25-redesign-outcome-catalog/specs/outcome-catalog/spec.md
+Design: openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md (Decisions 1–4 and 7)
 
 Bounded scope: implement the full-width catalog browse surface using the query model, with title/owner/stream/needed-by/direct-link-count rows, labeled filters, search, sorting, result counts, reset and section navigation. Keep view state local and persistent across workspace view switches/reloads; handle local-midnight date updates and loading/error/empty distinctions. Expose explicit inspection/edit/link/delete callbacks for the following sidebar-integration task.
 

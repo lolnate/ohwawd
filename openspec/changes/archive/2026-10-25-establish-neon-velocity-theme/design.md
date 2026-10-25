@@ -2,7 +2,7 @@
 
 ## Context
 
-See `proposal.md` for motivation. [The theme reference](../../../docs/visual-theme.md) defines the exact palette and component recipes; [the preview](../../../docs/theme-preview.html) illustrates the direction with example data.
+See `proposal.md` for motivation. [The theme reference](../../../../docs/visual-theme.md) defines the exact palette and component recipes; [the preview](../../../../docs/theme-preview.html) illustrates the direction with example data.
 
 `src/app/layout.tsx` imports the base stylesheet and numerous feature stylesheets. Colors are mostly literal light/green values, including highly specific timeline rules and minified base/workspace rules. Changing only the root background or appending overrides would leave unreadable controls and mixed light/dark surfaces.
 

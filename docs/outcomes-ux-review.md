@@ -1,6 +1,6 @@
 # Outcomes tab: unified workspace UX review
 
-**Status:** Approach A accepted on October 25, 2026 and incorporated into the active [OpenSpec design](../openspec/changes/redesign-outcome-catalog/design.md) and [requirements](../openspec/changes/redesign-outcome-catalog/specs/outcome-catalog/spec.md). This review records the rationale; OpenSpec is the source of truth. Implementation remains pending.
+**Status:** Approach A accepted on October 25, 2026 and implemented in the unified outcome workspace. The [archived OpenSpec design](../openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md) records the design, and [Outcome Catalog requirements](../openspec/specs/outcome-catalog/spec.md) are the normative source; this review records the accepted rationale and historical source findings.
 
 **Tracking:** design review `ohwawd-wihl`; planning update `ohwawd-mw2q`; implementation `ohwawd-5eqp` → `ohwawd-q087` → `ohwawd-xlk3` → `ohwawd-vart`, under `ohwawd-2ods`.
 
@@ -128,7 +128,7 @@ Restore focus to the original visible opener, with catalog/delivery fallbacks. M
 
 The active proposal, design and acceptance scenarios now specify the persistent sidebar, internal section navigation with both drafts preserved, title-first rows, scoped saves, direct creation-to-inspection transition and post-dismissal creation notices. They supersede the earlier separate-modal/picker-handoff plan.
 
-`ohwawd-5eqp` now owns sidebar/Details foundations. New dependent Beans `ohwawd-q087` and `ohwawd-xlk3` cover creation/Projects and page/context integration; `ohwawd-vart` verifies the completed experience. Shared multi-section draft/save conventions are documented in [UI/UX conventions](ui-ux-conventions.md). These planning changes do not imply implementation has shipped.
+`ohwawd-5eqp` delivered sidebar/Details foundations; `ohwawd-q087` delivered creation/Projects; `ohwawd-xlk3` integrated page/context entry points. `ohwawd-vart` records cross-feature verification. Shared multi-section draft/save conventions are documented in [UI/UX conventions](ui-ux-conventions.md).
 
 ## Validation plan
 

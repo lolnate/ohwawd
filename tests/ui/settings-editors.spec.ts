@@ -119,11 +119,12 @@ test("weekly defaults, overrides, removals, and cycle fallback remain separate a
 
 test("load failures offer retry and failed writes retain the editable draft", async ({ page, assignment }) => {
   await page.goto("/");
-  await expect(page.locator("#project-streams")).toBeVisible();
+  await openSettings(page);
+  await settings(page).getByRole("button", { name: "Close Settings" }).click();
   let failLoad = true;
   let failSave = true;
-  await page.route("**/api/board", (route) => {
-    if (route.request().method() === "GET" && failLoad) { failLoad = false; return route.fulfill({ status: 503, json: { error: "Settings temporarily unavailable" } }); }
+  await page.route("**/api/board", async (route) => {
+    if (route.request().method() === "GET" && failLoad && await settings(page).isVisible()) { failLoad = false; return route.fulfill({ status: 503, json: { error: "Settings temporarily unavailable" } }); }
     if (route.request().method() === "PUT" && failSave) { failSave = false; return route.fulfill({ status: 503, json: { error: "Save temporarily unavailable" } }); }
     return route.fallback();
   });
@@ -167,13 +168,16 @@ test("closing and reopening during a submitted write waits for one canonical com
 
 test("late responses from a dismissed opening cannot reset a newer opening", async ({ page, assignment }) => {
   await page.goto("/");
-  await expect(page.locator("#project-streams")).toBeVisible();
+  await openSettings(page);
+  await settings(page).getByRole("button", { name: "Close Settings" }).click();
   const stale = await assignment.board();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   let first = true;
   await page.route("**/api/board", async (route) => {
-    if (route.request().method() === "GET" && first) { first = false; await gate; await route.fulfill({ json: stale }); }
+    // Board also reads this endpoint during workspace startup. Delay the first
+    // Settings read, rather than accidentally capturing a background Board read.
+    if (route.request().method() === "GET" && first && await settings(page).isVisible()) { first = false; await gate; await route.fulfill({ json: stale }); }
     else await route.fallback();
   });
   await page.getByRole("button", { name: "Settings", exact: true }).click();

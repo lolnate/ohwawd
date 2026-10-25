@@ -31,7 +31,7 @@ The Settings overlay and approved outcome-sidebar design share this interaction 
 - Distinguish rejected writes from successful persistence followed by a refresh failure. Retain drafts on rejection, and offer refresh-only retry after persistence succeeds.
 - Keep section controls, Close, relevant save actions, and dirty/pending/saved/error feedback accessible at narrow widths. Preserve the surrounding page's browsing context.
 
-Outcome-specific sections, creation behavior, validation and save boundaries are defined in the active [Outcome Catalog design](../openspec/changes/redesign-outcome-catalog/design.md), Decisions 5–7. That sidebar is planned, not yet implemented.
+Outcome-specific requirements are maintained in the [Outcome Catalog specification](../openspec/specs/outcome-catalog/spec.md); the [archived design](../openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md), Decisions 5–7, records the rationale. The sidebar supports title-driven inspection, opening-scoped Details and Projects drafts, section-specific saves/cancels, and explicit mutation results with refresh-only retries. New outcomes save both sections with Create outcome and transition to saved Details without replacing the dialog. A creation completed after dismissal offers View outcome in the workspace notice.
 
 ## Centered settings overlays
 

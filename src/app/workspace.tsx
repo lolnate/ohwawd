@@ -5,11 +5,10 @@ import Board, { type BoardState } from "./board";
 import { apiRequest } from "./client-api";
 import ScenarioPanel from "./scenario-panel";
 import StatusFilter from "./status-filter";
-import OutcomeProjectPicker from "./outcome-project-picker";
 import OutcomeDelivery from "./outcome-delivery";
-import OutcomeCatalog, { focusOutcomeSection } from "./outcome-catalog";
-import CreateOutcomeModal, { type OutcomeDraft } from "./create-outcome-modal";
+import OutcomeCatalog, { focusOutcomeSection, type CatalogContext } from "./outcome-catalog";
 import WorkspaceSettings, { type SettingsRequest, type SettingsTarget } from "./workspace-settings";
+import OutcomeWorkspace, { type OutcomeRequest } from "./outcome-workspace";
 
 type Team = { id: string; name: string; key: string };
 type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
@@ -57,11 +56,9 @@ export default function App() {
   const [activity, setActivity] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [newOutcome, setNewOutcome] = useState<OutcomeDraft>({ title: "", description: "", owner: "", successSignal: "", neededBy: "" });
-  const [showCreateOutcome, setShowCreateOutcome] = useState(false);
-  const [editingOutcome, setEditingOutcome] = useState<OutcomeFields | null>(null);
-  const [inspectingOutcome, setInspectingOutcome] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [outcomeRequest, setOutcomeRequest] = useState<OutcomeRequest | null>(null);
+  const outcomeGeneration = useRef(0);
+  const [catalogContext, setCatalogContext] = useState<CatalogContext>({ ids: [], clear: () => {} });
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatuses, setProjectStatuses] = useState<string[]>([]);
   const [projectPreset, setProjectPreset] = useState<"needs" | "active" | "completed" | "hidden" | "all">("needs");
@@ -107,6 +104,16 @@ export default function App() {
     }
   }, [reload]);
 
+  const refreshOutcomes = useCallback(async () => {
+    try { await reload(); }
+    catch (reason) {
+      // Outcome persistence also affects delivery even when definitions cannot
+      // be read. Board keeps its own last-good data and refresh feedback.
+      setBoardVersion((version) => version + 1);
+      throw reason;
+    }
+  }, [reload]);
+
   useEffect(() => {
     api<{ authenticated: boolean }>("/api/session").then(async ({ authenticated }) => {
       setSignedIn(authenticated);
@@ -140,19 +147,6 @@ export default function App() {
     else { setPreview(null); if (data.teams.length === 1) setTeamId(data.teams[0].id); }
   }
 
-  function createOutcome(links: Record<string, "minimum" | "optional">) {
-    return run(async () => {
-      await api("/api/outcomes", "POST", { ...newOutcome, links: Object.entries(links).map(([projectId, requirement]) => ({ projectId, requirement })) });
-      setNewOutcome({ title: "", description: "", owner: "", successSignal: "", neededBy: "" });
-      setShowCreateOutcome(false);
-      await reload(); setNotice(`Outcome created${Object.keys(links).length ? " with its project links" : ""}.`);
-    }, "Creating outcome…");
-  }
-
-  function startLinking(outcome: OutcomeFields) {
-    setEditingOutcome(null); setEditing(outcome.id);
-  }
-
   function openOutcomeDelivery() {
     setActiveView("outcomes");
     window.requestAnimationFrame(() => {
@@ -165,61 +159,12 @@ export default function App() {
     setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
   }
 
-  function startEditingOutcome(outcome: OutcomeFields) {
-    setEditing(null); setInspectingOutcome(outcome.id); setEditingOutcome({ ...outcome });
-    window.requestAnimationFrame(() => {
-      const card = document.getElementById("catalog-existing-details");
-      card?.scrollIntoView({ block: "center", behavior: "smooth" });
-      card?.querySelector<HTMLInputElement>("input")?.focus();
-    });
-  }
-
-  function inspectOutcome(outcome: OutcomeFields) {
-    setEditingOutcome(null); setInspectingOutcome(outcome.id);
-    window.requestAnimationFrame(() => {
-      document.getElementById("catalog-existing-details")?.scrollIntoView({ block: "start" });
-      document.getElementById("catalog-detail-title")?.focus({ preventScroll: true });
-    });
+  function inspectOutcome(outcome: OutcomeFields, fallback: "catalog" | "delivery" = "catalog") {
+    setOutcomeRequest({ generation: ++outcomeGeneration.current, id: outcome.id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback });
   }
 
   function startAddingOutcome() {
-    setShowCreateOutcome(true);
-  }
-
-  function saveOutcome(event: FormEvent) {
-    event.preventDefault();
-    if (!editingOutcome) return;
-    void run(async () => {
-      await api(`/api/outcomes/${editingOutcome.id}`, "PUT", {
-        title: editingOutcome.title,
-        description: editingOutcome.description,
-        owner: editingOutcome.owner,
-        successSignal: editingOutcome.success_signal,
-        neededBy: editingOutcome.needed_by?.slice(0, 10) || "",
-      });
-      setEditingOutcome(null);
-      await reload();
-      setNotice("Outcome updated.");
-    });
-  }
-
-  function deleteOutcome(outcome: OutcomeFields) {
-    if (!window.confirm(`Delete “${outcome.title}” and its project links?`)) return;
-    void run(async () => {
-      await api(`/api/outcomes/${outcome.id}`, "DELETE");
-      if (editing === outcome.id) setEditing(null);
-      if (editingOutcome?.id === outcome.id) setEditingOutcome(null);
-      if (inspectingOutcome === outcome.id) setInspectingOutcome(null);
-      await reload();
-      setNotice("Outcome deleted.");
-    });
-  }
-
-  async function saveLinks(outcomeId: string, draftLinks: Record<string, "minimum" | "optional">) {
-    await api(`/api/outcomes/${outcomeId}/links`, "PUT", {
-      links: Object.entries(draftLinks).map(([projectId, requirement]) => ({ projectId, requirement })),
-    });
-    setEditing(null); await reload(); setNotice("Outcome links saved.");
+    setOutcomeRequest({ generation: ++outcomeGeneration.current, id: null, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" });
   }
 
   async function setProjectScope(project: Project): Promise<void> {
@@ -262,7 +207,7 @@ export default function App() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.6v2.8L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.6v-2.8L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg>
       </button>
       <button className="quiet" onClick={() => void run(async () => { await api("/api/session", "DELETE"); setSignedIn(false); setState(null); })}>Sign out</button></div></header>
-    <section className="view-heading"><div><p className="eyebrow">{activeView === "board" ? "Sequencing and forecast" : activeView === "outcomes" ? "Product intent" : activeView === "projects" ? "Execution source" : "Decision history"}</p><h1>{activeView === "board" ? "Sequencing board" : activeView === "outcomes" ? "Outcomes" : activeView === "projects" ? "Linear projects" : "Decision scenarios"}</h1><p>{activeView === "board" ? "See target risk, capacity, and parallel work without leaving the planning surface." : activeView === "outcomes" ? "Create, edit, and connect desired results to the work required for delivery." : activeView === "projects" ? "Import, search, review, and curate the Linear work available to planning." : "Save alternatives, publish decisions, and compare what changed the forecast."}</p></div></section>
+    <section className="view-heading"><div><p className="eyebrow">{activeView === "board" ? "Sequencing and forecast" : activeView === "outcomes" ? "Product intent" : activeView === "projects" ? "Execution source" : "Decision history"}</p><h1>{activeView === "board" ? "Sequencing board" : activeView === "outcomes" ? "Outcomes" : activeView === "projects" ? "Linear projects" : "Decision scenarios"}</h1><p>{activeView === "board" ? "See target risk, capacity, and parallel work without leaving the planning surface." : activeView === "outcomes" ? "Create, edit, and connect desired results to the work required for delivery." : activeView === "projects" ? "Import, search, review, and curate the Linear work available to planning." : "Save alternatives, publish decisions, and compare what changed the forecast."}</p></div>{activeView === "outcomes" && <button type="button" disabled={!state} onClick={startAddingOutcome}>Add outcome</button>}</section>
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
     <section className="workspace-view" hidden={activeView !== "projects"}><details className="panel source-panel" open={!state?.connection}><summary><div><strong>Linear source</strong><small>{state?.connection ? `${state.connection.team_name} · connected as ${state.connection.viewer_name} · last imported ${new Date(state.connection.last_imported_at).toLocaleString()}` : "Connect an API key to preview one team."}</small></div><span className="tag">Read only</span></summary>
       <div className="connect-grid"><label>{state?.connection ? "Rotate key (optional)" : "Linear API key"}<input type="password" autoComplete="off" value={key} onChange={(event) => setKey(event.target.value)} placeholder={state?.connection ? "Use saved key" : "lin_api_…"} /></label><button disabled={busy || (!key && !state?.connection)} onClick={() => void run(() => inspect(), "Checking Linear access…", true)}>Check access</button></div>
@@ -293,22 +238,20 @@ export default function App() {
       onOpenOutcomes={openOutcomeDelivery} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}>
       <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-delivery" onClick={(event) => { event.preventDefault(); focusOutcomeSection("delivery"); }}>Outcome delivery</a><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a></nav>
-      <OutcomeDelivery board={deliveryBoard} error={deliveryError} busy={busy} onAdd={startAddingOutcome} onEdit={startEditingOutcome} onManageLinks={startLinking} onDelete={deleteOutcome} onResolveProject={resolveOutcomeProject} />
-      <OutcomeCatalog data={state} error={stateError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onEdit={startEditingOutcome} onLinks={startLinking} onDelete={deleteOutcome}>
-      {state && (() => { const outcome = state.outcomes.find((item) => item.id === inspectingOutcome); if (!outcome) return null; const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card catalog-existing-details" id="catalog-existing-details" key={outcome.id}>
-        {editingOutcome?.id === outcome.id ? <form className="outcome-form" onSubmit={saveOutcome}>
-          <label>Outcome title<input value={editingOutcome.title} onChange={(event) => setEditingOutcome({ ...editingOutcome, title: event.target.value })} maxLength={200} required /></label>
-          <label>Success signal<input value={editingOutcome.success_signal} onChange={(event) => setEditingOutcome({ ...editingOutcome, success_signal: event.target.value })} /></label>
-          <div className="form-row"><label>Owner<input value={editingOutcome.owner} onChange={(event) => setEditingOutcome({ ...editingOutcome, owner: event.target.value })} /></label><label>Needed by<input type="date" value={editingOutcome.needed_by?.slice(0, 10) || ""} onChange={(event) => setEditingOutcome({ ...editingOutcome, needed_by: event.target.value || null })} /></label></div>
-          <label>Notes<textarea value={editingOutcome.description} onChange={(event) => setEditingOutcome({ ...editingOutcome, description: event.target.value })} rows={2} /></label>
-          <div className="actions"><button disabled={busy}>Save outcome</button><button type="button" className="quiet" disabled={busy} onClick={() => setEditingOutcome(null)}>Cancel</button></div>
-        </form> : <><div className="card-title"><h3 id="catalog-detail-title" tabIndex={-1}>{outcome.title}</h3><span className={minimum.length ? "tag" : "tag unplanned"}>{minimum.length ? `${minimum.length} required` : "Unplanned"}</span></div>{outcome.description && <p>{outcome.description}</p>}<p className="meta">{outcome.owner || "No owner"}{outcome.needed_by ? ` · Needed by ${outcome.needed_by.slice(0, 10)}` : " · No target"}{outcome.success_signal ? ` · ${outcome.success_signal}` : ""}</p>{links.length > 0 && <ul className="linked">{links.map((link) => <li key={link.project_id}>{state.projects.find((project) => project.id === link.project_id)?.name || "Unavailable project"} <small>· {link.requirement}</small></li>)}</ul>}<div className="actions"><button className="text-button" disabled={busy} onClick={() => startEditingOutcome(outcome)}>Edit outcome</button><button className="text-button" disabled={busy} onClick={() => deleteOutcome(outcome)}>Delete</button></div></>}
-      <button className="text-button" disabled={busy} onClick={() => startLinking(outcome)}>Manage project links →</button><button type="button" className="quiet" onClick={() => { setInspectingOutcome(null); setEditingOutcome(null); focusOutcomeSection("catalog"); }}>Close details</button></article>; })()}
-      </OutcomeCatalog>
+      <OutcomeDelivery board={deliveryBoard} error={deliveryError} onInspect={(outcome) => inspectOutcome(outcome, "delivery")} onResolveProject={resolveOutcomeProject} />
+      <OutcomeCatalog data={state} error={stateError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onContext={setCatalogContext} />
     </section>
-    {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
-    {showCreateOutcome && state && <CreateOutcomeModal draft={newOutcome} projects={state.projects} busy={busy} onChange={setNewOutcome} onSave={createOutcome} onCancel={() => setShowCreateOutcome(false)} />}
     <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
+    <OutcomeWorkspace request={outcomeRequest} data={state} context={catalogContext} onClose={() => setOutcomeRequest(null)} onView={(id) => setOutcomeRequest({ generation: ++outcomeGeneration.current, id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" })} onRemoved={(id, generation) => {
+      if (outcomeRequest?.generation === generation) {
+        const index = catalogContext.ids.indexOf(id);
+        const next = catalogContext.ids[index + 1] ?? catalogContext.ids[index - 1];
+        outcomeRequest.opener = next ? document.getElementById(`outcome-${next}`)?.querySelector<HTMLElement>("button") ?? null : null;
+        outcomeRequest.fallback = "catalog";
+        setOutcomeRequest(null);
+      }
+      setState((current) => current && ({ ...current, outcomes: current.outcomes.filter((item) => item.id !== id), links: current.links.filter((link) => link.outcome_id !== id) }));
+    }} onAccepted={(outcome, links) => setState((current) => current && ({ ...current, outcomes: current.outcomes.some((item) => item.id === outcome.id) ? current.outcomes.map((item) => item.id === outcome.id ? outcome : item) : [...current.outcomes, outcome], links: links ? [...current.links.filter((link) => link.outcome_id !== outcome.id), ...Object.entries(links).map(([project_id, requirement]) => ({ outcome_id: outcome.id, project_id, requirement }))] : current.links }))} onRefresh={refreshOutcomes} />
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;
 }

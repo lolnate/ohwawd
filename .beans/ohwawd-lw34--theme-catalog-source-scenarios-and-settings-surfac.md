@@ -5,14 +5,14 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-23T20:04:32Z
-updated_at: 2026-10-25T13:05:46Z
+updated_at: 2026-10-25T18:25:56Z
 parent: ohwawd-t1qd
 blocked_by:
     - ohwawd-px1w
 ---
 
-OpenSpec: openspec/changes/establish-neon-velocity-theme/design.md (Decisions 2, 4 and 7)
-Requirements: openspec/changes/establish-neon-velocity-theme/specs/visual-theme/spec.md
+OpenSpec: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/design.md (Decisions 2, 4 and 7)
+Requirements: openspec/changes/archive/2026-10-25-establish-neon-velocity-theme/specs/visual-theme/spec.md
 Reference: docs/visual-theme.md
 
 - [x] Migrate Outcomes/catalog/delivery, Linear project filters/lists/sync reports, scenarios/comparisons and remaining configuration surfaces to the shared palette
