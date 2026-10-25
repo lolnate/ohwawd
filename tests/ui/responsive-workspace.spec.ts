@@ -92,7 +92,7 @@ test("outcome links open in a contained focused picker", async ({ page }) => {
   await mockWorkspace(page);
   await page.goto("/");
   await page.getByRole("button", { name: /^Outcomes/ }).click();
-  await page.getByRole("button", { name: /Manage project links/ }).click();
+  await page.getByRole("button", { name: "Links for Customers migrate identity", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Customers migrate identity" })).toBeVisible();
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await expectContained(page);

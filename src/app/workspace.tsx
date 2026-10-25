@@ -7,6 +7,7 @@ import ScenarioPanel from "./scenario-panel";
 import StatusFilter from "./status-filter";
 import OutcomeProjectPicker from "./outcome-project-picker";
 import OutcomeDelivery from "./outcome-delivery";
+import OutcomeCatalog, { focusOutcomeSection } from "./outcome-catalog";
 import CreateOutcomeModal, { type OutcomeDraft } from "./create-outcome-modal";
 import WorkspaceSettings, { type SettingsRequest, type SettingsTarget } from "./workspace-settings";
 
@@ -41,6 +42,7 @@ export default function App() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State | null>(null);
+  const [stateError, setStateError] = useState("");
   const [boardVersion, setBoardVersion] = useState(0);
   const [deliveryBoard, setDeliveryBoard] = useState<BoardState | null>(null);
   const [boardUpdate, setBoardUpdate] = useState<BoardState | null>(null);
@@ -58,6 +60,7 @@ export default function App() {
   const [newOutcome, setNewOutcome] = useState<OutcomeDraft>({ title: "", description: "", owner: "", successSignal: "", neededBy: "" });
   const [showCreateOutcome, setShowCreateOutcome] = useState(false);
   const [editingOutcome, setEditingOutcome] = useState<OutcomeFields | null>(null);
+  const [inspectingOutcome, setInspectingOutcome] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatuses, setProjectStatuses] = useState<string[]>([]);
@@ -81,11 +84,15 @@ export default function App() {
       const data = await api<State>("/api/state");
       if (generation !== reloadGeneration.current) return;
       setError("");
+      setStateError("");
       setState(data);
       setBoardVersion((version) => version + 1);
       if (data.connection) setTeamId(data.connection.team_id);
     } catch (failure) {
-      if (generation === reloadGeneration.current) throw failure;
+      if (generation === reloadGeneration.current) {
+        setStateError(failure instanceof Error ? failure.message : "Workspace data is unavailable.");
+        throw failure;
+      }
     }
   }, []);
 
@@ -149,8 +156,7 @@ export default function App() {
   function openOutcomeDelivery() {
     setActiveView("outcomes");
     window.requestAnimationFrame(() => {
-      document.getElementById("outcome-delivery")?.scrollIntoView({ block: "start", behavior: "smooth" });
-      document.getElementById("outcome-delivery-title")?.focus();
+      focusOutcomeSection("delivery");
     });
   }
 
@@ -160,11 +166,19 @@ export default function App() {
   }
 
   function startEditingOutcome(outcome: OutcomeFields) {
-    setEditing(null); setEditingOutcome({ ...outcome });
+    setEditing(null); setInspectingOutcome(outcome.id); setEditingOutcome({ ...outcome });
     window.requestAnimationFrame(() => {
-      const card = document.getElementById(`outcome-${outcome.id}`);
+      const card = document.getElementById("catalog-existing-details");
       card?.scrollIntoView({ block: "center", behavior: "smooth" });
       card?.querySelector<HTMLInputElement>("input")?.focus();
+    });
+  }
+
+  function inspectOutcome(outcome: OutcomeFields) {
+    setEditingOutcome(null); setInspectingOutcome(outcome.id);
+    window.requestAnimationFrame(() => {
+      document.getElementById("catalog-existing-details")?.scrollIntoView({ block: "start" });
+      document.getElementById("catalog-detail-title")?.focus({ preventScroll: true });
     });
   }
 
@@ -195,6 +209,7 @@ export default function App() {
       await api(`/api/outcomes/${outcome.id}`, "DELETE");
       if (editing === outcome.id) setEditing(null);
       if (editingOutcome?.id === outcome.id) setEditingOutcome(null);
+      if (inspectingOutcome === outcome.id) setInspectingOutcome(null);
       await reload();
       setNotice("Outcome deleted.");
     });
@@ -277,21 +292,22 @@ export default function App() {
     <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} updatedState={boardUpdate} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")}
       onOpenOutcomes={openOutcomeDelivery} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}>
+      <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-delivery" onClick={(event) => { event.preventDefault(); focusOutcomeSection("delivery"); }}>Outcome delivery</a><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a></nav>
       <OutcomeDelivery board={deliveryBoard} error={deliveryError} busy={busy} onAdd={startAddingOutcome} onEdit={startEditingOutcome} onManageLinks={startLinking} onDelete={deleteOutcome} onResolveProject={resolveOutcomeProject} />
-      <section className="panel outcomes-panel" id="outcome-catalog"><div className="section-head"><div><h2>Outcome catalog</h2><p>Describe the change you need, even before there is a Linear project.</p></div><span className="count">{state?.outcomes.length ?? 0}</span></div>
-      <div className="outcome-catalog-actions"><button type="button" className="secondary" disabled={busy} onClick={startAddingOutcome}>Add outcome</button></div>
-      <div className="card-list">{state?.outcomes.map((outcome) => { const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card" id={`outcome-${outcome.id}`} key={outcome.id}>
+      <OutcomeCatalog data={state} error={stateError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onEdit={startEditingOutcome} onLinks={startLinking} onDelete={deleteOutcome}>
+      {state && (() => { const outcome = state.outcomes.find((item) => item.id === inspectingOutcome); if (!outcome) return null; const links = state.links.filter((link) => link.outcome_id === outcome.id); const minimum = links.filter((link) => link.requirement === "minimum"); return <article className="outcome-card catalog-existing-details" id="catalog-existing-details" key={outcome.id}>
         {editingOutcome?.id === outcome.id ? <form className="outcome-form" onSubmit={saveOutcome}>
           <label>Outcome title<input value={editingOutcome.title} onChange={(event) => setEditingOutcome({ ...editingOutcome, title: event.target.value })} maxLength={200} required /></label>
           <label>Success signal<input value={editingOutcome.success_signal} onChange={(event) => setEditingOutcome({ ...editingOutcome, success_signal: event.target.value })} /></label>
           <div className="form-row"><label>Owner<input value={editingOutcome.owner} onChange={(event) => setEditingOutcome({ ...editingOutcome, owner: event.target.value })} /></label><label>Needed by<input type="date" value={editingOutcome.needed_by?.slice(0, 10) || ""} onChange={(event) => setEditingOutcome({ ...editingOutcome, needed_by: event.target.value || null })} /></label></div>
           <label>Notes<textarea value={editingOutcome.description} onChange={(event) => setEditingOutcome({ ...editingOutcome, description: event.target.value })} rows={2} /></label>
           <div className="actions"><button disabled={busy}>Save outcome</button><button type="button" className="quiet" disabled={busy} onClick={() => setEditingOutcome(null)}>Cancel</button></div>
-        </form> : <><div className="card-title"><h3>{outcome.title}</h3><span className={minimum.length ? "tag" : "tag unplanned"}>{minimum.length ? `${minimum.length} required` : "Unplanned"}</span></div>{outcome.description && <p>{outcome.description}</p>}<p className="meta">{outcome.owner || "No owner"}{outcome.needed_by ? ` · Needed by ${outcome.needed_by.slice(0, 10)}` : " · No target"}{outcome.success_signal ? ` · ${outcome.success_signal}` : ""}</p>{links.length > 0 && <ul className="linked">{links.map((link) => <li key={link.project_id}>{state.projects.find((project) => project.id === link.project_id)?.name || "Unavailable project"} <small>· {link.requirement}</small></li>)}</ul>}<div className="actions"><button className="text-button" disabled={busy} onClick={() => startEditingOutcome(outcome)}>Edit outcome</button><button className="text-button" disabled={busy} onClick={() => deleteOutcome(outcome)}>Delete</button></div></>}
-      <button className="text-button" disabled={busy} onClick={() => startLinking(outcome)}>Manage project links →</button></article>; })}{!state?.outcomes.length && <p className="empty">No outcomes yet. Add one to start the plan.</p>}</div>
-      {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
-      {showCreateOutcome && state && <CreateOutcomeModal draft={newOutcome} projects={state.projects} busy={busy} onChange={setNewOutcome} onSave={createOutcome} onCancel={() => setShowCreateOutcome(false)} />}
-    </section></section>
+        </form> : <><div className="card-title"><h3 id="catalog-detail-title" tabIndex={-1}>{outcome.title}</h3><span className={minimum.length ? "tag" : "tag unplanned"}>{minimum.length ? `${minimum.length} required` : "Unplanned"}</span></div>{outcome.description && <p>{outcome.description}</p>}<p className="meta">{outcome.owner || "No owner"}{outcome.needed_by ? ` · Needed by ${outcome.needed_by.slice(0, 10)}` : " · No target"}{outcome.success_signal ? ` · ${outcome.success_signal}` : ""}</p>{links.length > 0 && <ul className="linked">{links.map((link) => <li key={link.project_id}>{state.projects.find((project) => project.id === link.project_id)?.name || "Unavailable project"} <small>· {link.requirement}</small></li>)}</ul>}<div className="actions"><button className="text-button" disabled={busy} onClick={() => startEditingOutcome(outcome)}>Edit outcome</button><button className="text-button" disabled={busy} onClick={() => deleteOutcome(outcome)}>Delete</button></div></>}
+      <button className="text-button" disabled={busy} onClick={() => startLinking(outcome)}>Manage project links →</button><button type="button" className="quiet" onClick={() => { setInspectingOutcome(null); setEditingOutcome(null); focusOutcomeSection("catalog"); }}>Close details</button></article>; })()}
+      </OutcomeCatalog>
+    </section>
+    {editing && state && (() => { const outcome = state.outcomes.find((item) => item.id === editing); return outcome ? <OutcomeProjectPicker key={outcome.id} outcomeTitle={outcome.title} projects={state.projects} links={state.links.filter((link) => link.outcome_id === outcome.id)} busy={busy} onCancel={() => setEditing(null)} onSave={(draft) => void run(() => saveLinks(outcome.id, draft))} /> : null; })()}
+    {showCreateOutcome && state && <CreateOutcomeModal draft={newOutcome} projects={state.projects} busy={busy} onChange={setNewOutcome} onSave={createOutcome} onCancel={() => setShowCreateOutcome(false)} />}
     <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;

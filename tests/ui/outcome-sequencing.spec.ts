@@ -31,6 +31,10 @@ test("sidebar backdrop dismisses without click-through and preserves inside inte
 });
 
 test("outcome rows show every shared appearance and switching owner updates one charge immediately", async ({ page, assignment }) => {
+  await assignment.seedDeliveryPrimary();
+  const withoutShadow = await assignment.board();
+  const localBefore = withoutShadow.forecast.packages.find((item) => item.id === "linear:d")!;
+  const deliveryCapacity = (board: typeof withoutShadow) => board.forecast.cycles.map((cycle) => cycle.streams.find((stream) => stream.id === "delivery"));
   await assignment.shareProjects();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
@@ -45,13 +49,25 @@ test("outcome rows show every shared appearance and switching owner updates one 
   expect(secondBox!.x).toBeGreaterThanOrEqual(firstBox!.x + firstBox!.width - 1);
   await expect(reference).toHaveClass(/shared-project/);
   await expect(reference).toHaveAttribute("title", /Shared · 0 pts here. Counted in Foundation · Core/);
-  const referenceBox = await reference.boundingBox();
+  const localPrimary = page.locator('[data-timeline-outcome="other:delivery"] [data-timeline-project="linear:d"]');
+  await expect(localPrimary).toHaveClass(/counted-project/);
+  const [referenceBox, localBox] = await Promise.all([reference.boundingBox(), localPrimary.boundingBox()]);
   // The Core shadow is only a reference, so it can overlap Delivery's concurrent primary work.
-  expect(referenceBox!.x).toBeLessThan(firstBox!.x + firstBox!.width);
-  expect(firstBox!.x).toBeLessThan(referenceBox!.x + referenceBox!.width);
+  expect(referenceBox!.x).toBeLessThan(localBox!.x + localBox!.width);
+  expect(localBox!.x).toBeLessThan(referenceBox!.x + referenceBox!.width);
   const original = await assignment.board();
   const firstForecast = original.forecast.packages.find((item) => item.id === "linear:a")!;
   const secondForecast = original.forecast.packages.find((item) => item.id === "linear:b")!;
+  const localForecast = original.forecast.packages.find((item) => item.id === "linear:d")!;
+  expect(localForecast.start).not.toBeNull();
+  expect(localForecast.finish).not.toBeNull();
+  expect(firstForecast.start).toBeLessThanOrEqual(localForecast.finish!);
+  expect(localForecast.start).toBeLessThanOrEqual(firstForecast.finish!);
+  // Adding shared appearances changes neither the independent local dates nor its stream's capacity.
+  expect(localForecast).toEqual(localBefore);
+  expect(deliveryCapacity(original)).toEqual(deliveryCapacity(withoutShadow));
+  expect(original.forecast.selectedKnown).toBe(withoutShadow.forecast.selectedKnown);
+  expect(original.packages.find((item) => item.id === "linear:d")).toMatchObject({ stream_id: "delivery", capacity_outcome_id: null, selected: true });
   expect(secondForecast.start).toBeGreaterThan(firstForecast.finish!);
   await reference.click();
   const drawer = page.getByRole("dialog", { name: "API foundation", exact: true });

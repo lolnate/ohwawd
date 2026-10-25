@@ -1,6 +1,6 @@
 # Tasks
 
-Beans is the live execution tracker. Reconcile this checklist from verified Bean completion; all implementation work is currently to do.
+Beans is the live execution tracker. Reconcile this checklist from verified Bean completion.
 
 Parent epic: **ohwawd-2ods — Outcome Catalog list redesign**.
 
@@ -10,7 +10,7 @@ Parent epic: **ohwawd-2ods — Outcome Catalog list redesign**.
 
 ## 2. Compact catalog browsing — ohwawd-sk0r
 
-- [ ] 2.1 Build full-width accessible rows, search/facets/sort, counts/reset, section navigation and robust loading/error/empty behavior with session-local state; verify many-outcome browsing, filters and desktop/mobile layout in browser tests, and document delivered controls in `docs/product-design.md`.
+- [x] 2.1 Build full-width accessible rows, search/facets/sort, counts/reset, section navigation and robust loading/error/empty behavior with session-local state; verify many-outcome browsing, filters and desktop/mobile layout in browser tests, and document delivered controls in `docs/product-design.md`.
 
 ## 3. Outcome details and action integration — ohwawd-5eqp
 

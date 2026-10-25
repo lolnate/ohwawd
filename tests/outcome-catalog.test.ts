@@ -27,7 +27,7 @@ function catalog() {
 
 test("catalog indexes direct links without changing saved planning data", () => {
   const index = catalog();
-  assert.deepEqual(index.owners, [{ value: "engineering", label: "Engineering" }]);
+  assert.deepEqual(index.owners, [{ value: "owner:engineering", label: "Engineering" }]);
   assert.deepEqual(index.rows.find((row) => row.id === "one")?.projects.map((project) => project.name), ["API implementation", "Legacy migration"]);
   assert.deepEqual(index.rows.find((row) => row.id === "two")?.projects, [
     { id: "missing", name: null, inScope: null, requirement: "optional" },
@@ -39,7 +39,7 @@ test("catalog indexes direct links without changing saved planning data", () => 
 
 test("catalog combines normalized search and saved-data facets", () => {
   const index = catalog();
-  const result = queryCatalog(index, { ...unrestricted, search: " launch legacy ", owner: "engineering", stream: "core", projects: "required", targetDate: "next30" }, "name", "2026-10-23");
+  const result = queryCatalog(index, { ...unrestricted, search: " launch legacy ", owner: "owner:engineering", stream: "core", projects: "required", targetDate: "next30" }, "name", "2026-10-23");
   assert.deepEqual(result.map((row) => row.id), ["one"]);
   assert.deepEqual(queryCatalog(index, { ...unrestricted, owner: "none", stream: "unassigned", projects: "none", targetDate: "none" }, "name", "2026-10-23").map((row) => row.id), ["three"]);
   assert.deepEqual(queryCatalog(index, { ...unrestricted, projects: "optional" }, "name", "2026-10-23").map((row) => row.id), ["two"]);
@@ -58,4 +58,20 @@ test("catalog queries do not mutate the indexed planning state", () => {
   const before = structuredClone(index);
   queryCatalog(index, { ...unrestricted, search: "api", targetDate: "next30" }, "newest", "2026-10-23");
   assert.deepEqual(index, before);
+});
+
+test("saved owners cannot collide with unrestricted or blank-owner filter modes", () => {
+  const owners = [" All ", "None", "Engineering", "  ", "all", "owner:all"];
+  const index = indexCatalog({
+    outcomes: owners.map((owner, id) => ({ ...catalog().rows[0], id: String(id), title: String(id), owner })),
+    projects: [], links: [], streams: [],
+  });
+  assert.deepEqual(index.owners.map((option) => option.value), ["owner:all", "owner:engineering", "owner:none", "owner:owner:all"]);
+  const ids = (owner: CatalogFilters["owner"]) => queryCatalog(index, { ...unrestricted, owner }, "name", "2026-10-23").map((row) => row.id);
+  assert.deepEqual(ids("all"), ["0", "1", "2", "3", "4", "5"]);
+  assert.deepEqual(ids("none"), ["3"]);
+  assert.deepEqual(ids("owner:all"), ["0", "4"]);
+  assert.deepEqual(ids("owner:none"), ["1"]);
+  assert.deepEqual(ids("owner:engineering"), ["2"]);
+  assert.deepEqual(ids("owner:owner:all"), ["5"]);
 });

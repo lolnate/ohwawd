@@ -37,7 +37,7 @@ test("Outcome delivery belongs to Outcomes and shares editing, links, deletion a
   await editor.getByLabel("Outcome title").fill("Launch readiness");
   await editor.getByRole("button", { name: "Save outcome" }).click();
   await expect(delivery).toContainText("Launch readiness");
-  await expect(page.locator("#outcome-catalog").getByRole("heading", { name: "Launch readiness" })).toBeVisible();
+  await expect(page.locator(".catalog-list").getByRole("button", { name: "Launch readiness", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Board/ }).click();
   await page.locator("#stream-work-core > summary").click();
   await page.getByRole("button", { name: "Move Web experience up", exact: true }).click();
@@ -66,9 +66,10 @@ test("new outcomes and their project links are created together in the outcome m
   await modal.getByLabel("API foundation requirement").selectOption("optional");
   await modal.getByRole("button", { name: "Create outcome", exact: true }).click();
   await expect(modal).toHaveCount(0);
-  const outcome = catalog.locator(".outcome-card").filter({ has: page.getByRole("heading", { name: "Onboarding complete", exact: true }) });
-  await expect(outcome).toContainText("API foundation");
-  await expect(outcome).toContainText("optional");
+  const outcome = catalog.locator(".catalog-row").filter({ has: page.getByRole("button", { name: "Onboarding complete", exact: true }) });
+  await expect(outcome).toContainText("0 required · 1 optional");
+  await outcome.getByRole("button", { name: "Onboarding complete", exact: true }).click();
+  await expect(catalog.locator("#catalog-existing-details")).toContainText("API foundation");
   const board = await assignment.board();
   const created = board.outcomes.find((item) => item.title === "Onboarding complete");
   expect(created).toBeTruthy();

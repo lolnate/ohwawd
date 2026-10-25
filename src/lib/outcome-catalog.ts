@@ -15,7 +15,7 @@ export type CatalogStream = { id: string; name: string };
 
 export type CatalogFilters = {
   search: string;
-  owner: "all" | "none" | string;
+  owner: "all" | "none" | `owner:${string}`;
   stream: "all" | "unassigned" | string;
   projects: "all" | "none" | "optional" | "required";
   targetDate: "all" | "past" | "next30" | "none";
@@ -31,7 +31,7 @@ export type CatalogRow = CatalogOutcome & {
 
 export type CatalogIndex = {
   rows: CatalogRow[];
-  owners: { value: string; label: string }[];
+  owners: { value: `owner:${string}`; label: string }[];
   streams: CatalogStream[];
 };
 
@@ -72,7 +72,7 @@ export function indexCatalog(input: { outcomes: CatalogOutcome[]; projects: Cata
   });
   return {
     rows,
-    owners: [...ownerLabels].map(([value, label]) => ({ value, label })).sort((left, right) => left.label.localeCompare(right.label)),
+    owners: [...ownerLabels].map(([value, label]) => ({ value: `owner:${value}` as const, label })).sort((left, right) => left.label.localeCompare(right.label)),
     streams: [...input.streams].sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
   };
 }
@@ -90,7 +90,7 @@ export function queryCatalog(index: CatalogIndex, filters: CatalogFilters, sort:
       (filters.targetDate === "past" && !!neededBy && neededBy < today) ||
       (filters.targetDate === "next30" && !!neededBy && neededBy >= today && neededBy < next30End);
     return terms.every((term) => searchable.includes(term)) &&
-      (filters.owner === "all" || (filters.owner === "none" ? !owner : owner === filters.owner)) &&
+      (filters.owner === "all" || (filters.owner === "none" ? !owner : `owner:${owner}` === filters.owner)) &&
       (filters.stream === "all" || (filters.stream === "unassigned" ? !row.stream_id : row.stream_id === filters.stream)) &&
       (filters.projects === "all" || projectCoverage === filters.projects) && matchesTarget;
   }).sort((left, right) => {

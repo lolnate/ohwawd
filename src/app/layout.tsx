@@ -16,6 +16,7 @@ import "./project-sequencing.css";
 import "./planning-timeline.css";
 import "./outcome-sequencing.css";
 import "./workspace-settings.css";
+import "./outcome-catalog.css";
 
 export const metadata: Metadata = { title: "Oh, WAWD!", description: "Outcomes and Linear work, connected." };
 

@@ -18,6 +18,8 @@ type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string
   setDemand: (projectId: string, points: number | null) => Promise<void>; requireProject: (projectId: string) => Promise<void>; pauseUnassigned: () => Promise<void>;
   configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void>;
   shareProjects: () => Promise<void>; changeOwner: (outcomeId: string) => Promise<void>;
+  seedCatalog: () => Promise<void>; clearCatalogOwner: () => Promise<void>;
+  seedDeliveryPrimary: () => Promise<void>;
   setCapacity: (baseline: number | null, coreAllocation?: number) => Promise<void>;
    setWeekAvailability: (weekStart: string, availability: number) => Promise<void>;
    observeCapacity: () => Promise<void>; setCycleAvailability: (availability: number) => Promise<void>;
@@ -144,6 +146,23 @@ export const test = base.extend<{ assignment: Controls }>({
           await replaceOutcomeLinks(client, '00000000-0000-4000-8000-000000000001', [{ projectId: 'a', requirement: 'minimum' }, { projectId: 'c', requirement: 'minimum' }]);
           await database.query("UPDATE work_package SET capacity_outcome_id='00000000-0000-4000-8000-000000000002' WHERE project_id IN ('a','b')");
           await database.query("UPDATE linear_project_cache SET description='The API foundation scope imported from Linear.' WHERE linear_id='a'");
+        },
+        seedCatalog: async () => {
+          await database.query("UPDATE linear_connection SET team_timezone='America/Los_Angeles'");
+          await database.query("UPDATE linear_project_cache SET in_scope=false WHERE linear_id='b'");
+          for (let index = 1; index <= 50; index++) {
+            await database.query("INSERT INTO outcome(id,title,owner,stream_id,created_at) VALUES($1,$2,$3,$4,$5)",
+              [randomUUID(), `Catalog outcome ${String(index).padStart(2, '0')}`, index % 2 ? 'Product' : '', index % 2 ? 'core' : null, `2026-10-${String(1 + index % 20).padStart(2, '0')}T12:00:00Z`]);
+          }
+          await database.query("INSERT INTO outcome(id,title,description,owner,success_signal,stream_id,needed_by,created_at) VALUES('00000000-0000-4000-8000-000000000010','Catalog launch','Migrate customers safely',' Engineering ','Adoption','core','2026-11-06','2026-10-23T12:00:00Z')");
+          await database.query("INSERT INTO outcome(id,title,owner,needed_by,created_at) VALUES($1,'Owner All','All','2026-11-05','2026-10-22'),($2,'Owner None','None',null,'2026-10-21'),($3,$4,'engineering',null,'2026-10-20')", [randomUUID(), randomUUID(), randomUUID(), 'Z '.repeat(99).trim()]);
+          await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES('00000000-0000-4000-8000-000000000010','a','optional'),('00000000-0000-4000-8000-000000000010','b','optional')");
+        },
+        clearCatalogOwner: async () => { await database.query("UPDATE outcome SET owner='' WHERE lower(trim(owner))='engineering'"); },
+        seedDeliveryPrimary: async () => {
+          // Independent local work follows Rollout, concurrently with Core's dependent API work.
+          await database.query("UPDATE linear_issue_cache SET estimate=8 WHERE project_id='d'");
+          await placeProjects(client, [{ packageId: "linear:d", streamId: "delivery", selected: true }]);
         },
         configureCycles: async (options) => {
           if (options.visibleOffset !== undefined) await database.query("UPDATE linear_cycle_cache SET name='Cycle ' || (number+$1)::text", [options.visibleOffset]);
