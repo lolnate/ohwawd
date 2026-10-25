@@ -1,30 +1,31 @@
-.timeline-outcome-title { display: block; color: #264f43; font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
+.timeline-outcome-title { display: block; color: var(--color-text); font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
 .outcome-timeline-track .outcome-project-block { min-height: 28px; padding: 5px 6px; text-align: left; border-width: 1px; }
-.outcome-timeline-track .outcome-project-block:hover { filter: brightness(.92); }
-.outcome-project-block:focus-visible { outline: 3px solid #bd8026; outline-offset: 2px; z-index: 3; }
-.counted-project { background: #4c8978; border: 1px solid #377664; }
-.outcome-timeline-track .shared-project, .calendar-legend .shared-project, .outcome-unscheduled .shared-project { background: #eef3f6; color: #48677d; border: 1px dashed #668296; }
-.shared-band-caption { position: absolute; left: 8px; color: #526e81; font-size: .62rem; z-index: 1; }
+.outcome-timeline-track .outcome-project-block:hover:not(:disabled) { background: var(--color-project-owned-bg); border-color: var(--color-focus); }
+.outcome-project-block:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; z-index: 3; }
+.counted-project { background: var(--color-project-owned-bg); border: 1px solid var(--color-project-owned-border); }
+.outcome-timeline-track .shared-project, .calendar-legend .shared-project, .outcome-unscheduled .shared-project { background: var(--color-project-shared-bg); color: var(--color-text-muted); border: 1px dashed var(--color-project-shared-border); }
+.outcome-timeline-track .shared-project:hover:not(:disabled) { background: var(--color-surface-hover); }
+.shared-band-caption { position: absolute; left: 8px; color: var(--color-text-muted); font-size: .69rem; z-index: 1; }
 .outcome-unscheduled { position: absolute; z-index: 2; left: 8px; right: 8px; bottom: 5px; display: flex; flex-direction: column; gap: 4px; }
-.unscheduled-project { background: #fff5e2; color: #80602a; border: 1px solid #d6c398; border-radius: 5px; padding: 5px 8px; font-size: .67rem; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.unassigned-outcomes { background: #f6f8f2; border: 1px solid #dae3d6; border-radius: 8px; padding: 16px; margin: 12px 0; }
+.unscheduled-project { background: var(--color-warning-bg); color: var(--color-warning); border: 1px solid var(--color-warning); border-radius: var(--radius-bar); padding: 5px 8px; font-size: .67rem; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unscheduled-project:hover:not(:disabled) { background: var(--color-warning-bg); border-color: var(--color-focus); }
+.unassigned-outcomes { background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: 16px; margin: 12px 0; }
 .unassigned-outcomes > label { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-top: 9px; }
 .unassigned-outcomes select { width: auto; min-width: 150px; max-width: 50%; }
-.project-drawer { position: fixed; inset: 0 0 0 auto; width: min(700px, 100vw); height: 100dvh; max-height: 100dvh; max-width: 100vw; margin: 0; border: 0; border-left: 1px solid #c7d8cc; padding: 0; background: #fafcf9; color: #2e493d; box-shadow: -16px 0 60px #10291d33; overflow-y: auto; overscroll-behavior: contain; }
-.project-drawer::backdrop { background: #12271e70; backdrop-filter: blur(2px); }
-.project-drawer-header { position: sticky; top: 0; z-index: 5; background: #f0f6f0; padding: 24px; border-bottom: 1px solid #d1dfd3; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.project-drawer { position: fixed; inset: 0 0 0 auto; width: min(700px, 100vw); height: 100dvh; max-height: 100dvh; max-width: 100vw; margin: 0; border: 0; border-left: 1px solid var(--color-border-strong); padding: 0; background: var(--color-surface-raised); color: var(--color-text); box-shadow: -16px 0 60px var(--color-page); overflow-y: auto; overscroll-behavior: contain; }
+.project-drawer::backdrop { background: color-mix(in srgb, var(--color-page) 72%, transparent); backdrop-filter: blur(2px); }
+.project-drawer-header { position: sticky; top: 0; z-index: 5; background: var(--color-surface-raised); padding: 24px; border-bottom: 1px solid var(--color-border); display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .project-drawer-header h2 { font-size: 1.4rem; line-height: 1.35; margin: 4px 0; overflow-wrap: anywhere; }
-.project-drawer-header h2:focus { outline: none; }
 .project-drawer-header p { font-size: .8rem; margin: 6px 0 0; }
 .project-drawer-body { padding: 0 24px 28px; }
-.project-drawer-body > section { padding: 22px 0; border-bottom: 1px solid #dce5dc; }
-.project-drawer-body h3 { font-size: .83rem; letter-spacing: .06em; margin: 0 0 12px; text-transform: uppercase; color: #648271; }
+.project-drawer-body > section { padding: 22px 0; border-bottom: 1px solid var(--color-border); }
+.project-drawer-body h3 { font-size: .83rem; letter-spacing: .06em; margin: 0 0 12px; text-transform: uppercase; color: var(--color-text-muted); }
 .project-drawer-body p { font-size: .85rem; line-height: 1.65; }
 .project-drawer-body .project-description { white-space: pre-wrap; overflow-wrap: anywhere; }
-.capacity-owner-location { background: #e6f1e9; border-left: 3px solid #4b8a71; padding: 12px; border-radius: 4px; }
+.capacity-owner-location { background: var(--color-selection-bg); border-left: 3px solid var(--color-action); padding: 12px; border-radius: var(--radius-bar); }
 .drawer-outcome-list, .drawer-dependency-list { list-style: none; padding: 0; margin: 0; }
 .drawer-outcome-list li, .drawer-dependency-list li { padding: 9px 0; font-size: .83rem; }
-.drawer-outcome-list small, .drawer-dependency-list small { display: block; color: #708375; margin-top: 4px; line-height: 1.5; }
+.drawer-outcome-list small, .drawer-dependency-list small { display: block; color: var(--color-text-muted); margin-top: 4px; line-height: 1.5; }
 .project-drawer .project-plan-card { margin: 0; padding: 0; background: transparent; border: 0; box-shadow: none; }
 .project-drawer-body > a { display: inline-block; margin-top: 22px; }
 @media (max-width: 760px) {

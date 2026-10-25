@@ -2,7 +2,7 @@
 
 **Design intent:** accelerate to the future.
 
-**Status:** specified, implementation pending. Runtime adoption is tracked in [establish-neon-velocity-theme](../openspec/changes/establish-neon-velocity-theme/proposal.md). The live application has not yet been restyled. The [visual preview](theme-preview.html) is a standalone design reference with illustrative data, not a working planning screen.
+**Status:** implemented across the current application. Runtime adoption and verification are tracked in [establish-neon-velocity-theme](../openspec/changes/establish-neon-velocity-theme/proposal.md). All workspace views and current overlays use the shared dark palette. The [visual preview](theme-preview.html) remains a standalone design reference with illustrative data, not a working planning screen.
 
 Implementation epic: **ohwawd-t1qd — Adopt Neon Velocity visual theme**. Its linked tasks cover tokens, shared controls, planning graphics, remaining views and accessibility/regression verification.
 
@@ -174,3 +174,11 @@ Operational labels stay plain and precise: Outcome, Project, Capacity, Forecast,
 4. Check normal, hover, selected, focus, disabled, loading, empty, success, warning, error and provisional states; also drawers/pickers, native inputs and all four workspace views.
 5. Verify desktop, tablet, 390px mobile, keyboard operation, reduced motion and forced colors. Color changes must not alter scheduling, filtering, ownership or data persistence.
 6. Keep the preview synchronized with material palette/recipe changes. It is a visual aid; production CSS and behavior must still satisfy the OpenSpec requirements.
+
+## 8. Runtime implementation and verification
+
+- `src/app/theme-tokens.css` is the color/type/radius/motion contract and is imported first by the root layout. `src/app/styles.css` owns the base controls and surfaces; feature styles use the same tokens at source. The temporary `theme-base.css` override layer has been consolidated into the base stylesheet.
+- Component styles contain no separate light/green palette. Transparent descendants inherit a themed surface; overlay backdrops and calendar hatches use `color-mix()` with existing semantic tokens. Do not bring back foreground-only dark-theme overrides over legacy light surfaces.
+- Display text uses the documented system fallback when Space Grotesk is not installed; there is no bundled font or external font request. Calendar ownership remains solid versus dashed; projected bars retain their ownership fill with a violet inset and an explicit asterisk, independently of the shared-reference treatment.
+- `tests/ui/visual-theme.spec.ts` checks the rendered CSS cascade, compositing transparent ancestor backgrounds before calculating text contrast. It covers all workspace views, Settings sections, project details, outcome creation/linking, field and action colors, error states, projected/reduced calendar combinations, reduced motion, forced colors, and enlarged text. Disabled controls and intentionally hidden drag targets are excluded from normal-text contrast calculations.
+- Browser evidence includes desktop (1440px), tablet (768px), and phone (390px) screenshots under Playwright's `test-results/` outputs. Existing assignment/timeline/ownership/scenario suites verify that the visual migration preserves planning values, scheduling geometry, focus, dismissal, and save behavior.

@@ -3,7 +3,7 @@
   .app-header { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-inline: -12px; padding: 9px 12px 0; }
   .app-brand p, .source-freshness { display: none; }
   .header-actions { margin-left: auto; }
-  .app-tabs { order: 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; min-width: 0; }
+  .app-tabs { order: 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; min-width: 0; height: auto; overflow: visible; }
   .app-tab { justify-content: center; min-width: 0; min-height: 38px; padding-inline: 8px; }
   .view-heading { align-items: flex-start; padding-top: 16px; }
   .view-heading .phase { display: none; }
@@ -18,8 +18,8 @@
   .stream-controls label { width: min(130px, 45%); }
   .calendar-months { grid-template-columns: minmax(0, 1fr); }
   .workspace-view, .sequencing-board, .sequencing-board > *, .stream-list, .stream-lane, .stream-heading, .lane-packages, .board-settings, .board-shelves, .outcome-forecast { min-width: 0; max-width: 100%; }
-  .timeline-scroll, .cycle-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-color: #6b968a #e9efea; box-shadow: inset -10px 0 12px -14px #173e35, inset 10px 0 12px -14px #173e35; }
-  .timeline-scroll:focus-visible, .cycle-table-wrap:focus-visible { outline: 3px solid #65bfb3; outline-offset: 2px; }
+  .timeline-scroll, .cycle-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-color: var(--color-border-strong) var(--color-surface); box-shadow: inset -10px 0 12px -14px var(--color-page), inset 10px 0 12px -14px var(--color-page); }
+  .timeline-scroll:focus-visible, .cycle-table-wrap:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
   .board-cards { grid-template-columns: minmax(0, 1fr); }
   .board-fields { grid-template-columns: minmax(0, 1fr); }
   .stream-controls { width: 100%; }

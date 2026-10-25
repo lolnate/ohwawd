@@ -6,52 +6,52 @@
   margin: auto;
   padding: 0;
   overflow: hidden;
-  border: 1px solid #cbdad1;
-  border-radius: 16px;
-  background: #fff;
-  color: #253045;
-  box-shadow: 0 24px 80px #10251f59;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  box-shadow: 0 24px 80px var(--color-page);
 }
 .project-picker[open] { display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
 .create-outcome-modal[open] { display: block; overflow-y: auto; }
 .create-outcome-body { display: block; }
 .create-outcome-modal .project-picker-results { overflow: visible; }
-.create-outcome-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 14px 22px; border-bottom: 1px solid #e1e8e2; }
+.create-outcome-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 14px 22px; border-bottom: 1px solid var(--color-border); }
 .create-outcome-fields > label:first-child, .create-outcome-fields > label:last-child { grid-column: 1 / -1; }
 .create-outcome-fields .form-row { display: contents; }
 .create-outcome-fields .form-row label { min-width: 0; }
-.project-picker::backdrop { background: #10231fc2; backdrop-filter: blur(3px); }
-.project-picker-head { display: flex; justify-content: space-between; gap: 20px; padding: 20px 22px 14px; border-bottom: 1px solid #e1e8e2; }
+.project-picker::backdrop { background: color-mix(in srgb, var(--color-page) 72%, transparent); backdrop-filter: blur(3px); }
+.project-picker-head { display: flex; justify-content: space-between; gap: 20px; padding: 20px 22px 14px; border-bottom: 1px solid var(--color-border); }
 .project-picker-head h2 { margin: 2px 0 5px; }
 .project-picker-head p { max-width: 650px; margin-bottom: 0; font-size: .84rem; }
 .project-picker-head .quiet { align-self: flex-start; }
-.project-picker-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px 22px; background: #f2f7f3; }
+.project-picker-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px 22px; background: var(--color-surface); }
 .project-picker-summary > div { min-width: 0; }
 .project-picker-summary strong, .project-picker-summary span { display: block; }
-.project-picker-summary strong { color: #205b52; font-size: .8rem; }
-.project-picker-summary span { overflow: hidden; color: #67766e; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.project-picker-summary strong { color: var(--color-text); font-size: .8rem; }
+.project-picker-summary span { overflow: hidden; color: var(--color-text-muted); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
 .project-picker-summary details { grid-column: 1 / -1; }
-.project-picker-summary summary { cursor: pointer; color: #205b52; font-size: .75rem; font-weight: 700; }
-.project-picker-summary ul { max-height: 100px; margin: 7px 0 0; padding-left: 18px; overflow: auto; color: #67766e; font-size: .75rem; }
+.project-picker-summary summary { cursor: pointer; color: var(--color-action); font-size: .75rem; font-weight: 700; }
+.project-picker-summary ul { max-height: 100px; margin: 7px 0 0; padding-left: 18px; overflow: auto; color: var(--color-text-muted); font-size: .75rem; }
 .project-picker-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .4fr); gap: 10px; align-items: end; padding: 14px 22px 3px; }
 .project-picker-filters input { margin-bottom: 0; }
 .project-picker-count { margin: 0; padding: 5px 22px 10px; }
-.project-picker-results { min-height: 0; overflow-y: auto; border-block: 1px solid #e1e8e2; }
-.project-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px 65px; align-items: center; gap: 12px; min-height: 57px; padding: 8px 22px; border-top: 1px solid #edf1ed; }
+.project-picker-results { min-height: 0; overflow-y: auto; border-block: 1px solid var(--color-border); }
+.project-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px 65px; align-items: center; gap: 12px; min-height: 57px; padding: 8px 22px; border-top: 1px solid var(--color-border); }
 .project-picker-row:first-child { border-top: 0; }
-.project-picker-row.changed { background: #fffaef; }
+.project-picker-row.changed { background: var(--color-warning-bg); }
 .project-picker-row > label { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0; }
 .project-picker-row input { flex: 0 0 auto; width: auto; margin: 0; }
 .project-picker-row label span { min-width: 0; }
 .project-picker-row label strong, .project-picker-row label small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-picker-row label strong { font-size: .82rem; }
-.project-picker-row label small { margin-top: 2px; color: #748079; font-size: .7rem; font-weight: 500; }
+.project-picker-row label small { margin-top: 2px; color: var(--color-text-muted); font-size: .7rem; font-weight: 500; }
 .project-picker-row select { margin: 0; padding: 7px 9px; font-size: .76rem; }
-.link-state { justify-self: end; border-radius: 99px; padding: 4px 7px; background: #e7eee8; color: #50645b; font-size: .65rem; font-weight: 750; }
-.link-state.new, .link-state.changed { background: #fff0ce; color: #8a5b18; }
-.link-state.removed { background: #f8e3e3; color: #924545; }
-.project-picker-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 12px 22px; background: #fff; }
-.project-picker-actions > span { color: #69776f; font-size: .76rem; }
+.link-state { justify-self: end; border-radius: var(--radius-bar); padding: 4px 7px; background: var(--color-selection-bg); color: var(--color-text-muted); font-size: .65rem; font-weight: 750; }
+.link-state.new, .link-state.changed { background: var(--color-warning-bg); color: var(--color-warning); }
+.link-state.removed { background: var(--color-danger-bg); color: var(--color-danger); }
+.project-picker-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 12px 22px; background: var(--color-surface-raised); }
+.project-picker-actions > span { color: var(--color-text-muted); font-size: .76rem; }
 
 @media (max-width: 600px) {
   .project-picker { width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
