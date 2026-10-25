@@ -17,8 +17,8 @@ async function mockWorkspace(page: Page, scenarioReady = true) {
     if (path === "/api/session") return route.fulfill({ json: { authenticated: true } });
     if (path === "/api/state") return route.fulfill({ json: {
       connection: { viewer_name: "Owner", team_id: "team-1", team_name: "Product", last_imported_at: "2026-10-20T10:00:00Z" },
-      projects, outcomes: [{ id: "outcome-1", title: "Customers migrate identity", description: "", owner: "Owner", success_signal: "Migration completes", needed_by: "2026-11-30" }],
-      links: [{ outcome_id: "outcome-1", project_id: "project-unassigned", requirement: "minimum" }], streams: [{ id: "stream-1", name: "Core" }],
+      projects, outcomes: [{ id: "outcome-1", title: "Customers migrate identity", description: "", owner: "Owner", success_signal: "Migration completes", needed_by: "2026-11-30", stream_id: "stream-1", created_at: "2026-10-20T10:00:00Z" }],
+      links: [{ outcome_id: "outcome-1", project_id: "project-unassigned", requirement: "minimum" }], streams: [{ id: "stream-1", name: "Core" }], timezone: "UTC",
     } });
     if (path === "/api/streams") return route.fulfill({ json: { streams: [{ id: "stream-1", name: "Core", position: 1, wip_limit: 2, allocation: 1, active: true, retired_at: null, retirement_reason: "", package_count: 1 }], activeScenario: null, events: [] } });
     if (path === "/api/scenarios") return route.fulfill({ json: { baselineRevisionId: null, activeScenarioId: null, activeDraftDirty: false, currentSourceAt: "2026-10-20T10:00:00Z", creationReadiness: { ready: scenarioReady, blockers: scenarioReady ? [] : ["Set a provisional baseline in points per cycle."], warnings: [] }, scenarios: [] } });

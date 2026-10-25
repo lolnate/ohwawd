@@ -1,0 +1,50 @@
+:root {
+  color-scheme: dark;
+  --color-page: #070A12;
+  --color-surface: #0D1424;
+  --color-surface-raised: #111C30;
+  --color-surface-hover: #16243B;
+  --color-border: #22344D;
+  --color-border-strong: #637B9D;
+  --color-text: #F2F6FF;
+  --color-text-muted: #B2C0D8;
+  --color-text-subtle: #8194B4;
+  --color-on-accent: #07101D;
+  --color-action: #51E5FF;
+  --color-action-hover: #92F0FF;
+  --color-action-active: #28C6E2;
+  --color-brand-secondary: #FF5CC8;
+  --color-focus: #FFE18A;
+  --color-selection-bg: #182B46;
+  --color-success: #62F6B5;
+  --color-success-bg: #0E2D2A;
+  --color-warning: #FFC56D;
+  --color-warning-bg: #332817;
+  --color-danger: #FF7389;
+  --color-danger-bg: #351E2C;
+  --color-info: #8CACFF;
+  --color-info-bg: #172742;
+  --color-provisional: #BCA4FF;
+  --color-provisional-bg: #241D39;
+  --color-project-owned-bg: #155568;
+  --color-project-owned-border: #51E5FF;
+  --color-project-shared-bg: #141C2D;
+  --color-project-shared-border: #8A9CBA;
+  --color-capacity-reduced-bg: #332817;
+  --color-calendar-projected-bg: #241D39;
+  --font-display: "Space Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-telemetry: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --radius-panel: 12px;
+  --radius-control: 6px;
+  --radius-bar: 4px;
+  --motion-fast: 140ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight !important; outline-offset: 3px; }
+}

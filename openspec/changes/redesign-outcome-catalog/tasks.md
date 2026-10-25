@@ -6,7 +6,7 @@ Parent epic: **ohwawd-2ods — Outcome Catalog list redesign**.
 
 ## 1. Saved data and query behavior — ohwawd-t9oa
 
-- [ ] 1.1 Add outcome stream/date/creation metadata and resolved timezone to the typed workspace-state contract, plus the pure indexed catalog filter/sort model; verify state-contract and query tests for shared/hidden/missing projects, blank owners, optional-only links, combined filters, date boundaries and stable sorting, and run TypeScript.
+- [x] 1.1 Add outcome stream/date/creation metadata and resolved timezone to the typed workspace-state contract, plus the pure indexed catalog filter/sort model; verify state-contract and query tests for shared/hidden/missing projects, blank owners, optional-only links, combined filters, date boundaries and stable sorting, and run TypeScript.
 
 ## 2. Compact catalog browsing — ohwawd-sk0r
 

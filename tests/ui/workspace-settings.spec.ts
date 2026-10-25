@@ -101,7 +101,7 @@ test("dismissal falls back to the current header gear when the captured opener i
 });
 
 test("Settings is available before Linear connection without fabricated evidence", async ({ page, assignment }) => {
-  await page.route("**/api/state", (route) => route.fulfill({ json: { connection: null, projects: [], outcomes: [], links: [], streams: [] } }));
+  await page.route("**/api/state", (route) => route.fulfill({ json: { connection: null, projects: [], outcomes: [], links: [], streams: [], timezone: "UTC" } }));
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });

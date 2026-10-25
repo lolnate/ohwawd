@@ -6,7 +6,7 @@ Parent epic: **ohwawd-t1qd — Adopt Neon Velocity visual theme**.
 
 ## 1. Semantic foundation — ohwawd-0t83
 
-- [ ] 1.1 Introduce shared semantic color/type/radius/motion tokens and local typography/fallbacks, with initial base-style migration; verify representative contrast pairs, native-control readability, offline font behavior, TypeScript/build compatibility and documented aliases.
+- [x] 1.1 Introduce shared semantic color/type/radius/motion tokens and local typography/fallbacks, with initial base-style migration; verify representative contrast pairs, native-control readability, offline font behavior, TypeScript/build compatibility and documented aliases.
 
 ## 2. Shared shell and interactions — ohwawd-somy
 

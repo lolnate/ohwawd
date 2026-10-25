@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import "./theme-tokens.css";
 import "./styles.css";
+import "./theme-base.css";
 import "./project-filters.css";
 import "./outcome-project-picker.css";
 import "./board.css";

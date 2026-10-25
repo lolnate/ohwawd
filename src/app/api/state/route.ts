@@ -5,7 +5,7 @@ export async function GET(): Promise<Response> {
   try {
     await requireOwner();
     return Response.json(await readTransaction(async (client) => {
-      const [connection, projects, outcomes, links, streams] = await Promise.all([
+      const [connection, projects, outcomes, links, streams, workspace] = await Promise.all([
       client.query("SELECT viewer_name, team_id, team_name, last_imported_at FROM linear_connection WHERE workspace_id=1"),
       client.query(`SELECT p.linear_id AS id, p.name, p.description, p.status, p.url, p.cross_team, p.needs_review, p.in_scope,
         p.source_updated_at, w.id AS package_id, w.stream_id,
@@ -15,16 +15,18 @@ export async function GET(): Promise<Response> {
         FROM linear_project_cache p JOIN work_package w ON w.project_id=p.linear_id
         LEFT JOIN linear_issue_cache i ON i.project_id=p.linear_id
         GROUP BY p.linear_id, w.id ORDER BY p.name`),
-      client.query("SELECT id, title, description, owner, success_signal, needed_by, created_at FROM outcome ORDER BY created_at DESC"),
-      client.query("SELECT outcome_id, project_id, requirement FROM outcome_project_link"),
-      client.query("SELECT id, name, position, wip_limit FROM stream WHERE active=true ORDER BY position"),
+       client.query("SELECT id, title, description, owner, success_signal, needed_by::text AS needed_by, stream_id, created_at FROM outcome ORDER BY created_at DESC"),
+       client.query("SELECT outcome_id, project_id, requirement FROM outcome_project_link"),
+       client.query("SELECT id, name, position, wip_limit FROM stream WHERE active=true ORDER BY position"),
+       client.query<{ timezone: string }>("SELECT COALESCE((SELECT team_timezone FROM linear_connection WHERE workspace_id=1), (SELECT timezone FROM workspace WHERE id=1), 'America/New_York') AS timezone"),
     ]);
       return {
       connection: connection.rows[0] ?? null,
       projects: projects.rows,
       outcomes: outcomes.rows,
       links: links.rows,
-      streams: streams.rows,
+       streams: streams.rows,
+       timezone: workspace.rows[0]?.timezone ?? "America/New_York",
       };
     }));
   } catch (error) { return responseError(error); }

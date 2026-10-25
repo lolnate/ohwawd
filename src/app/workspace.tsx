@@ -12,9 +12,10 @@ import WorkspaceSettings from "./workspace-settings";
 
 type Team = { id: string; name: string; key: string };
 type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
-type Outcome = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null };
+type OutcomeFields = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null };
+type Outcome = OutcomeFields & { stream_id: string | null; created_at: string };
 type Link = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
-type State = { connection: { viewer_name: string; team_id: string; team_name: string; last_imported_at: string } | null; projects: Project[]; outcomes: Outcome[]; links: Link[]; streams: { id: string; name: string }[] };
+type State = { connection: { viewer_name: string; team_id: string; team_name: string; last_imported_at: string } | null; projects: Project[]; outcomes: Outcome[]; links: Link[]; streams: { id: string; name: string }[]; timezone: string };
 type Preview = { id: string; name: string; status: string };
 type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 type ImportResult = { imported: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
@@ -54,7 +55,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [newOutcome, setNewOutcome] = useState<OutcomeDraft>({ title: "", description: "", owner: "", successSignal: "", neededBy: "" });
   const [showCreateOutcome, setShowCreateOutcome] = useState(false);
-  const [editingOutcome, setEditingOutcome] = useState<Outcome | null>(null);
+  const [editingOutcome, setEditingOutcome] = useState<OutcomeFields | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatuses, setProjectStatuses] = useState<string[]>([]);
@@ -123,7 +124,7 @@ export default function App() {
     }, "Creating outcome…");
   }
 
-  function startLinking(outcome: Outcome) {
+  function startLinking(outcome: OutcomeFields) {
     setEditingOutcome(null); setEditing(outcome.id);
   }
 
@@ -140,7 +141,7 @@ export default function App() {
     setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
   }
 
-  function startEditingOutcome(outcome: Outcome) {
+  function startEditingOutcome(outcome: OutcomeFields) {
     setEditing(null); setEditingOutcome({ ...outcome });
     window.requestAnimationFrame(() => {
       const card = document.getElementById(`outcome-${outcome.id}`);
@@ -170,7 +171,7 @@ export default function App() {
     });
   }
 
-  function deleteOutcome(outcome: Outcome) {
+  function deleteOutcome(outcome: OutcomeFields) {
     if (!window.confirm(`Delete “${outcome.title}” and its project links?`)) return;
     void run(async () => {
       await api(`/api/outcomes/${outcome.id}`, "DELETE");

@@ -78,7 +78,7 @@ export const test = base.extend<{ assignment: Controls }>({
             const current = await board();
             json = { connection: { viewer_name: "Owner", team_id: "team", team_name: "Product", last_imported_at: seenAt.toISOString() },
               projects: current.packages.map((item) => ({ ...item, id: item.project_id, package_id: item.id, description: "", issue_count: 1,
-                unestimated_open_issues: item.project_id === "d" ? 1 : 0, estimated_open_points: 5 })), outcomes: current.outcomes, links: current.links, streams: current.streams };
+                unestimated_open_issues: item.project_id === "d" ? 1 : 0, estimated_open_points: 5 })), outcomes: current.outcomes, links: current.links, streams: current.streams, timezone: current.timezone };
           } else if (path === "/api/streams") json = request.method() === "POST" ? await addStream(body, client) : await listStreams(client);
           else if (path === "/api/outcomes" && request.method() === "POST") {
             const id = randomUUID();
