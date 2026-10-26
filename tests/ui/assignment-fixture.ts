@@ -20,6 +20,8 @@ import { saveOutcomeCompletion, reconcileOutcomeCompletions } from "../../src/li
 import { saveDependency } from "../../src/lib/dependency-store";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
+  seedDerivedChain: () => Promise<void>;
+  seedOptionalDerived: () => Promise<void>;
   activateRoadmap: () => Promise<void>;
   setProjectCompleted: (projectId: string, completed: boolean) => Promise<void>;
   moveOutcome: (outcomeId: string, streamId: string, beforeOutcomeId?: string) => Promise<void>;
@@ -33,6 +35,7 @@ type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string
   seedCatalog: () => Promise<void>; clearCatalogOwner: () => Promise<void>;
   seedDeliveryPrimary: () => Promise<void>;
   setCapacity: (baseline: number | null, coreAllocation?: number) => Promise<void>;
+  setRemainingScope: (projectId: string, points: number | null) => Promise<void>; setHolidaysEnabled: (enabled: boolean) => Promise<void>;
    setWeekAvailability: (weekStart: string, availability: number) => Promise<void>;
    observeCapacity: () => Promise<void>; setCycleAvailability: (availability: number) => Promise<void>;
    setExtraScope: (projectId: string, points: number) => Promise<void> };
@@ -186,11 +189,19 @@ export const test = base.extend<{ assignment: Controls }>({
           await reconcileOutcomeCompletions(client, "Linear sync");
         }); },
         addSourceConflict: async () => { await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','linear')"); },
+        seedDerivedChain: async () => {
+          await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','local')");
+          await database.query("UPDATE work_package SET sequence_position=CASE project_id WHEN 'b' THEN 1 WHEN 'a' THEN 2 ELSE sequence_position END WHERE project_id IN ('a','b')");
+          await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES('00000000-0000-4000-8000-000000000001','b','optional')");
+        },
+        seedOptionalDerived: async () => { await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:d','linear:b','local')"); },
         setDemand: async (projectId, points) => { await database.query("UPDATE linear_issue_cache SET estimate=$2 WHERE project_id=$1", [projectId, points]); },
         setCapacity: async (baseline, coreAllocation = 0.5) => {
           await database.query("UPDATE capacity_profile SET baseline=$1 WHERE workspace_id=1", [baseline]);
           await database.query("UPDATE stream SET allocation=CASE WHEN id='core' THEN $1::numeric ELSE 1-$1::numeric END", [coreAllocation]);
         },
+         setRemainingScope: async (projectId, points) => { await database.query("UPDATE linear_project_cache SET remaining_scope=$2 WHERE linear_id=$1", [projectId, points]); },
+         setHolidaysEnabled: async (enabled) => { await database.query("UPDATE capacity_profile SET holidays_enabled=$1 WHERE workspace_id=1", [enabled]); },
          setWeekAvailability: (weekStart, availability) => saveWeeklyAvailability(client, { weekStart, availability }),
          observeCapacity: async () => {
            for (const [index, points] of [18, 20, 22].entries()) await database.query("INSERT INTO cycle_observation(linear_id,team_id,starts_at,ends_at,completed_at,cycle_days,completed_points) VALUES($1,'team','2026-10-01','2026-10-08','2026-10-08',7,$2)", [`observed-${index}`, points]);

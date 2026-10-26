@@ -81,6 +81,25 @@ test("extra scope is unchanged and advisory when newly estimated work appears", 
   await pg.close();
 });
 
+test("aggregate remaining scope produces finite stream demand despite unestimated issues", async () => {
+  const database = new PGlite();
+  try {
+    await database.exec(schemaSql); await database.query("INSERT INTO workspace(id) VALUES(1)");
+    await database.query("INSERT INTO stream(id,name,position,allocation) VALUES('core','Core',1,.2)");
+    await database.query("INSERT INTO capacity_profile(workspace_id,baseline,baseline_reason,reserve,horizon,holidays_enabled) VALUES(1,150,'Weekly planning capacity',0,6,false)");
+    const at = new Date("2026-11-01T00:00:00Z");
+    await saveImport(database as unknown as PoolClient, { encryptedKey: "test", viewer: { id: "v", name: "Owner" }, team: { id: "team", name: "Team" },
+      projects: [{ id: "iras", teamId: "team", name: "Identity", description: "", status: "started", url: "https://linear.app/iras", updatedAt: at,
+        crossTeam: false, remainingScope: 106, issues: [{ id: "unknown", projectId: "iras", teamId: "team", identifier: "IRAS-1", title: "Unestimated", estimate: null, stateType: "started", completedAt: null, updatedAt: at }] }],
+      cycles: Array.from({ length: 6 }, (_, index) => ({ id: `c${index}`, teamId: "team", number: index + 1, name: null,
+        startsAt: new Date(Date.UTC(2026, 10, 2 + index * 7)), endsAt: new Date(Date.UTC(2026, 10, 9 + index * 7)), cycleDays: 7, completedAt: null, completedPoints: null })),
+      cycleSettings: { timezone: "UTC", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 6 } }, at);
+    await placeProjects(database as unknown as PoolClient, [{ packageId: "linear:iras", streamId: "core", selected: true }]);
+    const projection = (await getBoard(database as unknown as PoolClient)).forecast.packages[0];
+    assert.equal(projection.demand, 106); assert.equal(projection.finish, 4); assert.deepEqual(projection.consumed, [30, 30, 30, 16]);
+  } finally { await database.close(); }
+});
+
 test("new Linear dependencies preserve user order and only withhold affected lane dates until repair", async () => {
   const database = new PGlite();
   try {

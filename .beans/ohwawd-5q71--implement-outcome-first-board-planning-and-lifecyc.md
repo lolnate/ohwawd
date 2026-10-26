@@ -1,20 +1,20 @@
 ---
 # ohwawd-5q71
 title: Implement outcome-first Board planning and lifecycle
-status: in-progress
+status: completed
 type: epic
 priority: normal
 created_at: 2026-10-25T18:37:04Z
-updated_at: 2026-10-26T00:36:03Z
+updated_at: 2026-10-26T01:20:17Z
 blocked_by:
     - ohwawd-a5j9
 ---
 
-Implement OpenSpec change implement-outcome-first-board after planning task ohwawd-a5j9. Sources: openspec/changes/implement-outcome-first-board/proposal.md, design.md, tasks.md and specs/. Review input: docs/board-design-validation.md. Completion: dependency-linked implementation children verified; v5 rank/tier scheduling, mandatory roadmap ownership, truthful immediate prerequisites/connectors and manual completion integrated with the existing outcome sidebar; scenario history preserved; documentation and OpenSpec reconciled and strict validation passing before normal archive. Beans own execution status; no Board implementation has started.
+Implement OpenSpec change implement-outcome-first-board after planning task ohwawd-a5j9. Sources: openspec/changes/archive/2026-10-25-implement-outcome-first-board/proposal.md, design.md, tasks.md and specs/. Review input: docs/board-design-validation.md. Completion: dependency-linked implementation children verified; v5 rank/tier scheduling, mandatory roadmap ownership, truthful immediate prerequisites/connectors and manual completion integrated with the existing outcome sidebar; scenario history preserved; documentation and OpenSpec reconciled and strict validation passing before normal archive. All implementation and acceptance children are verified complete.
 
 ## Implementation dependency map
 
-Planning ohwawd-a5j9 is completed. Implement in dependency order: ohwawd-rc2m (schema/conversion) → ohwawd-sug7 (atomic mutations) → ohwawd-d92k (v5 forecast) → ohwawd-gqh7 (completion service) → ohwawd-mg25 (scenarios) → ohwawd-0lzq (Board controls), then ohwawd-npmi (timeline) and ohwawd-4oo7 (sidebar lifecycle), both prerequisites of ohwawd-r2nj (integration verification). The first six implementation children through Board controls ohwawd-0lzq are completed; the remaining three implementation children remain todo. The complete mapping and verification deliverables are in openspec/changes/implement-outcome-first-board/tasks.md; strict proposal/spec/design/task validation passed.
+Planning ohwawd-a5j9 is completed. Implement in dependency order: ohwawd-rc2m (schema/conversion) → ohwawd-sug7 (atomic mutations) → ohwawd-d92k (v5 forecast) → ohwawd-gqh7 (completion service) → ohwawd-mg25 (scenarios) → ohwawd-0lzq (Board controls), then ohwawd-npmi (timeline) and ohwawd-4oo7 (sidebar lifecycle), both prerequisites of ohwawd-r2nj (integration verification). All implementation children and final integration acceptance are completed and verified. The complete mapping and verification deliverables are in openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md; strict proposal/spec/design/task validation passed.
 
 ## Foundation progress
 
@@ -47,3 +47,9 @@ Completed high-priority follow-up ohwawd-r568 from the first manual Board walkth
 ## Outcome-count density follow-up
 
 Completed ohwawd-m65h from the second manual Board review. Removed counted-points/direct-project blurbs from all timeline labels and moved equivalent current planning facts to saved outcome Details, retaining delivery state on the Board. Typecheck, 36 affected browser tests, responsive screenshot inspection, strict OpenSpec validation and whitespace checks passed. ohwawd-npmi remains next.
+
+
+
+## Final integrated acceptance
+
+Completed ohwawd-npmi, ohwawd-4oo7 and ohwawd-r2nj. Outcome-priority v5 scheduling, mandatory roadmap ownership, source/scenario compatibility, immediate prerequisite references/connectors, explicit wait/priority-bypass inspection and manual lifecycle actions/history are integrated. Final verification passed 137 unit/database tests, 111 Chromium tests, typecheck, production build, global strict OpenSpec validation, Beans integrity, responsive/accessible visual review and final multi-lens review with no findings.

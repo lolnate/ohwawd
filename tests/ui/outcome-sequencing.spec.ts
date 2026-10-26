@@ -44,6 +44,7 @@ test("outcome rows show every shared appearance and switching owner updates one 
   await expect(page.locator('[data-timeline-project="linear:a"]')).toHaveCount(3);
   await expect(counted).toHaveClass(/counted-project/);
   const sibling = page.locator(`[data-timeline-outcome="${foundation}"] [data-timeline-project="linear:b"]`);
+  await expect(sibling).toHaveAttribute("title", /Optional context for this outcome/);
   const [firstBox, secondBox] = await Promise.all([counted.boundingBox(), sibling.boundingBox()]);
   // Counted work owns this stream's capacity and must never overlap in time.
   expect(secondBox!.x).toBeGreaterThanOrEqual(firstBox!.x + firstBox!.width - 1);

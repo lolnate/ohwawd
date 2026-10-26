@@ -6,141 +6,186 @@ Make the order users arrange in each project stream persistent, accessible, and 
 ## Requirements
 
 ### Requirement: Stream order is visible and persistent
-Each stream SHALL present its saved ordered project queue without requiring expansion of project-management details. Queue order SHALL drive project and timeline-row presentation and scheduling preference. Reordering SHALL persist across reloads and SHALL NOT encode a preferred or hard start date.
+Each stream SHALL show its saved ranked outcome rows without expanding project management. Owned projects SHALL retain persistent order within their owner. Display and scheduling SHALL use outcome rank plus scoped project order, rather than a competing cross-outcome project queue. Reordering SHALL survive reload and SHALL NOT encode a preferred or hard start date.
 
 #### Scenario: Reorder independent projects
-- **WHEN** the planner drags project C before project A in a stream containing A, B, and C
-- **THEN** the saved queue and timeline rows become C, A, B
-- **AND** a reload preserves that order
-- **AND** forecast dates are recalculated from that order and other scheduling inputs
+- **WHEN** the planner moves project C before A within one outcome containing A, B and C
+- **THEN** its saved scoped order becomes C, A, B and reload preserves it
+- **AND** forecasts use that order within the outcome and required/optional scheduling tier
 
 #### Scenario: Priority sync preserves deliberate order
-- **WHEN** source priority changes after a queue has been arranged
-- **THEN** the displayed priority updates but the queue order does not
+- **WHEN** source priority changes after outcomes and projects have been arranged
+- **THEN** displayed source priority updates without changing outcome rank or scoped project order
 
 ### Requirement: Moves have accessible equivalent controls
-The board SHALL support drag-and-drop within streams, across streams, and between streams and the Needs assignment or Deferred shelves. It SHALL provide keyboard and touch-accessible non-drag controls for the same destination and insertion choices. All interaction paths SHALL enforce identical placement rules and expose success or failure accessibly.
+The Board SHALL provide drag/drop and keyboard/touch controls for equivalent outcome rank/stream moves and project moves within an owner, explicit ownership transfers, Needs assignment and Deferred. Project controls SHALL NOT silently reposition work across outcome priority boundaries. All paths SHALL enforce identical rules and expose success or failure accessibly.
 
 #### Scenario: Move without dragging
-- **WHEN** a keyboard or touch user selects a project, destination stream, and before-project insertion target through Move controls
-- **THEN** the result matches an equivalent drag-and-drop operation
-- **AND** focus remains usable and the resulting position is announced
+- **WHEN** the planner selects an eligible destination owner and project insertion target through Move controls
+- **THEN** the result matches the equivalent drag/drop ownership transfer
+- **AND** focus remains usable and the resulting owner and position are announced
 
 #### Scenario: Invalid drop
-- **WHEN** a drop violates a dependency or has an invalid destination
-- **THEN** no saved assignment or order changes
-- **AND** the interface explains the failure and retains focus on the project or its move control
+- **WHEN** a drop violates scoped dependency order or lacks a valid destination owner
+- **THEN** no assignment, ownership, rank or order changes
+- **AND** the explanation identifies the failure and retains focus on the move control
 
 ### Requirement: Explicit placement is atomic
-A successful placement SHALL remove a project from its prior queue and insert it at the requested valid position in the destination, preserving other projects' relative order. It SHALL update assignment and sequence atomically. A stale sequencing request SHALL be rejected rather than overwriting intervening assignment, order, or relevant dependency changes.
+A placement SHALL update affected outcome ranks, project ownership, stream and scoped order atomically while preserving other members' relative order. An included project SHALL appear once in its owner's ordered work. Stale sequence, ownership, rank, membership or relevant dependency information SHALL cause a conflict rather than overwrite intervening edits.
 
 #### Scenario: Move between streams
-- **WHEN** the planner inserts B between X and Y in another stream
-- **THEN** B appears once in that destination as X, B, Y and no longer appears in its former queue
-- **AND** both queues and their forecasts reflect one committed mutation
+- **WHEN** the planner transfers B into an eligible linked owner in another stream between X and Y
+- **THEN** the destination owner contains X, B, Y and B leaves its prior owned queue
+- **AND** both streams and all references reflect one committed mutation
 
 #### Scenario: Another edit occurred during a drag
-- **WHEN** a placement request uses sequencing information made stale by another assignment, reorder, or relevant source/dependency change
-- **THEN** it fails with a conflict and refreshed sequencing information
-- **AND** it does not overwrite the intervening edit
+- **WHEN** a placement request became stale after assignment, ownership, rank, membership, order or relevant source/dependency changes
+- **THEN** it fails with conflict and current planning information
+- **AND** no intervening edit is overwritten
 
 ### Requirement: All assignment paths produce a valid sequence
-Location-only assignments SHALL insert incoming projects at the last dependency-valid positions while preserving existing members' relative order. Bulk assignment SHALL use a deterministic dependency-valid order for incoming members and succeed or fail as a unit. Reassigning a project already selected in that stream SHALL NOT reposition it.
+Inclusion and ownership transfers without insertion targets SHALL append at the last dependency-valid position within the destination owner. Bulk inclusion SHALL require valid owners and use deterministic scoped dependency order, succeeding or failing as a unit. Repeating an already satisfied outcome placement or inclusion without an insertion target SHALL NOT reposition existing members.
 
 #### Scenario: Assign a blocker to its successor's stream
-- **WHEN** a location-only assignment moves A into a stream containing B and A blocks B
-- **THEN** A is inserted at the last position before B allowed by the effective dependency graph
-- **AND** the other existing members retain their relative order
+- **WHEN** inclusion moves A into an outcome containing B and A blocks B
+- **THEN** A is inserted at the last scoped position before B allowed by the effective dependency graph
+- **AND** existing members retain relative order
 
 #### Scenario: Repeat bulk outcome assignment
-- **WHEN** an outcome's projects are assigned again to a stream that already contains some of them
-- **THEN** existing members retain their sequence and only incoming members are inserted
-- **AND** a repeated fully satisfied assignment is a no-op
+- **WHEN** an outcome is assigned again to its existing stream without an insertion target
+- **THEN** its rank and existing project order remain unchanged
+- **AND** candidate, deferred and dismissed links are not silently included
 
 #### Scenario: Bulk placement cannot produce a valid order
-- **WHEN** any incoming project's constraints make the requested bulk assignment invalid
-- **THEN** the entire assignment is rejected with the blocking relationships
-- **AND** no subset of the projects moves
+- **WHEN** any incoming included project's owner or scoped constraints are invalid
+- **THEN** the entire assignment is rejected with the blocking relationships or missing owners
+- **AND** no subset moves
 
 ### Requirement: Effective dependencies constrain placement
-For selected unfinished projects in the same stream, every effective direct or transitive predecessor SHALL precede its successor. Effective dependencies SHALL include unwaived Linear edges and local edges. Cross-stream placement SHALL retain finish-to-start constraints without imposing a global queue rank. Dragging SHALL NOT create or waive dependencies.
+Within one owner, included unfinished direct and transitive predecessors SHALL precede successors in scoped project order. Effective edges SHALL remain unwaived Linear edges plus local edges. Across owners, including in the same stream, rank SHALL NOT impose a precedence restriction; finish-to-start eligibility SHALL still apply. Dragging SHALL NOT create or waive dependencies.
 
 #### Scenario: Direct blocker cannot follow blocked work
-- **WHEN** A blocks B and the planner attempts to place B before A in the same stream
-- **THEN** the move is rejected and the explanation identifies A as B's blocker
+- **WHEN** A and B have one owner, A blocks B, and the planner places B before A
+- **THEN** the move is rejected with A identified as the blocker
 - **AND** A is not moved automatically
 
 #### Scenario: Transitive blocker through another stream
-- **WHEN** A blocks X, X blocks B, A and B share a stream, and X belongs to another stream
+- **WHEN** A blocks X, X blocks B, A and B have one owner, and X belongs to another stream
 - **AND** the planner attempts to place B before A
 - **THEN** the move is rejected with the A to X to B dependency path
 
 #### Scenario: Dependencies across streams remain active
-- **WHEN** B is first in its stream but depends on A in another stream
+- **WHEN** B is the highest-priority eligible candidate in its stream but waits for A elsewhere
 - **THEN** B cannot start until a cycle after A finishes
-- **AND** an unresolved external or deferred predecessor continues to prevent B's finite completion forecast
+- **AND** an unfinished external, candidate, dismissed or deferred prerequisite prevents a finite dependent forecast
 
 #### Scenario: Completed or waived relationships
-- **WHEN** a predecessor is reconciled as complete or its Linear dependency has been explicitly waived through the dependency controls
-- **THEN** that relationship imposes no queue-position restriction
-- **AND** any waiver remains visibly distinguishable from an active Linear dependency
+- **WHEN** a predecessor is reconciled as actually complete or its Linear edge is explicitly waived
+- **THEN** that relationship imposes no scoped queue-position restriction
+- **AND** waivers remain visibly distinct from effective Linear dependencies
+
+#### Scenario: Lower-ranked outcome owns the same-stream blocker
+- **WHEN** higher-ranked outcome H owns B and lower-ranked L owns its prerequisite A in the same stream
+- **THEN** the rank H before L is valid, B waits and eligible A can run
+- **AND** the rank is not treated as a source order conflict
 
 ### Requirement: Source conflicts preserve user order
-If sync or rebase introduces a dependency that conflicts with saved order, the system SHALL preserve that order, identify affected relationships, and withhold unfinished-project dates for the affected lane until repaired. Repair moves SHALL be accepted when they reduce existing violations without introducing new ones. An effective dependency cycle SHALL remain an invalid-forecast error.
+Sync or rebase SHALL preserve ranks and scoped project order. New within-owner precedence violations SHALL be actionable conflicts withholding unfinished dates for that owner until repaired; independent owners SHALL remain usable subject to dependencies. Repair moves SHALL reduce existing violations without introducing new ones. Cross-owner priority inversions SHALL be waits, not order conflicts. Effective dependency cycles SHALL remain invalid for forecasting.
 
 #### Scenario: Sync introduces reverse precedence
-- **WHEN** a saved lane contains B before A and sync reports that A blocks B
-- **THEN** the lane remains B before A and displays an actionable order conflict
-- **AND** its unfinished work has no finite date until the conflict is repaired
-- **AND** otherwise valid lanes remain usable subject to their dependencies
+- **WHEN** one owner's saved project order is B before A and sync reports A blocks B
+- **THEN** saved order is retained with an actionable conflict and that owner's unfinished work has no finite dates until repaired
+- **AND** otherwise valid owners remain usable subject to dependencies
 
 #### Scenario: Repair several conflicts incrementally
-- **WHEN** a lane has multiple source-introduced order violations and a move resolves one without adding any
-- **THEN** the move succeeds even if another existing violation remains
-- **AND** dates return only after the lane is valid
+- **WHEN** an owner has several source-introduced violations and a move reduces them without adding another
+- **THEN** the move succeeds even if another violation remains
+- **AND** dates return when the owner's order is valid
 
 #### Scenario: Add a locally conflicting constraint
-- **WHEN** adding a local dependency or restoring a waiver would invalidate an otherwise valid lane order
-- **THEN** the mutation is rejected with the required precedence
-- **AND** the planner can reorder first and retry
+- **WHEN** adding a local edge or restoring a waiver would invalidate a valid within-owner project order
+- **THEN** the edit is rejected with required precedence so the planner can reorder and retry
+- **AND** a cross-owner dependency alone does not invalidate outcome rank
 
 ### Requirement: Scheduling selects eligible work by queue order
-The scheduler SHALL carry unfinished work from earlier cycles before selecting one eligible project in saved queue order per free stream. Projects in the same stream SHALL NOT overlap, regardless of outcome ownership or legacy WIP limit. Blocked projects SHALL be skipped in favor of later eligible work. Queue adjacency SHALL NOT create a dependency. Capacity conservation and next-cycle dependency unlocking SHALL remain in effect; independent streams MAY work concurrently.
+The scheduler SHALL carry unfinished work first, otherwise select at most one eligible project per free stream using required-delivery tier, owning outcome rank, scoped project order and stable ID. Required tier SHALL contain the effective closure of all minimum-required links; other included work SHALL be optional tier. Blocked work SHALL be skipped. Capacity conservation, independent stream concurrency and next-cycle unlocking SHALL remain unchanged.
 
 #### Scenario: Stream honors sequence
-- **WHEN** independent A and B are eligible in that order in a stream
-- **THEN** A receives the next free cycle even if B has higher Linear priority
+- **WHEN** independent A and B are eligible in the same tier and owning outcome in that scoped order
+- **THEN** A receives the next free cycle regardless of Linear priority
 - **AND** B waits until a cycle after A finishes
 
 #### Scenario: Legacy WIP does not allow overlap across outcomes
-- **WHEN** a stream has a saved WIP limit of two and its first two eligible projects belong to different outcomes
-- **THEN** only the first project starts and consumes the stream budget
-- **AND** the second project cannot start until the cycle after the first finishes
+- **WHEN** a saved stream has WIP two and eligible projects in different outcomes
+- **THEN** only the highest-priority eligible project starts
+- **AND** the second cannot start until the cycle after the first finishes
 
 #### Scenario: Different streams remain concurrent
-- **WHEN** two independent projects belong to different streams with available capacity
-- **THEN** they can start in the same cycle
+- **WHEN** independent projects belong to different streams with available capacity
+- **THEN** they can start in the same cycle without borrowing capacity across streams
 
 #### Scenario: Blocked head does not idle independent work
-- **WHEN** A is first but dependency-blocked and later B is independently eligible
-- **THEN** B can fill a free slot while A waits
-- **AND** no unused capacity is borrowed automatically from another stream
+- **WHEN** higher-ranked H waits for a prerequisite and lower-ranked L has eligible work
+- **THEN** L can fill the free slot while H waits
+- **AND** H is not assigned a start before the prerequisite completes
+
+#### Scenario: Optional work yields to lower-ranked required work
+- **WHEN** H has only unstarted optional-tier work and lower-ranked L has eligible required-tier work
+- **THEN** L's required work is selected first
+- **AND** already-started optional work is carried to completion rather than preempted
+
+#### Scenario: Shared ownership does not inherit rank
+- **WHEN** H requires A owned by lower-ranked L and another eligible owner M lies before L
+- **THEN** A retains L's priority, and M's eligible same-tier work may run first
+- **AND** no hidden priority donation or duplicate scheduling changes the chosen owners or ranks
 
 ### Requirement: Scenarios preserve sequencing semantics and history
-New saved drafts and revisions SHALL retain sequence and use the revised calculation version. Dirty detection and comparisons SHALL identify sequence changes separately from Linear priority changes. Loading legacy editable drafts SHALL adapt retired controls to the new model. Published legacy inputs, output, and calculation version SHALL remain unchanged.
+New drafts and revisions SHALL store membership, outcome ranks and scoped project order with calculation version v5. Dirty detection and comparison SHALL distinguish these from source priority changes. Older editable drafts SHALL adapt with explicit conversion feedback and require saving under v5 before publication. Published legacy inputs, outputs and calculation versions SHALL remain unchanged.
 
 #### Scenario: Round-trip an arranged draft
-- **WHEN** the planner saves a sequence, changes the live board, and reloads that draft
-- **THEN** its saved sequence is restored subject to visible source/stream reconciliation
-- **AND** comparisons show which project positions changed
+- **WHEN** the planner saves a v5 plan, changes the live Board and reloads that draft
+- **THEN** its ranks, ownership, membership and scoped order are restored with visible source/stream reconciliation
+- **AND** comparison identifies each kind of planning change
 
 #### Scenario: Load a legacy editable draft
-- **WHEN** a draft has numeric ranks, start constraints, and must-include flags but no sequence
-- **THEN** loading it seeds a deterministic dependency-valid queue using rank then immutable ID as the stable preference
-- **AND** it explains that start constraints and must-include are retired
-- **AND** subsequent save uses the revised model without applying those retired controls
+- **WHEN** a draft lacks ranks or membership, including one with retired rank/start/must-include controls
+- **THEN** existing legacy adaptation runs before deterministic v5 conversion
+- **AND** the notice explains ownerless candidates, outcome priority and excluded demand, while retired controls remain unapplied
+- **AND** the persisted draft stays unchanged until explicitly saved
 
 #### Scenario: Read a published legacy revision
-- **WHEN** the planner opens a v0 published revision after v1 is introduced
-- **THEN** its stored result, inputs, and version remain intact
-- **AND** comparison against a v1 plan identifies the calculation-version difference
+- **WHEN** the planner views or compares a v0 through v4 published revision
+- **THEN** its stored inputs, output and version remain intact without recalculation under v5
+- **AND** comparison identifies the calculation-version difference
+
+### Requirement: Outcome waits and priority bypass are explicit
+Project dependency details SHALL identify unfinished effective prerequisites, their location or excluded state, and any remediation. The timeline SHALL communicate visible immediate dependencies through ordered bars/references, connectors and accessible project labels rather than separate waiting or priority-bypass warning rows. Missing estimates and capacity SHALL remain inspectable without expanding the timeline.
+
+#### Scenario: Cross-stream prerequisite delays the highest outcome
+- **WHEN** H's required successor waits for a shared prerequisite in another stream while L runs locally
+- **THEN** H's timeline shows the prerequisite reference and finish-to-start connector when both endpoints are finite
+- **AND** opening either project exposes the named prerequisite and relevant planning details without a separate timeline warning
+- **AND** rank and ownership remain unchanged
+
+#### Scenario: Unresolved excluded prerequisite
+- **WHEN** the prerequisite is unfinished and dismissed or only a candidate
+- **THEN** the dependent outcome has no finite completion date until that prerequisite is resolved
+- **AND** project inspection explains Include on roadmap and owning-outcome requirements without a verbose timeline warning row
+
+### Requirement: Remaining project scope drives capacity demand
+When Linear supplies aggregate project scope history, the scheduler SHALL use total scope minus completed scope as remaining source demand. Individual unestimated issues SHALL NOT withhold a finite forecast in that case. Extra scope SHALL remain additive. When aggregate scope is unavailable, issue estimates and existing unknown-scope coverage rules SHALL remain the fallback.
+
+#### Scenario: Aggregate scope sizes an otherwise unestimated project
+- **WHEN** a project has 106 remaining aggregate points and unestimated individual issues
+- **THEN** its forecast demand is 106 points plus any saved Extra scope
+- **AND** the unestimated issues remain visible in project inspection without forcing an infinite timeline bar
+
+#### Scenario: Aggregate scope is unavailable
+- **WHEN** Linear does not supply usable aggregate scope for a project
+- **THEN** open issue estimates and Extra scope determine demand
+- **AND** uncovered unestimated issues continue to withhold a finite forecast
+
+#### Scenario: Completed scope reduces source demand
+- **WHEN** Linear reports 150 total scope points and 44 completed scope points
+- **THEN** the project contributes 106 remaining source points
+- **AND** completed points are not charged again

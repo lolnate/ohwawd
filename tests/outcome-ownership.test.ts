@@ -15,6 +15,27 @@ import { previewStreamRetirement, retireStream } from "../src/lib/streams";
 const first = "00000000-0000-4000-8000-000000000001";
 const second = "00000000-0000-4000-8000-000000000002";
 const third = "00000000-0000-4000-8000-000000000003";
+
+test("outcome rows add only deduplicated immediate prerequisites without changing direct links", () => {
+  const packages = ["a", "b", "c", "d"].map((id, index) => ({ id: `linear:${id}`, project_id: id, name: id.toUpperCase(), stream_id: "core", selected: true, sequence_position: index + 1 }));
+  const outcomes = [{ id: first, title: "Launch", stream_id: "core", stream_position: 1 }];
+  const links = [{ outcome_id: first, project_id: "b", requirement: "minimum" as const }, { outcome_id: first, project_id: "d", requirement: "optional" as const }];
+  const dependencies = [
+    { predecessorId: "linear:a", successorId: "linear:b" },
+    { predecessorId: "linear:a", successorId: "linear:b" },
+    { predecessorId: "linear:c", successorId: "linear:a" },
+    { predecessorId: "linear:d", successorId: "linear:a" },
+    { predecessorId: "linear:missing", successorId: "linear:b" },
+  ];
+  const before = structuredClone({ packages, outcomes, links, dependencies });
+  const row = outcomeRows("core", packages, outcomes, links, dependencies)[0];
+  assert.deepEqual(row.projects.map((item) => item.id), ["linear:a", "linear:b", "linear:d"]);
+  assert.deepEqual(row.derivedProjectIds, ["linear:a", "linear:missing"]);
+  assert.deepEqual(row.unavailablePrerequisiteIds, ["linear:missing"]);
+  assert.deepEqual(row.immediateEdges, [{ predecessorId: "linear:a", successorId: "linear:b" }, { predecessorId: "linear:d", successorId: "linear:a" }, { predecessorId: "linear:missing", successorId: "linear:b" }]);
+  assert.deepEqual({ packages, outcomes, links, dependencies }, before);
+});
+
 async function fixture() {
   const pg = new PGlite();
   await pg.exec(schemaSql);

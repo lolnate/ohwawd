@@ -329,6 +329,105 @@ test("removing an owning link reports excluded candidate work in the shared side
   expect([project.roadmap_state, project.selected, project.capacity_outcome_id, project.stream_id]).toEqual(["candidate", false, null, null]);
 });
 
+test("saved Details uses actual evidence to complete and reopen across Board, catalog and delivery", async ({ page, assignment }) => {
+  await assignment.activateRoadmap(); let dialog = await open(page);
+  await expect(dialog).toContainText("Required work is not actually complete yet");
+  await expect(dialog.getByRole("button", { name: "Mark complete", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Close outcome" }).click();
+  await assignment.setProjectCompleted("c", true); await assignment.setProjectCompleted("a", true);
+  dialog = await open(page); const handle = await dialog.elementHandle();
+  await expect(dialog).toContainText("Open · Ready to mark complete");
+  await dialog.getByRole("button", { name: "Mark complete", exact: true }).click();
+  await expect(dialog).toContainText("Outcome marked complete."); await expect(dialog).toContainText(/Completed .*\d/);
+  expect(await handle!.evaluate((element) => element === document.querySelector("dialog[open]"))).toBe(true);
+  await dialog.getByRole("button", { name: "Close outcome" }).click();
+  const catalogRow = page.locator(".catalog-row").filter({ has: page.getByRole("button", { name: "Launch", exact: true }) });
+  const deliveryRow = page.locator(".outcome-forecast-row").filter({ has: page.getByRole("button", { name: "Launch", exact: true }) });
+  await expect(catalogRow).toContainText("Completed"); await expect(deliveryRow).toContainText("Completed");
+  await page.getByRole("button", { name: /^Board/ }).click();
+  let boardTitle = page.locator('#board-outcome-title-00000000-0000-4000-8000-000000000001');
+  await expect(page.locator('[data-timeline-outcome="00000000-0000-4000-8000-000000000001"]')).toContainText("Completed");
+  await boardTitle.click(); dialog = page.getByRole("dialog"); const placement = dialog.locator(".outcome-placement");
+  await placement.getByLabel("Destination stream for Launch").selectOption(""); await placement.getByRole("button", { name: "Apply Board placement" }).click();
+  await dialog.getByRole("button", { name: "Close outcome" }).click();
+  const unassigned = page.locator(".unassigned-outcome-controls").filter({ hasText: "Launch" }); await expect(unassigned).toContainText("Completed");
+  boardTitle = unassigned.locator('#board-outcome-title-00000000-0000-4000-8000-000000000001'); await boardTitle.click(); dialog = page.getByRole("dialog"); await dialog.getByRole("button", { name: "Reopen outcome" }).click();
+  await expect(dialog).toContainText("Outcome reopened."); await expect(dialog).toContainText("Open · Ready to mark complete");
+  await dialog.getByText("Lifecycle history (2)").click(); await expect(dialog.getByText(/Completed by Owner/)).toBeVisible(); await expect(dialog.getByText(/Reopened by Owner/)).toBeVisible();
+  if (process.env.ACCEPTANCE_SCREENSHOT_PREFIX) { await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: `${process.env.ACCEPTANCE_SCREENSHOT_PREFIX}-lifecycle-history-390.png` }); }
+  await dialog.getByRole("button", { name: "Close outcome" }).click(); await expect(boardTitle).toBeFocused();
+});
+
+test("completion actions stay disabled for independent drafts and optional-only saved scope", async ({ page, assignment }) => {
+  await assignment.setProjectCompleted("c", true); await assignment.setProjectCompleted("a", true);
+  const dialog = await open(page); const complete = dialog.getByRole("button", { name: "Mark complete", exact: true }); await expect(complete).toBeEnabled();
+  await dialog.getByRole("button", { name: "Edit details", exact: true }).click(); await dialog.getByLabel("Notes").fill("Unsaved completion context");
+  await expect(complete).toBeDisabled(); await expect(dialog).toContainText("Save or cancel changes in Details and Projects");
+  await dialog.getByRole("button", { name: "Cancel details" }).click(); await dialog.getByRole("button", { name: "Projects", exact: true }).click();
+  await dialog.getByRole("button", { name: "Manage projects" }).click(); await dialog.getByLabel("Rollout requirement").selectOption("optional");
+  await dialog.getByRole("button", { name: /Details/ }).click(); await expect(complete).toBeDisabled();
+  await dialog.getByRole("button", { name: /Projects/ }).click(); await dialog.getByRole("button", { name: "Save links" }).click();
+  await dialog.getByRole("button", { name: /Details/ }).click();
+  await expect(dialog).toContainText("Open · Unplanned"); await expect(dialog).toContainText("define at least one minimum-required project"); await expect(complete).toBeDisabled();
+});
+
+test("completion blockers hand off to project inspection without stacking dialogs", async ({ page, assignment }) => {
+  await assignment.board();
+  const dialog = await open(page); await dialog.getByRole("button", { name: "Inspect Rollout", exact: true }).click();
+  await expect(page.locator("dialog[open]")).toHaveCount(1); await expect(page.getByRole("dialog", { name: "Rollout", exact: true })).toBeVisible();
+});
+
+test("stale completion evidence refreshes in place and completed source changes stay sticky until reopen", async ({ page, assignment }) => {
+  await assignment.setProjectCompleted("c", true); await assignment.setProjectCompleted("a", true);
+  let dialog = await open(page); await expect(dialog.getByRole("button", { name: "Mark complete", exact: true })).toBeEnabled();
+  await assignment.setProjectCompleted("c", false); await dialog.getByRole("button", { name: "Mark complete", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("evidence or lifecycle state changed");
+  await expect(dialog.getByRole("heading", { name: "Completion" })).toBeFocused();
+  await expect(dialog).toContainText("Required work is not actually complete yet"); await expect(dialog.getByRole("button", { name: "Mark complete", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Close outcome" }).click(); await assignment.setProjectCompleted("c", true);
+  dialog = await open(page); await dialog.getByRole("button", { name: "Mark complete", exact: true }).click();
+  await assignment.setProjectCompleted("c", false); await dialog.getByRole("button", { name: "Close outcome" }).click(); dialog = await open(page);
+  await expect(dialog).toContainText("Completed"); await expect(dialog).toContainText("Review completion needed");
+  await expect(dialog.getByRole("button", { name: "Reopen outcome" })).toBeEnabled(); await dialog.getByRole("button", { name: "Reopen outcome" }).click();
+  await expect(dialog).toContainText("Required work is not actually complete yet");
+});
+
+test("required-link changes latch review markers across Details, Board, catalog and delivery", async ({ page, assignment }, testInfo) => {
+  await assignment.activateRoadmap(); await assignment.setProjectCompleted("c", true); await assignment.setProjectCompleted("a", true);
+  await page.setViewportSize({ width: 390, height: 900 }); let dialog = await open(page); await dialog.getByRole("button", { name: "Mark complete", exact: true }).click();
+  await dialog.getByRole("button", { name: "Projects", exact: true }).click(); await dialog.getByRole("button", { name: "Manage projects" }).click();
+  await dialog.getByLabel("Rollout requirement").selectOption("optional"); await dialog.getByRole("button", { name: "Save links" }).click(); await dialog.getByRole("button", { name: /Details/ }).click();
+  await expect(dialog).toContainText("Review completion needed"); await expect(dialog).toContainText("Required delivery scope changed after completion");
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true); await page.screenshot({ path: testInfo.outputPath("lifecycle-review-390.png") });
+  await dialog.getByRole("button", { name: "Close outcome" }).click();
+  const catalogRow = page.locator(".catalog-row").filter({ has: page.getByRole("button", { name: "Launch", exact: true }) });
+  const deliveryRow = page.locator(".outcome-forecast-row").filter({ has: page.getByRole("button", { name: "Launch", exact: true }) });
+  await expect(catalogRow).toContainText("Review completion needed"); await expect(deliveryRow).toContainText("Review completion needed");
+  await page.getByRole("button", { name: /^Board/ }).click(); await expect(page.locator('[data-timeline-outcome="00000000-0000-4000-8000-000000000001"]')).toContainText("Review completion needed");
+});
+
+test("saved completion survives refresh failure and retry performs no second lifecycle write", async ({ page, assignment }) => {
+  await assignment.setProjectCompleted("c", true); await assignment.setProjectCompleted("a", true);
+  const dialog = await open(page); let writes = 0;
+  page.on("request", (request) => { if (request.method() === "PUT" && request.url().endsWith("/completion")) writes++; });
+  await page.route("**/api/state", (route) => route.fulfill({ status: 503, json: { error: "Refresh failed" } }));
+  await dialog.getByRole("button", { name: "Mark complete", exact: true }).click();
+  await expect(dialog).toContainText("Completed"); await expect(dialog).toContainText("Outcome saved, but workspace views could not be refreshed");
+  await page.unroute("**/api/state"); await dialog.getByRole("button", { name: "Retry workspace refresh" }).click();
+  await expect(dialog.getByRole("button", { name: "Retry workspace refresh" })).toHaveCount(0); expect(writes).toBe(1);
+});
+
+test("dismissed completion finishes without replacing or focusing a newer outcome opening", async ({ page, assignment }) => {
+  await assignment.shareProjects(); await assignment.setProjectCompleted("c", true); await assignment.setProjectCompleted("a", true);
+  let dialog = await open(page); let release!: () => void; const waiting = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/outcomes/*/completion", async (route) => { await waiting; await route.fallback(); });
+  await dialog.getByRole("button", { name: "Mark complete", exact: true }).click(); await expect(dialog.getByRole("button", { name: "Close outcome" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Close outcome" }).click(); await page.locator(".catalog-title").filter({ hasText: /^Foundation$/ }).click();
+  dialog = page.getByRole("dialog"); await expect(dialog.getByRole("button", { name: "Mark complete", exact: true })).toBeDisabled(); await expect(dialog.getByRole("status")).toContainText("Another outcome change is finishing"); await dialog.getByRole("button", { name: "Edit details", exact: true }).click(); await dialog.getByLabel("Notes").fill("Newer opening draft");
+  release(); await expect(page.getByRole("status").filter({ hasText: "Outcome marked complete." })).toBeVisible();
+  await expect(dialog.locator("h2")).toHaveText("Foundation"); await expect(dialog.getByLabel("Notes")).toHaveValue("Newer opening draft"); await expect(dialog.getByLabel("Notes")).toBeFocused();
+});
+
 for (const width of [1440, 768, 390]) {
   test(`sidebar long-content visual and keyboard walkthrough at ${width}px`, async ({ page, assignment }, testInfo) => {
     await assignment.seedCatalog();

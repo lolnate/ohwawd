@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { indexCatalog, queryCatalog, type CatalogFilters, type CatalogOutcome, type CatalogSort } from "@/lib/outcome-catalog";
 import { millisecondsUntilNextTeamDate, teamLocalDate } from "@/lib/project-scope";
+import { outcomeLifecycleSummary } from "./outcome-lifecycle-view";
 
 const defaults: CatalogFilters = { search: "", owner: "all", stream: "all", projects: "all", targetDate: "all" };
 type Data = Parameters<typeof indexCatalog>[0] & { timezone: string };
@@ -61,7 +62,7 @@ export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onIn
       <div className="catalog-results"><p role="status" aria-live="polite">{rows.length} of {index.rows.length} outcomes{restricted ? " · Filters active" : ""}</p>{restricted && <button type="button" className="text-button" onClick={() => setFilters(defaults)}>Clear filters</button>}</div>
       {!!rows.length && <><div className="catalog-columns" aria-hidden="true"><span>Outcome</span><span>Owner</span><span>Stream</span><span>Needed by</span><span>Projects</span></div>
         <ul className="catalog-list">{rows.map((row) => <li key={row.id}><article className="catalog-row" id={`outcome-${row.id}`}>
-          <h3><button type="button" className="catalog-title" title={row.title} onClick={() => onInspect(row)}>{row.title}</button></h3>
+          <h3><button type="button" className="catalog-title" title={row.title} onClick={() => onInspect(row)}>{row.title}</button>{outcomeLifecycleSummary(row.lifecycle) && <small className="outcome-lifecycle-summary">{outcomeLifecycleSummary(row.lifecycle)}</small>}</h3>
           <div className="catalog-cell"><span className="catalog-cell-label">Owner</span><span>{row.owner.trim() || "No owner"}</span></div>
           <div className="catalog-cell"><span className="catalog-cell-label">Stream</span><span>{index.streams.find((stream) => stream.id === row.stream_id)?.name ?? (row.stream_id ? "Unavailable stream" : "Needs assignment")}</span></div>
           <div className="catalog-cell"><span className="catalog-cell-label">Needed by</span>{row.needed_by ? <time dateTime={row.needed_by}>{row.needed_by}</time> : <span>No target</span>}</div>

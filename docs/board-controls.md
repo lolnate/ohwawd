@@ -1,6 +1,6 @@
 # Outcome-first Board controls
 
-Implemented by **ohwawd-0lzq**, against task 6.1 of [implement-outcome-first-board](../openspec/changes/implement-outcome-first-board/tasks.md). The [design](../openspec/changes/implement-outcome-first-board/design.md) and [scheduling contract](scheduling-contract.md) govern behavior.
+Implemented by **ohwawd-0lzq** and **ohwawd-npmi**, against tasks 6.1 and 7.1 of archived [implement-outcome-first-board](../openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md). The [design](../openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md) and [scheduling contract](scheduling-contract.md) govern behavior.
 
 ## Delivered workflow
 
@@ -8,9 +8,16 @@ Implemented by **ohwawd-0lzq**, against task 6.1 of [implement-outcome-first-boa
 - Stream moves append by default. A same-stream move without an insertion target is an exact no-op. Unassigning an outcome excludes its included owner work as candidates and explains the affected work.
 - Manage work groups projects by owner. Project drag, arrow and insertion controls change only that owner's sequence. Explicit transfer chooses another linked outcome assigned to an active stream, moving the sole capacity charge.
 - Candidate, deferred and dismissed shelves expose include, defer, resume, dismiss and restore actions. Inclusion/resumption requires a valid owner. Restore returns to candidate status. Hidden work remains available through show-hidden; source Hide only changes visibility.
-- Conversion feedback identifies excluded ambiguous/invalid work and opens inspection. Structured prerequisite wait/bypass evidence remains available to timeline/project dependency context and the scheduler contract, but the sticky outcome label has no expandable wait block. Missing scope/capacity remains distinct.
+- Conversion feedback identifies excluded ambiguous/invalid work and opens inspection. The timeline uses compact project controls and dependency connectors only; wait/bypass evidence, missing-scope explanations and remediation stay in project inspection rather than adding warning rows.
 - Inspection performs no planning write. Link an outcome explicitly hands off to the shared sidebar's Projects section, then inclusion remains an explicit Board action. Project-to-outcome/Settings handoffs close the current overlay first. In-drawer resolution focuses existing controls without replacing the dialog.
 - Writes carry current planning tokens and serialize while pending. Stale edits reload saved state with an accessible error and useful focus. A late save cannot steal focus from or reset a newer outcome-sidebar draft.
+
+## Prerequisite timeline convention
+
+- Each outcome row shows its saved project links plus one derived box for each unlinked immediate effective prerequisite. A deeper prerequisite continues to constrain the forecast and remains reachable through project dependency details, but does not recursively add another box to the outcome row.
+- A derived prerequisite reuses the package's one forecast span and contributes zero points in that row. It has a dashed outline, `Prerequisite` wording, its counted location, and optional-context wording when it falls outside required delivery scope. Saved-link counts and catalog search remain unchanged.
+- A thin directional path connects an immediate prerequisite to its successor only when both have dated spans in that row. The SVG layer is row-local, noninteractive and hidden from assistive technology; equivalent project names, predecessor text and drawer navigation remain on focusable project controls. Undated or excluded endpoints use compact selectable references without a fabricated connector; explanations remain in project inspection.
+- Cross-stream relationships use a local prerequisite reference instead of routing a line between stream panels. Paths and boxes share the timeline's actual month/week scale, scroll together, and retain explicit dashed/text cues in narrow layouts, reduced motion and forced colors.
 
 ## Manual walkthrough checkpoint
 
@@ -26,10 +33,10 @@ Use a migrated workspace with assigned outcomes, linked projects and at least on
 
 ## Verification evidence
 
-`tests/ui/outcome-board.spec.ts` exercises 12 real-application Chromium cases with the PGlite-backed assignment fixture: persistent pointer/sidebar order and actual forecast changes, explicit before/after placement, append/no-op/unassignment, explicit links and membership transitions, dismissed prerequisites, scoped drag/transfer, stale saves, late-save isolation, sidebar/delete focus recovery, source Hide and 1440/768/390px layouts. It exercises reduced-motion and forced-color modes and captures `outcome-board-{width}.png` and `roadmap-project-{width}.png` under Playwright's ignored `test-results/` directory.
+`tests/ui/outcome-board.spec.ts` exercises 12 real-application Chromium cases with the PGlite-backed assignment fixture: persistent pointer/sidebar order and actual forecast changes, explicit before/after placement, append/no-op/unassignment, explicit links and membership transitions, dismissed prerequisites, scoped drag/transfer, stale saves, late-save isolation, sidebar/delete focus recovery, source Hide and 1440/768/390px layouts. It exercises reduced-motion and forced-color modes and captures `outcome-board-{width}.png` and `roadmap-project-{width}.png` under Playwright's ignored `test-results/` directory. `tests/ui/planning-timeline.spec.ts` additionally verifies the derived cross-stream reference, one capacity charge, shared forecast geometry, row-local path endpoints, horizontal scrolling, keyboard focus, reduced motion and forced colors, and captures `dependency-timeline-{width}.png` at the same three widths.
 
-Visual inspection of all six captures confirmed wrapped long labels, owner movement controls, visible keyboard focus, contained fields and reachable drawer Close at each width. The long-row captures intentionally show the final outcome and open movement form after scrolling, rather than a top-of-page overview. The project captures show the focused explicit-link control after in-place resolution. These fixture-backed checks are independent of live Linear and production database migration.
+Visual inspection of all six Board/project captures confirmed wrapped long labels, owner movement controls, visible keyboard focus, contained fields and reachable drawer Close at each width. The phone outcome-sidebar capture keeps two lifecycle events, completion evidence and actions readable without horizontal overflow. The capacity-timeline follow-up removes the prior wait panel and adds separate 1440px/768px/390px evidence for fractional project bars, sequential placement and row-local connectors. These fixture-backed checks are independent of live Linear.
 
-Immediate-prerequisite boxes/connectors (**ohwawd-npmi**) and visible manual completion/reopen (**ohwawd-4oo7**) have separate acceptance work in the active change.
+Visible manual completion/reopen (**ohwawd-4oo7**) is available in saved outcome Details. Compact persisted completion/review markers appear on assigned and unassigned Board rows; readiness and blocker evidence remain in the sidebar and do not alter scheduling.
 
-Completion checks: all 135 unit/database tests and all 101 Chromium browser tests passed, as did standalone typecheck and the production build. Two older stale-edit assertions were updated to match the expanded project-sequence/outcome-priority/dependency message; their stale rejection, rollback and focus checks remain intact.
+Completion checks: all 139 unit/database tests and all 112 Chromium browser tests passed, as did standalone typecheck, the production build, global strict OpenSpec validation, Beans integrity and whitespace checks. Focused backend/frontend review found no remaining issues after adding a truthful sub-4-pixel bar with a separate 24-pixel pointer target. Two older stale-edit assertions were updated to match the expanded project-sequence/outcome-priority/dependency message; their stale rejection, rollback and focus checks remain intact.

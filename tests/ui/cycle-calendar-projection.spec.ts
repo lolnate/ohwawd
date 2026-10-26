@@ -9,7 +9,7 @@ test("week headers use visible Cycle 46 rather than internal ordinal 1 and conti
   await expect(context).toContainText("C49");
   await expect(context.locator(".projected-cycle-label").filter({ hasText: "C50*" }).first()).toBeAttached();
   await expect(timeline.locator('[data-week-band="2026-12-21"]').first()).toHaveClass(/projected-calendar/);
-  await expect(page.locator("#stream-core .calendar-legend")).toContainText("Projected from Linear cadence");
+  await expect(page.locator("#stream-core .calendar-legend")).toContainText("* Provisional");
   const board = await assignment.board();
   expect(board.linearCycles).toHaveLength(4);
   expect(board.linearCycles[0].number).toBe(1);
@@ -46,13 +46,13 @@ test("projected cycles enable provisional delivery and retain editable weekly ho
   await expect(page.locator("#outcome-delivery")).toContainText("provisional");
 });
 
-test("disabled cadence retains imported labels and explains genuinely unsupported future weeks", async ({ page, assignment }) => {
+test("disabled cadence retains imported labels and marks genuinely unsupported future weeks", async ({ page, assignment }) => {
   await assignment.configureCycles({ visibleOffset: 45, importedCount: 4, enabled: false });
   await page.goto("/");
   const timeline = page.getByRole("region", { name: /^Core forecast timeline/ });
   await expect(timeline.locator(".timeline-cycle-context th").first()).toHaveText("C46");
   await expect(timeline.locator(".projected-cycle-label")).toHaveCount(0);
-  await expect(page.locator("#stream-core .calendar-coverage-note")).toContainText("Linear cycles are not enabled");
+  await expect(page.locator("#stream-core .calendar-legend")).toContainText("No capacity");
   await expect(timeline.locator(".timeline-week-band.no-calendar").first()).toBeAttached();
   expect((await assignment.board()).calendarProjection.projectedCount).toBe(0);
 });

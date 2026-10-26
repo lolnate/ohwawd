@@ -20,4 +20,10 @@
 .outcome-workspace .project-picker-row { grid-template-columns: minmax(0, 1fr); }
 .outcome-workspace .project-picker-filters { grid-template-columns: minmax(0, 1fr); }
 .outcome-delete { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--color-border); }
+.outcome-lifecycle { margin-top: 24px; padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+.outcome-lifecycle h4 { margin-top: 0; }
+.outcome-lifecycle-state { font-weight: 700; color: var(--color-text); }
+.outcome-lifecycle-state.ready { color: var(--color-success); }
+.outcome-lifecycle-state.review-needed, .outcome-lifecycle .warning { color: var(--color-warning); }
+.outcome-lifecycle ul { padding-left: 20px; }
 @media(max-width:620px) { .outcome-workspace { width: 100vw; border: 0; } .outcome-workspace-header, .outcome-workspace-nav, .outcome-workspace-body { padding-left: 16px; padding-right: 16px; } .outcome-workspace input, .outcome-workspace textarea, .outcome-workspace select { font-size: 16px; } }

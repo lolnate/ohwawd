@@ -5,14 +5,14 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T18:37:34Z
-updated_at: 2026-10-25T20:42:29Z
+updated_at: 2026-10-26T01:20:17Z
 parent: ohwawd-5q71
 blocked_by:
     - ohwawd-rc2m
 ---
 
 OpenSpec: implement-outcome-first-board.
-References: openspec/changes/implement-outcome-first-board/design.md (Decisions 2–3, 7); openspec/changes/implement-outcome-first-board/specs/outcome-sequencing/spec.md; openspec/changes/implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/implement-outcome-first-board/tasks.md (2.1).
+References: openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md (Decisions 2–3, 7); openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/outcome-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md (2.1).
 
 - [x] Extend outcomeAssignment with persisted before/after rank insertion, cross-stream append defaults and same-stream no-target idempotency; move only owned included work.
 - [x] Implement explicit include/candidate/defer/resume/dismiss/restore and linked-owner transfer with owner-scoped project insertion; keep Hide visibility-only and disallow active stream inclusion without an owner.

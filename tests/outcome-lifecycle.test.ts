@@ -94,6 +94,7 @@ test("complete/reopen persist accepted snapshots and audit without changing plan
     const current = await f.read();
     const reopened = await tx(f.client, () => saveOutcomeCompletion(f.client, H.toUpperCase(), { completed: false, expectedLifecycleVersion: current.lifecycleVersion, eligibilityToken: current.eligibilityToken }));
     assert.equal(reopened.lifecycle.completedAt, null); assert.equal(reopened.lifecycle.lifecycleVersion, 2); assert.equal(reopened.lifecycle.ready, true);
+    assert.deepEqual(reopened.lifecycle.history.map((event) => [event.action, event.lifecycleVersion, event.actor]), [["complete", 1, "Owner"], ["reopen", 2, "Owner"]]);
     assert.equal(await planningToken(f.client), token);
     const history = (await f.pg.query<{ action: string; lifecycle_version: number; actor: string; payload: { previousCompletedAt: string | null } }>("SELECT action,lifecycle_version,actor,payload FROM outcome_lifecycle_event ORDER BY lifecycle_version")).rows;
     assert.deepEqual(history.map((item) => [item.action, item.lifecycle_version, item.actor]), [["complete", 1, "Owner"], ["reopen", 2, "Owner"]]);

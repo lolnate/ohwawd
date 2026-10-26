@@ -44,8 +44,8 @@ export async function saveImport(
     ...(project.blockedBy || []).filter((id) => importedIds.has(id) && id !== project.id).map((id) => [id, project.id] as const),
   ]).map((edge) => [JSON.stringify(edge), edge])).values()];
   const [savedProjects, savedIssues, savedEdges] = await Promise.all([
-    client.query<{ linear_id: string; name: string; description: string; status: string; priority: number | null; url: string; source_updated_at: Date; cross_team: boolean; external_blockers: string[] | null; needs_review: boolean }>(
-      "SELECT linear_id,name,description,status,priority,url,source_updated_at,cross_team,external_blockers,needs_review FROM linear_project_cache WHERE team_id=$1", [input.team.id],
+    client.query<{ linear_id: string; name: string; description: string; status: string; priority: number | null; remaining_scope: string | null; url: string; source_updated_at: Date; cross_team: boolean; external_blockers: string[] | null; needs_review: boolean }>(
+      "SELECT linear_id,name,description,status,priority,remaining_scope::text,url,source_updated_at,cross_team,external_blockers,needs_review FROM linear_project_cache WHERE team_id=$1", [input.team.id],
     ),
     client.query<{ linear_id: string; project_id: string; team_id: string; identifier: string; title: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
       "SELECT linear_id,project_id,team_id,identifier,title,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE project_id IN (SELECT linear_id FROM linear_project_cache WHERE team_id=$1)", [input.team.id],
@@ -77,6 +77,7 @@ export async function saveImport(
     if (saved.description !== project.description) changes.push("description");
     if (saved.status !== project.status) changes.push("status");
     if (saved.priority !== (project.priority ?? null)) changes.push("priority");
+    if ((saved.remaining_scope === null ? null : Number(saved.remaining_scope)) !== (project.remainingScope ?? null)) changes.push("remaining scope");
     if (saved.url !== project.url) changes.push("URL");
     if (timestamp(saved.source_updated_at) !== timestamp(project.updatedAt)) changes.push("updated timestamp");
     if (saved.cross_team !== project.crossTeam) changes.push("cross-team scope");
@@ -95,15 +96,15 @@ export async function saveImport(
   }
   for (const project of input.projects) {
     await client.query(`
-       INSERT INTO linear_project_cache (linear_id, team_id, name, description, status, url, source_updated_at, last_seen_at, last_seen_import_id, cross_team, external_blockers,priority)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       INSERT INTO linear_project_cache (linear_id, team_id, name, description, status, url, source_updated_at, last_seen_at, last_seen_import_id, cross_team, external_blockers,priority,remaining_scope)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       ON CONFLICT (linear_id) DO UPDATE SET
         name=EXCLUDED.name, description=EXCLUDED.description, status=EXCLUDED.status,
         url=EXCLUDED.url, source_updated_at=EXCLUDED.source_updated_at,
         last_seen_at=EXCLUDED.last_seen_at, last_seen_import_id=EXCLUDED.last_seen_import_id,
-         needs_review=false, cross_team=EXCLUDED.cross_team, external_blockers=EXCLUDED.external_blockers,priority=EXCLUDED.priority`,
+         needs_review=false, cross_team=EXCLUDED.cross_team, external_blockers=EXCLUDED.external_blockers,priority=EXCLUDED.priority,remaining_scope=EXCLUDED.remaining_scope`,
       [project.id, input.team.id, project.name, project.description, project.status, project.url, project.updatedAt, seenAt, importId, project.crossTeam,
-         (project.blockedBy || []).filter((id) => !importedIds.has(id)), project.priority ?? null],
+         (project.blockedBy || []).filter((id) => !importedIds.has(id)), project.priority ?? null, project.remainingScope ?? null],
     );
     // A single stable package per project prevents a project linked to two outcomes
     // from acquiring two copies of its eventual demand.

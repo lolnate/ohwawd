@@ -93,7 +93,8 @@ export const schemaSql = `
       needs_review boolean NOT NULL DEFAULT false,
       in_scope boolean NOT NULL DEFAULT true,
       cross_team boolean NOT NULL DEFAULT false,
-      external_blockers text[] NOT NULL DEFAULT '{}'
+      external_blockers text[] NOT NULL DEFAULT '{}',
+      remaining_scope numeric CHECK (remaining_scope IS NULL OR remaining_scope >= 0)
     );
     CREATE TABLE IF NOT EXISTS linear_issue_cache (
       linear_id text PRIMARY KEY,
@@ -300,6 +301,10 @@ const upgradeSql = `
     ON CONFLICT DO NOTHING;
 `;
 
+const projectRemainingScopeSql = `
+  ALTER TABLE linear_project_cache ADD COLUMN IF NOT EXISTS remaining_scope numeric CHECK (remaining_scope IS NULL OR remaining_scope >= 0);
+`;
+
 export const migrations = [
   { version: 1, name: "initial-schema", sql: schemaSql },
   { version: 2, name: "upgrade-existing-proof-schema", sql: upgradeSql },
@@ -308,6 +313,7 @@ export const migrations = [
   { version: 5, name: "outcome-capacity-ownership", sql: outcomeOwnershipMigrationSql },
   { version: 6, name: "outcome-roadmap-foundation", sql: roadmapSchemaSql },
   { version: 7, name: "activate-outcome-roadmap", sql: "", up: activateRoadmapPlanning },
+  { version: 8, name: "linear-project-remaining-scope", sql: projectRemainingScopeSql },
 ] as const;
 
 export const latestMigrationVersion = migrations.at(-1)!.version;

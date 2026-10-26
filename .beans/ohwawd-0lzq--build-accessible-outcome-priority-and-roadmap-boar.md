@@ -5,14 +5,14 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T18:38:41Z
-updated_at: 2026-10-25T23:54:37Z
+updated_at: 2026-10-26T01:20:17Z
 parent: ohwawd-5q71
 blocked_by:
     - ohwawd-mg25
 ---
 
 OpenSpec: implement-outcome-first-board.
-References: openspec/changes/implement-outcome-first-board/design.md (Decisions 1–4, 7); openspec/changes/implement-outcome-first-board/specs/outcome-sequencing/spec.md; openspec/changes/implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/implement-outcome-first-board/tasks.md (6.1); docs/ui-ux-conventions.md; docs/visual-theme.md.
+References: openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md (Decisions 1–4, 7); openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/outcome-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md (6.1); docs/ui-ux-conventions.md; docs/visual-theme.md.
 
 - [x] Add outcome drag/drop, keyboard up/down and before/after stream insertion controls backed by saved rank; keep project reorder controls scoped to owner and expose explicit linked-owner transfer.
 - [x] Add candidate/included/deferred/dismissed triage and include/dismiss/resume/restore actions; require an owning outcome, remove Other selected work ownership choices, keep Hide visibility-only and surface migration/owner-removal feedback.

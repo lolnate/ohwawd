@@ -19,6 +19,11 @@ test("versioned migrations build the current schema transactionally", async () =
   assert.equal((await database.query("SELECT linear_sync_generation,cycle_sync_generation FROM workspace WHERE id=1")).rows.length, 1);
   assert.equal((await database.query("SELECT id FROM stream WHERE active=true")).rows.length, 5);
   assert.equal((await database.query<{ roadmap_planning_migrated: boolean }>("SELECT roadmap_planning_migrated FROM workspace")).rows[0].roadmap_planning_migrated, true);
+  assert.ok((await database.query("SELECT remaining_scope FROM linear_project_cache LIMIT 0")));
+  await database.exec("ALTER TABLE linear_project_cache DROP COLUMN remaining_scope");
+  await database.exec(migrations[7].sql);
+  await database.exec(migrations[7].sql);
+  assert.ok((await database.query("SELECT remaining_scope FROM linear_project_cache LIMIT 0")));
   await database.close();
 });
 

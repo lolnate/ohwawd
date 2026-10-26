@@ -86,3 +86,13 @@ export function timelineSpan(start: string, end: string, firstWeek: string, week
   const to = Math.min(total, calendarDaysBetween(firstWeek, end));
   return to <= from ? null : { left: from / total * 100, width: (to - from) / total * 100 };
 }
+
+export function fractionalTimelineSpan(start: string, finalCycleStart: string, finalCycleEnd: string, finalCycleFraction: number,
+  firstWeek: string, weekCount: number): { left: number; width: number } | null {
+  const total = weekCount * 7;
+  const from = Math.max(0, calendarDaysBetween(firstWeek, start));
+  const cycleStart = calendarDaysBetween(firstWeek, finalCycleStart);
+  const cycleDays = calendarDaysBetween(finalCycleStart, finalCycleEnd);
+  const to = Math.min(total, cycleStart + cycleDays * Math.max(0, Math.min(1, finalCycleFraction)));
+  return to <= from ? null : { left: from / total * 100, width: (to - from) / total * 100 };
+}

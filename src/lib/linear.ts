@@ -7,7 +7,7 @@ export type ImportedIssue = {
 };
 export type ImportedProject = {
   id: string; teamId: string; name: string; description: string; status: string; url: string;
-  updatedAt: Date; crossTeam: boolean; priority?: number | null; issues: ImportedIssue[]; dependencies?: string[]; blockedBy?: string[];
+  updatedAt: Date; crossTeam: boolean; priority?: number | null; remainingScope?: number | null; issues: ImportedIssue[]; dependencies?: string[]; blockedBy?: string[];
 };
 export type ImportedCycle = { id: string; teamId: string; number: number; name: string | null; startsAt: Date; endsAt: Date; completedAt: Date | null; cycleDays: number; completedPoints: number | null };
 export type LinearCycleSettings = { timezone: string; cyclesEnabled: boolean; cycleDuration: number; cycleStartDay: number; cycleCooldownTime: number; upcomingCycleCount: number };
@@ -31,6 +31,7 @@ export function linearProjectDependencies(relations: ProjectRelation[]): { prede
 
 type ProjectDetailsResponse = {
   project: {
+    scope: number; completedScopeHistory: number[];
     teams: { nodes: { id: string }[]; pageInfo: { hasNextPage: boolean } };
     issues: {
       nodes: {
@@ -46,6 +47,7 @@ type ProjectDetailsResponse = {
 const projectDetailsQuery = `
   query OhwawdProjectDetails($id: String!, $after: String) {
     project(id: $id) {
+      scope completedScopeHistory
       teams(first: 50) { nodes { id } pageInfo { hasNextPage } }
       issues(first: 50, after: $after) {
         nodes {
@@ -68,6 +70,11 @@ export function linearReadError(error: unknown, action: string): Response {
       ? "Linear denied access. Check the API key and its team permissions."
       : `Linear could not ${action}${detail ? `: ${detail}` : ` (${error.type || "unknown error"})`}.`;
   return Response.json({ error: message }, { status: error.type === LinearErrorType.Ratelimited ? 429 : 502 });
+}
+
+export function linearRemainingScope(scope: number, completedScopeHistory: number[]): number | null {
+  const completed = completedScopeHistory.at(-1) ?? 0;
+  return Number.isFinite(scope) && scope > 0 && Number.isFinite(completed) && completed >= 0 ? Math.max(0, scope - completed) : null;
 }
 
 // The adapter is read-only. The SDK rejects GraphQL responses containing errors,
@@ -123,6 +130,7 @@ export function createLinearSource(apiKey: string) {
         let after: string | null = null;
         let projectTeams: { id: string }[] = [];
         let extraTeams = false;
+        let remainingScope: number | null = null;
         const issues: ImportedIssue[] = [];
         do {
           const response: LinearRawResponse<ProjectDetailsResponse> = await client.client.rawRequest<ProjectDetailsResponse, { id: string; after: string | null }>(
@@ -132,6 +140,7 @@ export function createLinearSource(apiKey: string) {
           if (!details) throw new HttpError(502, `Linear did not return details for project ${project.id}.`);
           projectTeams = details.teams.nodes;
           extraTeams = details.teams.pageInfo.hasNextPage;
+          remainingScope = linearRemainingScope(details.scope, details.completedScopeHistory);
           if (includeIssues) for (const issue of details.issues.nodes) {
             issues.push({
               id: issue.id, projectId: project.id, teamId: issue.team?.id || "",
@@ -152,7 +161,7 @@ export function createLinearSource(apiKey: string) {
         const dependencyEdges = linearProjectDependencies([...relations, ...inverseRelations]);
         return {
           id: project.id, teamId, name: project.name, description: project.description || "",
-          status: project.state || "unknown", url: project.url, updatedAt: project.updatedAt, priority: project.priority,
+          status: project.state || "unknown", url: project.url, updatedAt: project.updatedAt, priority: project.priority, remainingScope,
           crossTeam: extraTeams || projectTeams.length > 1 || issues.some((issue) => issue.teamId !== teamId), issues,
           dependencies: dependencyEdges.filter((edge) => edge.predecessorId === project.id).map((edge) => edge.successorId),
           blockedBy: dependencyEdges.filter((edge) => edge.successorId === project.id).map((edge) => edge.predecessorId),

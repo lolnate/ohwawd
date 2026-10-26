@@ -30,15 +30,15 @@ Beans is the source of truth for execution state and dependencies. Reconcile the
 
 ## 7. Immediate prerequisite timeline and connectors — ohwawd-npmi
 
-- [ ] 7.1 Derive immediate-only deduplicated appearances without saved-link writes, retain actual shared dates/accounting/context and add truthful noninteractive row-local connectors per Decision 5; verify direct/derived deduplication, optional scope, deeper constraint preservation, missing endpoints, geometry on scrolling/resizing, accessible text/deep tracing, keyboard/reduced-motion/forced-color and 1440px/768px/390px screenshots with unit and browser tests, document connector conventions and run typecheck plus affected timeline/theme tests.
+- [x] 7.1 Derive immediate-only deduplicated appearances without saved-link writes, retain actual shared dates/accounting/context and add truthful noninteractive row-local connectors per Decision 5; verify direct/derived deduplication, optional scope, deeper constraint preservation, missing endpoints, geometry on scrolling/resizing, accessible text/deep tracing, keyboard/reduced-motion/forced-color and 1440px/768px/390px screenshots with unit and browser tests, document connector conventions and run typecheck plus affected timeline/theme tests.
 
 ## 8. Unified sidebar completion experience — ohwawd-4oo7
 
-- [ ] 8.1 Add saved-Details Mark complete/Reopen, readiness/review/history context, clean-only actions, captured lifecycle submissions and accepted snapshots with refresh-only retry per Decisions 6–7; preserve Details/Projects draft/save scopes, stable dialog, catalog context and Board opener fallback; verify actual-versus-forecast eligibility, source/link review, rejection/stale evidence, pending dismissal/new openings, refresh failures and consistent Board/catalog/delivery labels with browser tests, update product/convention docs and run typecheck plus affected sidebar/catalog/Settings tests.
+- [x] 8.1 Add saved-Details Mark complete/Reopen, readiness/review/history context, clean-only actions, captured lifecycle submissions and accepted snapshots with refresh-only retry per Decisions 6–7; preserve Details/Projects draft/save scopes, stable dialog, catalog context and Board opener fallback; verify actual-versus-forecast eligibility, source/link review, rejection/stale evidence, pending dismissal/new openings, refresh failures and consistent Board/catalog/delivery labels with browser tests, update product/convention docs and run typecheck plus affected sidebar/catalog/Settings tests.
 
 ## 9. Cross-feature verification — ohwawd-r2nj
 
-- [ ] 9.1 After every prior implementation task has its own tests/documentation, verify all delta scenarios across Board, source triage, scenarios, catalog, delivery, sidebar and Settings; run typecheck, all unit/database tests and affected browser suites, inspect 1440px/768px/390px plus keyboard/reduced-motion/forced-color behavior, record actual walkthrough/visual evidence, reconcile delivered scheduling/product docs and this checklist from verified Beans, and run strict change/global validation.
+- [x] 9.1 After every prior implementation task has its own tests/documentation, verify all delta scenarios across Board, source triage, scenarios, catalog, delivery, sidebar and Settings; run typecheck, all unit/database tests and affected browser suites, inspect 1440px/768px/390px plus keyboard/reduced-motion/forced-color behavior, record actual walkthrough/visual evidence, reconcile delivered scheduling/product docs and this checklist from verified Beans, and run strict change/global validation.
 
 ## Dependencies
 
@@ -46,10 +46,9 @@ Beans is the source of truth for execution state and dependencies. Reconcile the
 
 From the compact Board follow-up, `ohwawd-npmi` (timeline) and `ohwawd-4oo7` (sidebar lifecycle, also depending on the completion service) can proceed independently. Both block `ohwawd-r2nj`. Scenario compatibility also directly depends on the scheduler. All implementation children belong to `ohwawd-5q71`.
 
-The first six deliverables and both compact Board review follow-ups (`ohwawd-r568`, `ohwawd-m65h`) are verified complete. Activated reads/saves/publications now use v5; the transitional publication pause is retired, and legacy drafts require explicit conversion/save. Migration 6 is additive and migration 7 registers coordinated activation; no further schema migration is required for lifecycle/scenario adoption. Compact Board controls passed all 135 unit/database and 101 browser tests plus typecheck/build; the follow-up count relocation passed 36 affected browser tests and typecheck, with responsive visual evidence and a manual checkpoint in docs/board-controls.md. The remaining three deliverables—prerequisite timeline/connectors, sidebar completion and cross-feature acceptance—stay unchecked until verified. Beans remains the live execution tracker.
+All deliverables and both compact Board review follow-ups (`ohwawd-r568`, `ohwawd-m65h`) are verified complete. Activated reads/saves/publications use v5; the transitional publication pause is retired, and legacy drafts require explicit conversion/save. Migration 6 is additive and migration 7 registers coordinated activation; no further schema migration is required for lifecycle/scenario adoption. Final integrated acceptance passed all 137 unit/database and 111 browser tests plus typecheck/build, global strict OpenSpec validation, responsive/keyboard/reduced-motion/forced-color review, Beans integrity and whitespace checks. Final multi-lens review found no remaining issues. Beans remains the live execution tracker.
 
 ## Workflow follow-up
 
-- Keep this change active while implementation or unresolved acceptance work remains.
-- Complete the implementation epic only after every child is verified, then reconcile tasks and use normal OpenSpec spec synchronization/archive.
+- All implementation and acceptance work is verified; complete the implementation epic and use normal OpenSpec spec synchronization/archive.
 - Update Bean/document artifact references to the archived path and validate current specs and archived checklists afterward.

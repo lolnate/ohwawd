@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { indexCatalog, queryCatalog, type CatalogFilters } from "../src/lib/outcome-catalog";
+import { mergeOutcomeSnapshot } from "../src/app/outcome-lifecycle-view";
 
 const unrestricted: CatalogFilters = { search: "", owner: "all", stream: "all", projects: "all", targetDate: "all" };
+
+test("metadata snapshots cannot replace newer lifecycle evidence they did not accept", () => {
+  const lifecycle = { lifecycleVersion: 2 } as never;
+  assert.deepEqual(mergeOutcomeSnapshot({ title: "Old", lifecycle }, { title: "Saved", lifecycle: undefined }), { title: "Saved", lifecycle });
+});
 
 function catalog() {
   return indexCatalog({

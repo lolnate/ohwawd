@@ -7,6 +7,7 @@ import type { CatalogContext } from "./outcome-catalog";
 import type { OutcomeLifecycle } from "@/lib/outcome-completion";
 import type { BoardState } from "./board";
 import type { OutcomeMove } from "./outcome-board-controls";
+import { outcomeLifecycleSummary } from "./outcome-lifecycle-view";
 
 export type OutcomeRecord = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null; stream_id: string | null; stream_position?: number | null; created_at: string; lifecycle?: OutcomeLifecycle };
 export type OutcomeLink = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
@@ -14,20 +15,34 @@ export type OutcomeData = { outcomes: OutcomeRecord[]; links: OutcomeLink[]; pro
 export type OutcomeRequest = { generation: number; id: string | null; opener: HTMLElement | null; fallback: "catalog" | "delivery"; fallbackId?: string; section?: "details" | "projects" };
 type Details = { title: string; description: string; owner: string; successSignal: string; neededBy: string };
 type LinkMap = Record<string, Requirement>;
-type Submission = { kind: "details" | "links" | "create" | "delete"; outcome?: OutcomeRecord; details: Details; links: LinkMap; generation: number; planningToken?: string };
+type Submission = { kind: "details" | "links" | "create" | "delete" | "complete" | "reopen"; outcome?: OutcomeRecord; details: Details; links: LinkMap; generation: number; planningToken?: string; lifecycle?: OutcomeLifecycle };
 type Result = { status: "rejected"; error: string } | { status: "saved" | "refresh-failed"; outcome: OutcomeRecord };
 const detailsOf = (outcome?: OutcomeRecord): Details => ({ title: outcome?.title ?? "", description: outcome?.description ?? "", owner: outcome?.owner ?? "", successSignal: outcome?.success_signal ?? "", neededBy: outcome?.needed_by?.slice(0, 10) ?? "" });
 const messageOf = (error: unknown) => error instanceof Error ? error.message : "Could not save outcome.";
 const linksOf = (data: OutcomeData, id?: string): LinkMap => Object.fromEntries(data.links.filter((link) => link.outcome_id === id).map((link) => [link.project_id, link.requirement]));
 const sameLinks = (left: LinkMap, right: LinkMap) => Object.keys(left).length === Object.keys(right).length && Object.keys(left).every((key) => left[key] === right[key]);
 
+class LifecycleRequestError extends Error {
+  constructor(message: string, readonly lifecycle?: OutcomeLifecycle) { super(message); }
+}
+
+async function saveLifecycle(outcomeId: string, completed: boolean, lifecycle: OutcomeLifecycle) {
+  const response = await fetch(`/api/outcomes/${outcomeId}/completion`, { method: "PUT", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ completed, expectedLifecycleVersion: lifecycle.lifecycleVersion, eligibilityToken: lifecycle.eligibilityToken }) });
+  const payload = await response.json().catch(() => null) as { lifecycle?: OutcomeLifecycle; error?: string } | null;
+  if (!response.ok) throw new LifecycleRequestError(payload?.error || `Could not ${completed ? "complete" : "reopen"} outcome.`, payload?.lifecycle);
+  if (!payload?.lifecycle) throw new LifecycleRequestError("The completion service returned an invalid response.");
+  return payload.lifecycle;
+}
+
 // The controller survives dismissal. Captured submissions never act on another
 // opening; only the dialog awaiting its own result changes its local draft.
-export default function OutcomeWorkspace({ request, data, planning, context, onClose, onAccepted, onRefresh, onView, onRemoved, onMoveOutcome }: {
+export default function OutcomeWorkspace({ request, data, planning, context, onClose, onAccepted, onRefresh, onView, onRemoved, onMoveOutcome, onInspectProject }: {
   request: OutcomeRequest | null; data: OutcomeData | null; onClose: () => void;
   onAccepted: (outcome: OutcomeRecord, links?: LinkMap, planningToken?: string) => void; onRefresh: () => Promise<void>; onView: (id: string) => void;
   context: CatalogContext; onRemoved: (id: string, generation: number) => void;
   planning: BoardState | null; onMoveOutcome: (move: OutcomeMove) => Promise<void>;
+  onInspectProject: (id: string) => void;
 }) {
   const pending = useRef(false);
   const removed = useRef(onRemoved);
@@ -46,28 +61,36 @@ export default function OutcomeWorkspace({ request, data, planning, context, onC
       let acceptedToken: string | undefined;
       let affectedCandidates: { id: string; name: string }[] = [];
       if (kind === "create") {
-        const result = await apiRequest<{ id: string; planningToken?: string }>("/api/outcomes", "POST", { ...details, links });
+        const result = await apiRequest<{ id: string; planningToken?: string; lifecycle?: OutcomeLifecycle }>("/api/outcomes", "POST", { ...details, links });
         acceptedToken = result.planningToken;
-        outcome = { id: result.id, title: details.title, description: details.description, owner: details.owner, success_signal: details.successSignal, needed_by: details.neededBy || null, stream_id: null, created_at: new Date().toISOString() };
+        outcome = { id: result.id, title: details.title, description: details.description, owner: details.owner, success_signal: details.successSignal, needed_by: details.neededBy || null, stream_id: null, created_at: new Date().toISOString(), lifecycle: result.lifecycle };
         setCreatedId(result.id);
       } else if (kind === "delete") {
         const result = await apiRequest<{ affectedCandidates?: { id: string; name: string }[] }>(`/api/outcomes/${outcome!.id}`, "DELETE", { planningToken: submission.planningToken });
         affectedCandidates = result.affectedCandidates ?? [];
         removed.current(outcome!.id, submission.generation);
       } else if (kind === "links") {
-        const result = await apiRequest<{ planningToken?: string; affectedCandidates?: { id: string; name: string }[] }>(`/api/outcomes/${outcome!.id}/links`, "PUT", { links, planningToken: submission.planningToken });
+        const result = await apiRequest<{ planningToken?: string; affectedCandidates?: { id: string; name: string }[]; lifecycle?: OutcomeLifecycle }>(`/api/outcomes/${outcome!.id}/links`, "PUT", { links, planningToken: submission.planningToken });
         acceptedToken = result.planningToken; affectedCandidates = result.affectedCandidates ?? [];
+        if (result.lifecycle) outcome = { ...outcome!, lifecycle: result.lifecycle };
+      } else if (kind === "complete" || kind === "reopen") {
+        const lifecycle = await saveLifecycle(outcome!.id, kind === "complete", submission.lifecycle!);
+        outcome = { ...outcome!, lifecycle };
       }
       else {
         await apiRequest(`/api/outcomes/${outcome!.id}`, "PUT", details);
-        outcome = { ...outcome!, title: details.title, description: details.description, owner: details.owner, success_signal: details.successSignal, needed_by: details.neededBy || null };
+        outcome = { ...outcome!, title: details.title, description: details.description, owner: details.owner, success_signal: details.successSignal, needed_by: details.neededBy || null, lifecycle: undefined };
       }
       const accepted = outcome!;
-      if (kind !== "delete") onAccepted(accepted, kind === "details" ? undefined : { ...submission.links }, acceptedToken);
+      if (kind !== "delete") onAccepted(accepted, kind === "links" || kind === "create" ? { ...submission.links } : undefined, acceptedToken);
       const impact = affectedCandidates.length ? ` Needs assignment: ${affectedCandidates.map((item) => item.name).join(", ")}. Their future demand is excluded until an owner is chosen.` : "";
-      try { await onRefresh(); setRefreshFailed(false); setNotice((kind === "delete" ? "Outcome deleted." : kind === "create" ? "Outcome created." : kind === "links" ? "Outcome links saved." : "Outcome details saved.") + impact); return { status: "saved", outcome: accepted }; }
+      const success = kind === "delete" ? "Outcome deleted." : kind === "create" ? "Outcome created." : kind === "links" ? "Outcome links saved." : kind === "complete" ? "Outcome marked complete." : kind === "reopen" ? "Outcome reopened." : "Outcome details saved.";
+      try { await onRefresh(); setRefreshFailed(false); setNotice(success + impact); return { status: "saved", outcome: accepted }; }
       catch { setRefreshFailed(true); setNotice("Outcome saved, but workspace views could not be refreshed." + impact); return { status: "refresh-failed", outcome: accepted }; }
-    } catch (error) { setNotice(messageOf(error)); return { status: "rejected", error: messageOf(error) }; }
+    } catch (error) {
+      if (error instanceof LifecycleRequestError && error.lifecycle && submission.outcome) onAccepted({ ...submission.outcome, lifecycle: error.lifecycle });
+      setNotice(messageOf(error)); return { status: "rejected", error: messageOf(error) };
+    }
     finally { pending.current = false; setSaving(false); }
   }
   async function refresh() {
@@ -76,7 +99,7 @@ export default function OutcomeWorkspace({ request, data, planning, context, onC
   }
   return <>
     {notice && <div className="notice" role="status">{notice}{createdId && <><button type="button" className="text-button" onClick={() => onView(createdId)}>View outcome</button>{!context.ids.includes(createdId) && <button type="button" className="text-button" onClick={context.clear}>Clear filters</button>}</>}{refreshFailed && <button type="button" className="text-button" onClick={() => void refresh()}>Retry workspace refresh</button>}</div>}
-    {request && data && <OutcomeDialog key={request.generation} request={request} data={data} planning={planning} context={context} saving={saving} onSubmit={submit} onMoveOutcome={onMoveOutcome} onClose={onClose} onRefresh={refresh} refreshFailed={refreshFailed} onMissing={() => { setNotice("Outcome was removed from the workspace."); onClose(); }} />}
+    {request && data && <OutcomeDialog key={request.generation} request={request} data={data} planning={planning} context={context} saving={saving} onSubmit={submit} onMoveOutcome={onMoveOutcome} onInspectProject={onInspectProject} onClose={onClose} onRefresh={refresh} refreshFailed={refreshFailed} onMissing={() => { setNotice("Outcome was removed from the workspace."); onClose(); }} />}
   </>;
 }
 
@@ -85,10 +108,11 @@ function outside(dialog: HTMLDialogElement, x: number, y: number) {
   return x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom;
 }
 
-function OutcomeDialog({ request, data, planning, context, saving, onSubmit, onMoveOutcome, onClose, onRefresh, refreshFailed, onMissing }: {
+function OutcomeDialog({ request, data, planning, context, saving, onSubmit, onMoveOutcome, onInspectProject, onClose, onRefresh, refreshFailed, onMissing }: {
   request: OutcomeRequest; data: OutcomeData; saving: boolean; onSubmit: (submission: Submission) => Promise<Result>;
   onClose: () => void; onRefresh: () => Promise<void>; refreshFailed: boolean;
   context: CatalogContext; onMissing: () => void; planning: BoardState | null; onMoveOutcome: (move: OutcomeMove) => Promise<void>;
+  onInspectProject: (id: string) => void;
 }) {
   const [created, setCreated] = useState<OutcomeRecord | null>(null);
   // Accepted creations are inserted into workspace data before refresh. Once an
@@ -152,10 +176,14 @@ function OutcomeDialog({ request, data, planning, context, saving, onSubmit, onM
     }
     if (kind === "links") { setLinkError(""); setLinkFeedback(""); } else { setError(""); setFeedback(""); }
     setSubmitted(kind);
-    const result = await onSubmit({ kind, outcome: saved ?? undefined, details: { ...draft }, links: { ...links }, generation: request.generation, planningToken: kind === "links" ? linkToken : data.planningToken });
+    const result = await onSubmit({ kind, outcome: saved ?? undefined, details: { ...draft }, links: { ...links }, generation: request.generation, planningToken: kind === "links" ? linkToken : data.planningToken, lifecycle: saved?.lifecycle });
     setSubmitted(null);
-    if (result.status === "rejected") { if (kind === "links") setLinkError(result.error); else setError(result.error); }
+    if (result.status === "rejected") {
+      if (kind === "links") setLinkError(result.error); else setError(result.error);
+      if (kind === "complete" || kind === "reopen") requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>("#outcome-lifecycle-title")?.focus());
+    }
     else if (kind === "links") { setEditingLinks(false); setLinkFeedback("Links saved."); }
+    else if (kind === "complete" || kind === "reopen") setFeedback(kind === "complete" ? "Outcome marked complete." : "Outcome reopened.");
     else {
       setDraft(detailsOf(result.outcome)); setEditing(false); setFeedback("Details saved.");
       if (kind === "create") { setCreated(result.outcome); setEditingLinks(false); setSection("details"); }
@@ -178,7 +206,7 @@ function OutcomeDialog({ request, data, planning, context, saving, onSubmit, onM
     <div className="outcome-workspace-body">
       {saved && !context.ids.includes(saved.id) && <p className="notice">Outside current filters. <button type="button" className="text-button" onClick={context.clear}>Clear filters</button></p>}
       {(dirty || linksDirty) && <p className="meta">Changes stay while switching sections. Closing discards unsaved changes.</p>}
-      {submitted && <p role="status">{submitted === "create" ? "Creating outcome…" : submitted === "links" ? "Saving links…" : "Saving details…"}</p>}
+      {submitted && <p role="status">{submitted === "create" ? "Creating outcome…" : submitted === "links" ? "Saving links…" : submitted === "complete" ? "Marking outcome complete…" : submitted === "reopen" ? "Reopening outcome…" : submitted === "delete" ? "Deleting outcome…" : "Saving details…"}</p>}
       {refreshFailed && <p role="alert">Outcome saved, but workspace views could not be refreshed. <button type="button" className="text-button" onClick={() => void onRefresh()}>Retry workspace refresh</button></p>}
       <section hidden={section !== "details"} aria-labelledby="outcome-details-title"><h3 id="outcome-details-title">Details</h3>
         {error && <p className="error" role="alert">{error}</p>}{feedback && <p className="notice" role="status">{feedback}</p>}
@@ -190,6 +218,7 @@ function OutcomeDialog({ request, data, planning, context, saving, onSubmit, onM
           <label>Notes<textarea rows={5} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
           {!isNew && <div className="actions"><button disabled={saving}>Save details</button><button type="button" className="quiet" onClick={() => { setDraft(detailsOf(saved ?? undefined)); setEditing(false); setError(""); }}>Cancel details</button></div>}
         </fieldset></form> : saved && <><dl className="outcome-saved-details"><dt>Title</dt><dd>{saved.title}</dd><dt>Notes</dt><dd>{saved.description || "No notes"}</dd><dt>Owner</dt><dd>{saved.owner || "No owner"}</dd><dt>Success signal</dt><dd>{saved.success_signal || "No success signal"}</dd><dt>Needed by</dt><dd>{saved.needed_by || "No target"}</dd>{planning && <><dt>Points counted</dt><dd>{countedPoints.toLocaleString()}</dd><dt>Direct projects</dt><dd>{directPackages.length.toLocaleString()}</dd></>}</dl><button type="button" className="secondary" onClick={() => { setDraft(detailsOf(saved)); setEditing(true); setError(""); }}>Edit details</button></>}
+        {saved && <OutcomeLifecyclePanel outcome={saved} disabled={editing || editingLinks || dirty || linksDirty || saving || !!submitted} editing={editing || editingLinks} dirty={dirty || linksDirty} externalPending={saving && !submitted} pending={submitted} onSave={save} onProjects={() => setSection("projects")} onInspectProject={(id) => { onClose(); requestAnimationFrame(() => onInspectProject(id)); }} />}
         {saved && planning?.roadmapPlanningMigrated && <OutcomePlacementControls outcome={saved} planning={planning} disabled={editing || editingLinks || dirty || linksDirty || saving || !!submitted} onMove={onMoveOutcome} />}
         {saved && !planning?.roadmapPlanningMigrated && <p className="meta">Stream: {data.streams.find((item) => item.id === saved.stream_id)?.name ?? "Needs assignment"}. Manage stream assignment on Board.</p>}
         {saved && <div className="outcome-delete"><button type="button" className="text-button danger-text" disabled={dirty || linksDirty || saving} onClick={() => { if (window.confirm(`Delete “${saved.title}” and its project links?`)) void save("delete"); }}>Delete outcome</button>{(dirty || linksDirty) && <p className="meta">Save or cancel unsaved changes before deleting.</p>}</div>}
@@ -205,6 +234,30 @@ function OutcomeDialog({ request, data, planning, context, saving, onSubmit, onM
     </div>
     {isNew && <footer className="outcome-workspace-footer"><span>{Object.keys(links).length} projects selected</span><button type="button" disabled={saving} onClick={() => void save("create")}>Create outcome</button></footer>}
   </dialog>;
+}
+
+function OutcomeLifecyclePanel({ outcome, disabled, editing, dirty, externalPending, pending, onSave, onProjects, onInspectProject }: { outcome: OutcomeRecord; disabled: boolean; editing: boolean; dirty: boolean; externalPending: boolean; pending: Submission["kind"] | null; onSave: (kind: Submission["kind"]) => Promise<void>; onProjects: () => void; onInspectProject: (id: string) => void }) {
+  const lifecycle = outcome.lifecycle;
+  const summary = outcomeLifecycleSummary(lifecycle, true);
+  return <section className="outcome-lifecycle" aria-labelledby="outcome-lifecycle-title">
+    <h4 id="outcome-lifecycle-title" tabIndex={-1}>Completion</h4>
+    {!lifecycle ? <p className="meta">Completion evidence is unavailable. Refresh the workspace before changing lifecycle state.</p> : <>
+      <p className={`outcome-lifecycle-state${lifecycle.reviewNeeded ? " review-needed" : lifecycle.ready ? " ready" : ""}`}>{summary}</p>
+      {lifecycle.completedAt && <p className="meta">Recorded <time dateTime={lifecycle.completedAt}>{new Date(lifecycle.completedAt).toLocaleString()}</time>.</p>}
+      {!!lifecycle.history.length && <details><summary>Lifecycle history ({lifecycle.history.length})</summary><ol>{[...lifecycle.history].reverse().map((event) => <li key={event.lifecycleVersion}><strong>{event.action === "complete" ? "Completed" : event.action === "reopen" ? "Reopened" : "Review requested"}</strong> by {event.actor} · <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></li>)}</ol></details>}
+      {lifecycle.reviewNeeded && <><p className="warning"><strong>Review completion needed.</strong> Reopen this outcome before recording completion against updated evidence.</p>{!!lifecycle.reviewReasons.length && <ul>{lifecycle.reviewReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}</>}
+      {!lifecycle.completedAt && lifecycle.ready && <p>All saved minimum-required work and effective prerequisites are actually complete. Forecast dates did not determine this status.</p>}
+      {!lifecycle.completedAt && !lifecycle.ready && <><p>{lifecycle.directRequiredIds.length ? "Required work is not actually complete yet." : "Unplanned: define at least one minimum-required project before marking complete."}</p>{!!lifecycle.reasons.length && <ul>{lifecycle.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}</>}
+      {!!lifecycle.blockers.some((blocker) => blocker.packageId) && <div className="actions">{[...new Map(lifecycle.blockers.filter((blocker) => blocker.packageId).map((blocker) => [blocker.packageId!, blocker])).values()].map((blocker) => <button key={blocker.packageId} type="button" className="text-button" onClick={() => onInspectProject(blocker.packageId!)}>Inspect {blocker.message.split(":")[0]}</button>)}</div>}
+      <p className="meta">Saved required scope: {lifecycle.directRequiredIds.length} direct · {lifecycle.requiredIds.length} including prerequisites.</p>
+      {dirty && <p className="meta">Save or cancel changes in Details and Projects before changing completion.</p>}
+      {editing && !dirty && <p className="meta">Finish or cancel editing before changing completion.</p>}
+      {externalPending && <p className="meta" role="status">Another outcome change is finishing. Completion actions will be available when it finishes.</p>}
+      {!lifecycle.directRequiredIds.length && <button type="button" className="text-button" onClick={onProjects}>Define required projects</button>}
+      <div className="actions">{lifecycle.completedAt ? <button type="button" className="secondary" disabled={disabled} onClick={() => void onSave("reopen")}>{pending === "reopen" ? "Reopening outcome…" : "Reopen outcome"}</button>
+        : <button type="button" disabled={disabled || !lifecycle.ready} onClick={() => void onSave("complete")}>{pending === "complete" ? "Marking complete…" : "Mark complete"}</button>}</div>
+    </>}
+  </section>;
 }
 
 function OutcomePlacementControls({ outcome, planning, disabled, onMove }: { outcome: OutcomeRecord; planning: BoardState; disabled: boolean; onMove: (move: OutcomeMove) => Promise<void> }) {

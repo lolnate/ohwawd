@@ -1,13 +1,18 @@
 .timeline-outcome-title { display: block; color: var(--color-text); font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
-.outcome-timeline-track .outcome-project-block { min-height: 28px; padding: 5px 6px; text-align: left; border-width: 1px; }
+.outcome-timeline-track .outcome-project-block { min-height: 28px; padding: 5px 0; text-align: left; border-width: 1px; }
 .outcome-timeline-track .outcome-project-block:hover:not(:disabled) { background: var(--color-project-owned-bg); border-color: var(--color-focus); }
 .outcome-project-block:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; z-index: 3; }
 .counted-project { background: var(--color-project-owned-bg); border: 1px solid var(--color-project-owned-border); }
 .outcome-timeline-track .shared-project, .calendar-legend .shared-project, .outcome-unscheduled .shared-project { background: var(--color-project-shared-bg); color: var(--color-text-muted); border: 1px dashed var(--color-project-shared-border); }
 .outcome-timeline-track .shared-project:hover:not(:disabled) { background: var(--color-surface-hover); }
-.shared-band-caption { position: absolute; left: 8px; color: var(--color-text-muted); font-size: .69rem; z-index: 1; }
+.outcome-timeline-track .prerequisite-project { border-style: dashed; border-width: 2px; }
+.outcome-dependency-connectors { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; }
+.outcome-dependency-connectors path { fill: none; stroke: var(--color-info); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.outcome-dependency-connectors marker path { fill: var(--color-info); stroke: none; }
+.outcome-timeline-track .outcome-project-block, .outcome-unscheduled { z-index: 2; }
 .outcome-unscheduled { position: absolute; z-index: 2; left: 8px; right: 8px; bottom: 5px; display: flex; flex-direction: column; gap: 4px; }
-.unscheduled-project { background: var(--color-warning-bg); color: var(--color-warning); border: 1px solid var(--color-warning); border-radius: var(--radius-bar); padding: 5px 8px; font-size: .67rem; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.outcome-unscheduled { align-items: flex-start; }
+.unscheduled-project { width: auto; max-width: min(18rem, calc(100vw - 11rem)); background: var(--color-warning-bg); color: var(--color-warning); border: 1px solid var(--color-warning); border-radius: var(--radius-bar); padding: 5px 8px; font-size: .67rem; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .unscheduled-project:hover:not(:disabled) { background: var(--color-warning-bg); border-color: var(--color-focus); }
 .unassigned-outcomes { background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: 16px; margin: 12px 0; }
 .unassigned-outcomes > label { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-top: 9px; }
@@ -35,4 +40,8 @@
   .unassigned-outcomes { padding: 12px; }
   .unassigned-outcomes > label { flex-direction: column; align-items: stretch; gap: 5px; }
   .unassigned-outcomes select { max-width: 100%; width: 100%; }
+}
+@media (forced-colors: active) {
+  .outcome-dependency-connectors path { stroke: CanvasText; }
+  .outcome-dependency-connectors marker path { fill: CanvasText; }
 }

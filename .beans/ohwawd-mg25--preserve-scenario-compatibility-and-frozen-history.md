@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T18:38:26Z
-updated_at: 2026-10-25T22:16:52Z
+updated_at: 2026-10-26T01:20:17Z
 parent: ohwawd-5q71
 blocked_by:
     - ohwawd-d92k
@@ -13,7 +13,7 @@ blocked_by:
 ---
 
 OpenSpec: implement-outcome-first-board.
-References: openspec/changes/implement-outcome-first-board/design.md (Decisions 6, 8); openspec/changes/implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/implement-outcome-first-board/specs/outcome-lifecycle/spec.md; openspec/changes/implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/implement-outcome-first-board/tasks.md (5.1).
+References: openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md (Decisions 6, 8); openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/outcome-lifecycle/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md (5.1).
 
 - [x] Adopt calculationVersion v5 for new saves/publications and round-trip rank, membership, ownership and scoped order in scenario fingerprints, activation and comparisons.
 - [x] Apply shared conservative conversion after older legacy adapters; report inferred ownership, excluded candidates and scoped conflicts; require explicit v5 save before old draft publication and leave stored old draft JSON unchanged until saved.

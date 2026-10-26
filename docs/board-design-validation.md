@@ -6,7 +6,7 @@ Date: 25 October 2026. Review Bean: **ohwawd-jpzr**. Draft specification follow-
 
 Compared the current OpenSpec requirements, scheduling contract, product design, Board implementation and existing tests with `/Users/nate/Obsidian/Personal/Projects/Oh WAWD/Stream and Outcome Design.md`, plus the author's clarification answers during this review.
 
-The existing single-project/single-capacity-owner foundation supports the intended model. Shared dates, conserved capacity, finish-to-start dependencies, additive estimates, and ownership/stream transfers are implemented. The principal changes are **outcome-priority scheduling and controls, immediate-prerequisite visualization, explicit waiting warnings, mandatory outcome ownership for roadmap work, off-roadmap exclusion, dependency connectors, and manual outcome completion**.
+The existing single-project/single-capacity-owner foundation supports the intended model. Shared dates, conserved capacity, finish-to-start dependencies, additive estimates, and ownership/stream transfers are implemented. The principal changes are **outcome-priority scheduling and controls, immediate-prerequisite visualization, compact dependency context, mandatory outcome ownership for roadmap work, off-roadmap exclusion, dependency connectors, and manual outcome completion**.
 
 Several differences are changes to previously accepted behavior, rather than implementation failures against the existing specifications. This review records the clarified direction; it does not replace normative OpenSpec requirements or claim that the gaps are implemented.
 
@@ -32,7 +32,7 @@ The source note's wording “drawn AFTER the dependent outcome” is interpreted
 | Projects required by an outcome are visible, including immediate prerequisites of its projects | Explicit linked appearances; dependency-aware delivery | Row builder includes direct outcome links only | Missing automatic immediate-prerequisite appearances |
 | Shared prerequisites gate local successors and required outcome delivery | Required work's effective dependency closure gates delivery | Cross-stream dependency checks and closure are implemented | Scheduling aligned; prerequisite boxes can be absent from the row |
 | Independent shared work can overlap local work without consuming local capacity | References carry zero local points | One owning-stream simulation; no additional charge from references | Aligned; a same-stream reference still follows that stream's one-project execution rule |
-| Duration follows the working stream's capacity and combined estimate | Open estimated Linear issues plus remaining Extra scope | Capacity simulation includes reserve, allocation and calendar availability | Aligned; Extra scope is additive, not a replacement total estimate |
+| Duration follows the working stream's capacity and combined estimate | Linear aggregate remaining project scope when available, otherwise open estimated issues, plus remaining Extra scope | Capacity simulation includes reserve, allocation and calendar availability | Aligned; Extra scope is additive, not a replacement total estimate |
 | Thin flexible dependency connectors, including shared prerequisites | Existing design deliberately uses project codes and drawer navigation instead of an arrow overlay | Textual predecessor codes and clickable dependency navigation; no drawn connectors | Design and implementation change required |
 | Outcome rows run top-to-bottom in user-defined delivery priority | Project queue, rather than an outcome queue, controls scheduling | Outcomes are fetched newest-created first and rendered in that order; scheduler never receives outcome rank | Missing persistent outcome priority and its scheduling effect |
 | Reorder outcomes with drag/drop and before/after controls | Accessible reorder controls apply to projects | Project controls exist inside Manage work; outcome rows have no move controls | Missing at outcome level |
@@ -78,8 +78,8 @@ Moving an outcome currently moves its owned projects and claims selected ownerle
 
 ### 4. Estimate and capacity semantics already match
 
-- [`src/lib/board.ts:64–72`](../src/lib/board.ts#L64) sums estimates from open Linear issues and passes Extra scope separately.
-- [`src/lib/forecast.ts:79–99`](../src/lib/forecast.ts#L79) combines that known demand with Extra scope and withholds finite forecasts for uncovered unknown estimates.
+- [`src/lib/board.ts`](../src/lib/board.ts) prefers imported aggregate remaining project scope, falls back to open issue estimates, and passes Extra scope separately.
+- [`src/lib/forecast.ts`](../src/lib/forecast.ts) combines that source demand with Extra scope and withholds finite forecasts for uncovered unknown estimates only on the issue-level fallback.
 - [`src/lib/forecast.ts:104–133`](../src/lib/forecast.ts#L104) applies availability, reserve and the owning stream's allocation, with one execution slot per stream.
 - [`src/app/project-drawer.tsx:63`](../src/app/project-drawer.tsx#L63) explains the estimate basis.
 
@@ -107,7 +107,7 @@ Manual completion must use actual reconciled completion of required work and its
 
 The next design change should reconcile these sources before implementation:
 
-- [`outcome-sequencing`](../openspec/specs/outcome-sequencing/spec.md): replace ownerless active roadmap behavior; define persistent outcome priority, outcome reorder/move controls, immediate-prerequisite appearances, waiting warnings, connectors, and ownership lifecycle rules.
+- [`outcome-sequencing`](../openspec/specs/outcome-sequencing/spec.md): replace ownerless active roadmap behavior; define persistent outcome priority, outcome reorder/move controls, immediate-prerequisite appearances, compact dependency context, connectors, and ownership lifecycle rules.
 - [`stream-sequencing`](../openspec/specs/stream-sequencing/spec.md): reconcile authoritative project queues with outcome-first scheduling; retain finish-to-start constraints, atomic edits, blocked-work skipping, single-stream execution and accessible controls.
 - [`project-assignment`](../openspec/specs/project-assignment/spec.md): require an owning outcome for Board assignment and define off-roadmap dismissal separately from visibility and deferral.
 - [`planning-timeline`](../openspec/specs/planning-timeline/spec.md): specify outcome rank presentation, automatically derived immediate references and connector behavior.
@@ -129,7 +129,7 @@ The main behavior questions above are answered. Before implementation, specify:
 
 ### Resolution recorded by ohwawd-a5j9
 
-The follow-up [implement-outcome-first-board proposal](../openspec/changes/implement-outcome-first-board/proposal.md), [design](../openspec/changes/implement-outcome-first-board/design.md) and five capability deltas turn the confirmed clarifications into the proposed normative behavior. Design Decision 1 resolves the questions above:
+The archived [implement-outcome-first-board proposal](../openspec/changes/archive/2026-10-25-implement-outcome-first-board/proposal.md), [design](../openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md) and five synchronized capability specs turn the confirmed clarifications into normative behavior. Design Decision 1 resolves the questions above:
 
 - Carry started work first; eligible required-delivery closure precedes optional-only work, then owner outcome rank and within-owner project order. No competing cross-outcome project queue remains.
 - A lower-ranked prerequisite retains its owner's rank without hidden priority donation. Blocked higher work yields to eligible work; dependency context carries the named wait/bypass explanation without expanding the sticky outcome label.
@@ -137,7 +137,7 @@ The follow-up [implement-outcome-first-board proposal](../openspec/changes/imple
 - Connectors stay row-local through immediate reference boxes. References retain the established dashed treatment. Deeper dependencies still constrain delivery and remain accessible through details.
 - Manual completion/reopen uses clean saved Details in the completed outcome sidebar. Completed rows retain their rank/time; changed required scope or reopened source evidence latches Review completion needed until explicit reopen. Lifecycle markers never become scheduling gates. Workspace-global completion survives scenario activation; published lifecycle evidence stays frozen.
 
-These resolution choices are documented design decisions, not new quotations attributed to the author. The implementation epic and dependency map are recorded in [tasks.md](../openspec/changes/implement-outcome-first-board/tasks.md). The [data foundation](roadmap-migration.md), [atomic writer/activation layer](roadmap-mutations.md), [v5 scheduling core](scheduling-contract.md), [actual-evidence completion service](outcome-lifecycle.md), [scenario adoption/frozen history](scenario-v5-compatibility.md) and [accessible Board controls](board-controls.md) are implemented and verified. Activated plans now save and publish as v5. Immediate-prerequisite timeline/connectors, visible sidebar lifecycle controls and integrated acceptance remain in dependent tasks. The comparison/evidence above records the reviewed pre-v5 Board behavior.
+These resolution choices are documented design decisions, not new quotations attributed to the author. The completed implementation epic and dependency map are recorded in archived [tasks.md](../openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md). The [data foundation](roadmap-migration.md), [atomic writer/activation layer](roadmap-mutations.md), [v5 scheduling core](scheduling-contract.md), [actual-evidence completion service](outcome-lifecycle.md), [scenario adoption/frozen history](scenario-v5-compatibility.md), [accessible Board controls](board-controls.md), immediate-prerequisite timeline/connectors, visible sidebar lifecycle controls and integrated acceptance are implemented and verified. Activated plans save and publish as v5. The comparison/evidence above records the reviewed pre-v5 Board behavior.
 
 ## Verification performed
 

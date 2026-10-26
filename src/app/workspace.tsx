@@ -12,6 +12,7 @@ import OutcomeWorkspace, { type OutcomeRequest } from "./outcome-workspace";
 import type { OutcomeMove } from "./outcome-board-controls";
 import type { RoadmapConversion, StoredRoadmapFields } from "@/lib/roadmap-planning";
 import type { OutcomeLifecycle } from "@/lib/outcome-completion";
+import { mergeOutcomeSnapshot } from "./outcome-lifecycle-view";
 
 type Team = { id: string; name: string; key: string };
 type Project = Partial<StoredRoadmapFields> & { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
@@ -205,6 +206,17 @@ export default function App() {
     }
   }
 
+  function acceptOutcome(outcome: Outcome, links?: Record<string, "minimum" | "optional">, planningToken?: string) {
+    setState((current) => current && ({ ...current, planningToken: planningToken ?? current.planningToken,
+      outcomes: current.outcomes.some((item) => item.id === outcome.id) ? current.outcomes.map((item) => item.id === outcome.id ? mergeOutcomeSnapshot(item, outcome) : item) : [...current.outcomes, outcome],
+      links: links ? [...current.links.filter((link) => link.outcome_id !== outcome.id), ...Object.entries(links).map(([project_id, requirement]) => ({ outcome_id: outcome.id, project_id, requirement }))] : current.links }));
+    if (outcome.lifecycle) setDeliveryBoard((current) => {
+      if (!current?.outcomes.some((item) => item.id === outcome.id)) return current;
+      const next = { ...current, outcomes: current.outcomes.map((item) => item.id === outcome.id ? { ...item, lifecycle: outcome.lifecycle } : item) };
+      setBoardUpdate(next); return next;
+    });
+  }
+
   const statuses = [...new Set(state?.projects.map((project) => project.status) ?? [])].sort();
   const statusKey = statuses.join("\0");
   useEffect(() => {
@@ -267,7 +279,7 @@ export default function App() {
       <OutcomeCatalog data={state} error={stateError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onContext={setCatalogContext} />
     </section>
     <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
-    <OutcomeWorkspace request={outcomeRequest} data={state} planning={deliveryBoard} context={catalogContext} onMoveOutcome={moveOutcome} onClose={() => setOutcomeRequest(null)} onView={(id) => setOutcomeRequest({ generation: ++outcomeGeneration.current, id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" })} onRemoved={(id, generation) => {
+    <OutcomeWorkspace request={outcomeRequest} data={state} planning={deliveryBoard} context={catalogContext} onMoveOutcome={moveOutcome} onInspectProject={inspectProjectOnBoard} onClose={() => setOutcomeRequest(null)} onView={(id) => setOutcomeRequest({ generation: ++outcomeGeneration.current, id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" })} onRemoved={(id, generation) => {
       if (outcomeRequest?.generation === generation) {
         const index = catalogContext.ids.indexOf(id);
         const next = catalogContext.ids[index + 1] ?? catalogContext.ids[index - 1];
@@ -276,7 +288,7 @@ export default function App() {
         setOutcomeRequest(null);
       }
       setState((current) => current && ({ ...current, outcomes: current.outcomes.filter((item) => item.id !== id), links: current.links.filter((link) => link.outcome_id !== id) }));
-    }} onAccepted={(outcome, links, planningToken) => setState((current) => current && ({ ...current, planningToken: planningToken ?? current.planningToken, outcomes: current.outcomes.some((item) => item.id === outcome.id) ? current.outcomes.map((item) => item.id === outcome.id ? outcome : item) : [...current.outcomes, outcome], links: links ? [...current.links.filter((link) => link.outcome_id !== outcome.id), ...Object.entries(links).map(([project_id, requirement]) => ({ outcome_id: outcome.id, project_id, requirement }))] : current.links }))} onRefresh={refreshOutcomes} />
+    }} onAccepted={acceptOutcome} onRefresh={refreshOutcomes} />
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;
 }

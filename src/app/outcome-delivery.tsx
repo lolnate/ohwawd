@@ -1,6 +1,7 @@
 "use client";
 
 import type { BoardState, BoardOutcome } from "./board";
+import { outcomeLifecycleSummary } from "./outcome-lifecycle-view";
 
 type Props = { board: BoardState | null; error: string; onInspect: (outcome: BoardOutcome) => void; onResolveProject: (id: string) => void };
 
@@ -15,7 +16,7 @@ export default function OutcomeDelivery({ board, error, onInspect, onResolveProj
       const blockedPackage = projected?.requiredIds.map((id) => board.packages.find((item) => item.id === id))
         .find((item) => item && packageForecasts.get(item.id)?.reason);
       return <div className="outcome-forecast-row" key={outcome.id}>
-        <div><button type="button" className="delivery-title" onClick={() => onInspect(outcome)}>{outcome.title}</button><small>{outcome.owner || "No owner"} · Target {outcome.needed_by || "not set"} · {projected?.requiredIds.length || 0} required including blockers</small></div>
+        <div><button type="button" className="delivery-title" onClick={() => onInspect(outcome)}>{outcome.title}</button><small>{outcome.owner || "No owner"} · Target {outcome.needed_by || "not set"} · {projected?.requiredIds.length || 0} required including blockers</small>{outcomeLifecycleSummary(outcome.lifecycle) && <small className="outcome-lifecycle-summary">{outcomeLifecycleSummary(outcome.lifecycle)}</small>}</div>
         <div className="outcome-status">
           <span className={`forecast-pill status-${projected?.status || "unknown"}`}>{projected?.status.replaceAll("_", " ") || "unknown"}{projected?.endDate ? ` · ${projected.endDate}` : ""}{projected?.calendarProjected ? " · projected cycles" : ""}</span>
           <span className={`target-status ${projected?.target || "unknown"}`}>{projected?.target === "missed" ? `Target missed · ${projected.gapCycles} cycle gap` : projected?.target === "met" ? "Target met" : projected?.target === "unknown" ? `Cannot assess target · ${projected.status === "blocked" ? "blocked work" : "forecast setup incomplete"}` : "No target set"}</span>

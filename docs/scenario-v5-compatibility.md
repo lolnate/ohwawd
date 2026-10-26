@@ -1,6 +1,6 @@
 # Scenario v5 compatibility and frozen history
 
-Task: **ohwawd-mg25** under **ohwawd-5q71**. Requirements/design: `openspec/changes/implement-outcome-first-board/specs/stream-sequencing/spec.md`, `specs/outcome-lifecycle/spec.md` and design Decisions 6 and 8.
+Task: **ohwawd-mg25** under **ohwawd-5q71**. Requirements/design: `openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/stream-sequencing/spec.md`, `specs/outcome-lifecycle/spec.md` and design Decisions 6 and 8.
 
 ## Current version and publication
 

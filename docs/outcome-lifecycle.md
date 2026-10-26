@@ -1,6 +1,6 @@
 # Outcome completion service
 
-Implementation task: **ohwawd-gqh7**, under **ohwawd-5q71**. Source requirements: `openspec/changes/implement-outcome-first-board/specs/outcome-lifecycle/spec.md`; design Decisions 6–7. This is the backend/evidence layer. The later sidebar task **ohwawd-4oo7** adds visible Mark complete/Reopen actions using the existing outcome workspace.
+Implementation tasks: backend/evidence foundation **ohwawd-gqh7** and unified-sidebar integration **ohwawd-4oo7**, under **ohwawd-5q71**. Source requirements: `openspec/specs/outcome-lifecycle/spec.md`; archived design Decisions 6–7: `openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md`.
 
 ## Readiness uses actual saved evidence
 
@@ -53,7 +53,7 @@ Rejected actions do not alter history or planning inputs. A replay with an old v
 Relevant writes re-evaluate completed outcomes after their final changes:
 
 - Linear source import, including newly missing work and changed effective source dependencies.
-- Outcome required links; accepted link/create responses also carry current lifecycle evidence for later sidebar integration.
+- Outcome required links; accepted link/create responses carry current lifecycle evidence into the sidebar immediately.
 - Extra scope changes, including removal.
 - Local dependency add/remove and Linear waiver/restore, through the shared dependency store.
 - Final scenario restoration, including direct scope/dependency restoration paths.
@@ -62,10 +62,14 @@ The first failed actual proof or changed required scope latches Review completio
 
 Lifecycle tables remain independent of scenario-managed definitions and survive ordinary deletion/recreation. Definition removal latches review in the same transaction while retaining completion time/history, so restoration cannot silently erase that invalidation. Scenario restoration never copies old lifecycle fields back into business storage. Lifecycle-only writes change no planning token, project execution, links, rank, capacity or scenario scheduling-dirty state. Markers never satisfy a project dependency or suppress newly unfinished work from normal scheduling.
 
-## Integration boundary and verification
+## Unified sidebar integration
 
-The later sidebar implementation must serialize complete/reopen with the existing captured outcome submissions, disable actions for dirty sections/pending writes, retain Close/Escape/backdrop availability, isolate newer openings and distinguish persistence from follow-up refresh failures. It should apply accepted lifecycle evidence from completion/link/create responses without treating a simulated finish or wait resolution as completion. [Scenario adoption and frozen historical comparison](scenario-v5-compatibility.md) are implemented; activation retains live history and publication freezes the saved draft's lifecycle evidence.
+Saved Details shows readiness, review reasons, completion time, complete/reopen/review event history, required-scope counts, blockers and explicit Mark complete/Reopen actions. Completion/reopen is serialized with captured outcome submissions and disabled while either section is editing or dirty, or while any outcome write is pending. Close, Escape and backdrop dismissal remain available.
+
+Stale responses replace local evidence with the canonical snapshot, announce the conflict and focus Completion. Project blockers close the outcome sidebar before opening project details. Accepted lifecycle evidence from completion/link/create responses is applied before broader refresh; refresh failure retries only that read, and a dismissed opening cannot replace or focus a newer one. Board, catalog and delivery show persisted completion/review markers without treating simulated finishes, waits or lifecycle state as scheduling inputs. [Scenario adoption and frozen historical comparison](scenario-v5-compatibility.md) remain implemented; activation retains live history and publication freezes the saved draft's lifecycle evidence.
+
+## Verification
 
 `tests/outcome-lifecycle.test.ts` covers proof semantics, validation, stale/current evidence, history, sticky source/link/graph/scope review, rollback, serialized source-update rejection, scenario/history retention and lifecycle-only scheduling cleanliness using PGlite. Historical migration tests seed the old writer's rows directly rather than running the current lifecycle-aware importer against a pre-foundation schema. `tests/ui/outcome-completion-api.spec.ts` verifies the real unauthenticated route guard and API-shaped completion/read/reopen behavior using the existing intercepted PGlite fixture; it does not claim live-Linear or production-database verification.
 
-Verified results: typecheck, **127 unit/database tests** (11 new lifecycle cases), production build including the new route, **56 affected browser/API cases** (including both new completion API cases), strict current-spec/change and seven-archive validation, and whitespace checks passed. No existing local or remote database was migrated during this task.
+Current integrated results: typecheck, **137 unit/database tests**, production build, all **111 Chromium browser cases**, global strict OpenSpec validation and whitespace checks passed. The sidebar suite covers actual-versus-forecast eligibility, lifecycle history, source/link review, stale evidence, pending dismissal/new openings, refresh-only retry, blocker handoff, responsive layouts and consistent Board/catalog/delivery markers. No existing local or remote database was migrated during this task.

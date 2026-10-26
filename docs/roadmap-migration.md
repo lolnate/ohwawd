@@ -1,6 +1,6 @@
 # Outcome-first Board data foundation
 
-Implementation task: **ohwawd-rc2m**, under epic **ohwawd-5q71**. Requirements and coordinated rollout: [implement-outcome-first-board design](../openspec/changes/implement-outcome-first-board/design.md), Decisions 2, 6 and 8.
+Implementation task: **ohwawd-rc2m**, under epic **ohwawd-5q71**. Requirements and coordinated rollout: [implement-outcome-first-board design](../openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md), Decisions 2, 6 and 8.
 
 ## Migration 6: additive storage
 

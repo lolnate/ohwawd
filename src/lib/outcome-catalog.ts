@@ -1,3 +1,5 @@
+import type { OutcomeLifecycle } from "./outcome-completion";
+
 export type CatalogOutcome = {
   id: string;
   title: string;
@@ -7,6 +9,7 @@ export type CatalogOutcome = {
   needed_by: string | null;
   stream_id: string | null;
   created_at: string;
+  lifecycle?: OutcomeLifecycle;
 };
 
 export type CatalogProject = { id: string; name: string; in_scope: boolean };

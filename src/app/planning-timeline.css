@@ -27,14 +27,16 @@
 .timeline-week-band.projected-calendar,.calendar-legend-swatch.projected-calendar { background-image: repeating-linear-gradient(135deg, transparent 0, transparent 5px, color-mix(in srgb, var(--color-provisional) 20%, transparent) 5px, color-mix(in srgb, var(--color-provisional) 20%, transparent) 6px); }
 .calendar-project-bar.uses-projected-cycles { box-shadow: inset 0 3px var(--color-provisional); }
 .calendar-day.projected-cycle { background: var(--color-calendar-projected-bg); color: var(--color-provisional); border-style: dashed; }
-.calendar-project-bar { position: absolute; top: 23px; min-height: 26px; border: 1px solid var(--color-project-owned-border); border-radius: var(--radius-bar); color: var(--color-text); background: var(--color-project-owned-bg); padding: 5px 6px; z-index: 1; overflow: hidden; white-space: nowrap; font-size: .66rem; }
-.calendar-project-bar span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.calendar-project-bar { position: absolute; top: 23px; min-height: 26px; border: 1px solid var(--color-project-owned-border); border-radius: var(--radius-bar); color: var(--color-text); background: var(--color-project-owned-bg); padding: 5px 0; z-index: 1; overflow: visible; white-space: nowrap; font-size: .66rem; }
+.calendar-project-bar::after { content: ""; position: absolute; top: -1px; bottom: -1px; left: 50%; width: max(100%, 24px); transform: translateX(-50%); }
+.calendar-project-bar[data-hit-edge="start"]::after { left: 0; transform: none; }
+.calendar-project-bar[data-hit-edge="end"]::after { right: 0; left: auto; transform: none; }
+.calendar-project-bar span { display: block; overflow: hidden; padding: 0 6px; text-overflow: ellipsis; }
 .calendar-project-bar.provisional { text-decoration: underline dotted var(--color-provisional); text-underline-offset: 3px; }
 .calendar-project-bar.continuing { border-right: 3px dashed var(--color-project-owned-border); border-radius: var(--radius-bar) 0 0 var(--radius-bar); background-image: repeating-linear-gradient(135deg, transparent 0, transparent 7px, color-mix(in srgb, var(--color-text) 7%, transparent) 7px, color-mix(in srgb, var(--color-text) 7%, transparent) 10px); }
 .calendar-row-reason { position: absolute; left: 10px; right: 10px; top: 28px; color: var(--color-warning); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .calendar-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 6px 0 0; font-size: .75rem; color: var(--color-text-muted); }
 .calendar-legend-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--color-border-strong); border-radius: 2px; }
-.calendar-coverage-note { font-size: .75rem; color: var(--color-text-muted); margin: 5px 0 0; }
 .holiday-preset { margin-top: 14px; }
 .holiday-week-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 16px; }
 .holiday-week-list span { background: var(--color-warning-bg); color: var(--color-warning); padding: 6px 8px; border-radius: var(--radius-control); font-size: .75rem; }

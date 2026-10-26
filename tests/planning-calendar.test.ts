@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import type { PoolClient } from "pg";
-import { addCalendarDays, cycleAvailability, holidayWeeksForRange, mondayOf, planningWeeks, timelineSpan } from "../src/lib/planning-calendar";
+import { addCalendarDays, cycleAvailability, fractionalTimelineSpan, holidayWeeksForRange, mondayOf, planningWeeks, timelineSpan } from "../src/lib/planning-calendar";
 import { schemaSql } from "../src/lib/db";
 import { weeklyCapacitySchemaSql } from "../src/lib/weekly-capacity-schema";
 import { saveHolidayPreset, saveWeeklyAvailability } from "../src/lib/weekly-capacity-store";
@@ -26,6 +26,8 @@ test("calendar weeks group into months with stable Thanksgiving and Christmas de
   assert.equal(weeks.find((week) => week.start === "2026-11-23")!.availability, 0.5);
   assert.deepEqual(timelineSpan("2026-10-27", "2026-11-10", "2026-10-26", 4), { left: 1 / 28 * 100, width: 14 / 28 * 100 });
   assert.equal(timelineSpan("2027-01-01", "2027-02-01", "2026-10-26", 4), null);
+  const fractional = fractionalTimelineSpan("2026-10-26", "2026-11-16", "2026-11-23", 16 / 30, "2026-10-26", 26)!;
+  assert.ok(Math.abs(fractional.width / 100 * 26 - (3 + 16 / 30)) < 0.000001);
 });
 
 test("weekly availability is weekday-weighted across cycle boundaries and DST without double reduction", () => {

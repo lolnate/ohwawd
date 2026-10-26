@@ -15,6 +15,7 @@ import { getOutcomeLifecycles } from "./outcome-lifecycle";
 type BoardPackage = StoredRoadmapFields & { id: string; project_id: string; team_id: string; stream_id: string | null; capacity_outcome_id: string | null;
   selected: boolean; sequence_position: number | null; pause_reason: string; name: string; description: string; status: string; linear_priority: number | null;
   url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; external_blockers: string[];
+  remaining_scope: number | null;
   priority_rank?: number; must_include?: boolean; earliest_cycle?: number; preferred_cycle?: number; earliest_linear_cycle_id?: string; preferred_linear_cycle_id?: string };
 
 export async function assignPackagesToStream(client: Pick<PoolClient, "query">, streamId: string, packageIds: string[], outcomeId?: string): Promise<void> {
@@ -31,7 +32,7 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
     database.query<{ created_at: Date; roadmap_planning_migrated: boolean }>("SELECT created_at,roadmap_planning_migrated FROM workspace WHERE id=1"),
     database.query("SELECT last_imported_at,cycles_refreshed_at,GREATEST(last_imported_at,cycles_refreshed_at) AS source_at,team_id,team_name,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count FROM linear_connection WHERE workspace_id=1"),
     database.query<BoardPackage>(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.capacity_outcome_id,w.selected,w.sequence_position,w.pause_reason,w.roadmap_state,w.roadmap_conversion,
-      p.name,p.description,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`),
+      p.name,p.description,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers,p.remaining_scope::float FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`),
     database.query("SELECT id,name,position,wip_limit,allocation::float FROM stream WHERE active=true ORDER BY position"),
     database.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link"),
     database.query<{ id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null; stream_id: string | null; stream_position: number | null; created_at: Date }>("SELECT id,title,description,owner,success_signal,needed_by::text,stream_id,stream_position,created_at FROM outcome ORDER BY created_at DESC,id"),
@@ -75,8 +76,8 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
       const extra = extraScopes.rows.find((item) => item.package_id === row.id);
       return { id: row.id, projectId: row.project_id, name: row.name, status: row.status, streamId: row.stream_id,
          selected: row.selected, sequence: row.sequence_position, ownerOutcomeId: row.capacity_outcome_id, roadmapState: row.roadmap_state,
-        known: open.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0), openIssueCount: open.length,
-        unknownIssueIds: open.filter((issue) => issue.estimate === null).map((issue) => issue.linear_id),
+        known: row.remaining_scope ?? open.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0), openIssueCount: open.length,
+        unknownIssueIds: row.remaining_scope === null ? open.filter((issue) => issue.estimate === null).map((issue) => issue.linear_id) : [],
           crossTeam: row.cross_team, needsReview: row.needs_review, orderReview: sequenceConflicts.find((conflict) => workspace.rows[0].roadmap_planning_migrated ? conflict.ownerId === row.capacity_outcome_id : conflict.streamId === row.stream_id)?.message, externalBlockers: row.external_blockers,
          extraScope: extra ? { points: extra.points, issueIds: extra.issue_ids } : undefined };
     }),

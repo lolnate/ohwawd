@@ -5,14 +5,14 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T18:37:18Z
-updated_at: 2026-10-25T19:45:46Z
+updated_at: 2026-10-26T01:20:17Z
 parent: ohwawd-5q71
 blocked_by:
     - ohwawd-a5j9
 ---
 
 OpenSpec: implement-outcome-first-board.
-References: openspec/changes/implement-outcome-first-board/design.md (Decisions 2, 6, 8); openspec/changes/implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/implement-outcome-first-board/specs/outcome-sequencing/spec.md; openspec/changes/implement-outcome-first-board/tasks.md (1.1).
+References: openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md (Decisions 2, 6, 8); openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/outcome-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md (1.1).
 
 - [x] Add numbered idempotent schema migration for per-stream outcome rank, roadmap state/selected invariants and independent workspace-global lifecycle records/events keyed by stable outcome identity.
 - [x] Add shared conservative live/legacy conversion: preserve valid owners; infer only one unambiguous linked owner in the existing stream; otherwise excluded Needs assignment candidate with prior-stream review context; preserve deferred state, scope and links; seed ranks from previous displayed order.

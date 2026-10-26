@@ -19,7 +19,7 @@ export async function getWorkspaceState(client: Pick<PoolClient, "query">) {
       p.source_updated_at,w.id AS package_id,w.stream_id,w.capacity_outcome_id,w.selected,w.roadmap_state,w.roadmap_conversion,
       COUNT(i.linear_id)::integer AS issue_count,
       COUNT(i.linear_id) FILTER (WHERE i.estimate IS NULL AND i.state_type NOT IN ('completed','canceled'))::integer AS unestimated_open_issues,
-      COALESCE(SUM(i.estimate) FILTER (WHERE i.state_type NOT IN ('completed','canceled')),0)::float AS estimated_open_points
+      COALESCE(p.remaining_scope,SUM(i.estimate) FILTER (WHERE i.state_type NOT IN ('completed','canceled')),0)::float AS estimated_open_points
       FROM linear_project_cache p JOIN work_package w ON w.project_id=p.linear_id
       LEFT JOIN linear_issue_cache i ON i.project_id=p.linear_id GROUP BY p.linear_id,w.id ORDER BY p.name`),
     client.query<Outcome>("SELECT id,title,description,owner,success_signal,needed_by::text,stream_id,stream_position,created_at FROM outcome ORDER BY created_at DESC,id"),

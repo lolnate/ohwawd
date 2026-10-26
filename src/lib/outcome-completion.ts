@@ -8,9 +8,10 @@ export type CompletionProject = CompletionFacts & {
 };
 export type CompletionBlocker = { packageId: string | null; code: "no_required_scope" | "dependency_cycle" | "missing_project" | "unfinished_project" | "open_issues" | "remaining_extra_scope" | "source_review" | "cross_team" | "external_blockers"; message: string };
 export type CompletionEvidence = { ready: boolean; reasons: string[]; blockers: CompletionBlocker[]; directRequiredIds: string[]; requiredIds: string[]; scopeSignature: string; evidenceSignature: string };
+export type OutcomeLifecycleEvent = { action: "complete" | "reopen" | "review"; actor: string; lifecycleVersion: number; createdAt: string };
 export type OutcomeLifecycle = Omit<CompletionEvidence, "evidenceSignature"> & {
   outcomeId: string; completedAt: string | null; lifecycleVersion: number; completedScopeSignature: string | null;
-  reviewNeeded: boolean; reviewReasons: string[]; eligibilityToken: string;
+  reviewNeeded: boolean; reviewReasons: string[]; eligibilityToken: string; history: OutcomeLifecycleEvent[];
 };
 export const evidenceHash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 

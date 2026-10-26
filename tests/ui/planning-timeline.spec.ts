@@ -15,13 +15,13 @@ test("scoped bars and all shadows resize and align from the primary stream's cap
     for (const position of positions) expect(position).toEqual(positions[0]);
     return positions[0];
   };
-  await expect(primary).toHaveAttribute("title", /finishes at cycle end 2026-11-26/);
-  const initial = await geometry(); // 5 points fit the first cycle's 6-point primary budget.
+  await expect(primary).toHaveAttribute("title", /uses 83% of its final cycle ending 2026-11-26/);
+  const initial = await geometry(); // 5 points consume 5/6 of the holiday-weighted first cycle.
   await assignment.setDemand("a", 15);
   await page.reload();
-  await expect(primary).toHaveAttribute("title", /finishes at cycle end 2026-12-03/);
+  await expect(primary).toHaveAttribute("title", /uses 100% of its final cycle ending 2026-12-03/);
   const estimated = await geometry();
-  expect(estimated.pixels).toBeCloseTo(initial.pixels * 2, 0);
+  expect(estimated.pixels / initial.pixels).toBeCloseTo(12 / 5, 1);
   expect(estimated.left).toBe(initial.left);
   await primary.click();
   const drawer = page.getByRole("dialog", { name: "API foundation", exact: true });
@@ -30,14 +30,14 @@ test("scoped bars and all shadows resize and align from the primary stream's cap
   await expect(drawer.getByRole("status")).toContainText("extra scope saved");
   await page.keyboard.press("Escape");
   await expect(primary).toHaveClass(/provisional/);
-  await expect(primary).toHaveAttribute("title", /25 pts counted here.*finishes at cycle end 2026-12-10/);
+  await expect(primary).toHaveAttribute("title", /25 pts counted here.*uses 100% of its final cycle ending 2026-12-10/);
   const manual = await geometry();
-  expect(manual.pixels).toBeCloseTo(initial.pixels * 3, 0);
+  expect(manual.pixels / initial.pixels).toBeCloseTo(18 / 5, 1);
   await assignment.setCapacity(20, 0.25); // Other streams cannot supply the primary's missing budget.
   await page.reload();
-  await expect(primary).toHaveAttribute("title", /finishes at cycle end 2027-01-07/);
+  await expect(primary).toHaveAttribute("title", /uses 44% of its final cycle ending 2027-01-07/);
   const reduced = await geometry();
-  expect(reduced.pixels).toBeCloseTo(initial.pixels * 7, 0);
+  expect(reduced.pixels / initial.pixels).toBeCloseTo(116 / 15, 1);
   expect(reduced.left).toBe(initial.left);
   await assignment.setDemand("a", null);
   await page.reload();
@@ -62,7 +62,7 @@ test("continuing bars stop at the last simulated progress rather than unused cal
   // The first cycle still has some capacity; every date in later cycles has none.
   for (const week of ["2026-11-23", "2026-11-30", "2026-12-07"]) await assignment.setWeekAvailability(week, 0);
   await page.goto("/");
-  const bar = page.locator('[data-timeline-project="linear:a"].calendar-project-bar');
+  const bar = page.locator('[data-timeline-project="linear:a"].calendar-project-bar.counted-project');
   await expect(bar).toHaveClass(/continuing/);
   const width = await bar.evaluate((element) => element.getBoundingClientRect().width);
   expect(width).toBeCloseTo(80, 0); // One calendar week of progress, not all three simulated cycles.
@@ -138,9 +138,106 @@ test("partial forecasts stop at the planning horizon and successor rows explain 
   expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(trackBox!.x + trackBox!.width + 1);
   await expect(bar).toHaveAttribute("title", /continues beyond the simulated calendar/);
   const successor = page.getByRole("region", { name: /^Delivery forecast timeline/ }).locator('[data-timeline-project="linear:c"]');
-  await expect(successor).toContainText("After API foundation");
-  await expect(successor).toContainText("Waiting for API foundation");
+  await expect(successor).toContainText("ROLL");
   await expect(successor).not.toHaveClass(/calendar-project-bar/);
+  await expect(successor).toHaveAttribute("aria-label", /Rollout.*After API foundation/);
+  await expect(page.locator('[data-dependency-from="linear:a"][data-dependency-to="linear:c"]')).toHaveCount(0);
   await expect(core.locator(".timeline-week-band.projected-calendar").first()).toBeAttached();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
+});
+
+test("aggregate remaining scope draws a fractional sequential bar and connector without wait prose", async ({ page, assignment }) => {
+  await assignment.shareProjects(); await assignment.activateRoadmap(); await assignment.setRemainingScope("a", 106); await assignment.setDemand("a", null);
+  await assignment.setCapacity(150, .2); await assignment.setHolidaysEnabled(false); await page.goto("/");
+  const core = page.getByRole("region", { name: /^Core forecast timeline/ });
+  const owned = core.locator('[data-timeline-project="linear:a"].counted-project');
+  await expect(owned).toHaveAttribute("data-finish-fraction", String(16 / 30));
+  const delivery = page.getByRole("region", { name: /^Delivery forecast timeline/ });
+  const launch = delivery.locator('[data-timeline-outcome="00000000-0000-4000-8000-000000000001"]');
+  const reference = launch.locator('[data-timeline-project="linear:a"].shared-project');
+  const successor = launch.locator('[data-timeline-project="linear:c"]');
+  const weekWidth = await core.locator(".timeline-weeks th").first().evaluate((element) => element.getBoundingClientRect().width);
+  const [ownedBox, referenceBox, successorBox] = await Promise.all([owned.boundingBox(), reference.boundingBox(), successor.boundingBox()]);
+  expect(ownedBox!.width / weekWidth).toBeCloseTo(106 / 30, 1); expect(referenceBox!.width).toBeCloseTo(ownedBox!.width, 0);
+  expect(referenceBox!.x + referenceBox!.width).toBeLessThanOrEqual(successorBox!.x + 1);
+  await expect(launch.locator('[data-dependency-from="linear:a"][data-dependency-to="linear:c"]')).toHaveCount(1);
+  await expect(page.locator("[data-outcome-wait]")).toHaveCount(0); await expect(page.getByText(/^Waiting for /)).toHaveCount(0);
+  await reference.click(); await expect(page.getByRole("dialog", { name: "API foundation", exact: true })).toContainText("106 pts");
+  await page.keyboard.press("Escape");
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 }); await core.scrollIntoViewIfNeeded();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
+    if (process.env.ACCEPTANCE_SCREENSHOT_PREFIX) await page.screenshot({ path: `${process.env.ACCEPTANCE_SCREENSHOT_PREFIX}-capacity-timeline-${width}.png` });
+    await launch.scrollIntoViewIfNeeded();
+    if (process.env.ACCEPTANCE_SCREENSHOT_PREFIX) await page.screenshot({ path: `${process.env.ACCEPTANCE_SCREENSHOT_PREFIX}-dependency-timeline-${width}.png` });
+  }
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" }); await reference.focus(); await expect(reference).toBeFocused();
+  await expect(launch.locator('[data-dependency-from="linear:a"][data-dependency-to="linear:c"]')).not.toHaveCSS("stroke", "none");
+});
+
+test("tiny fractional bars retain an accurate visual span and a minimum pointer target", async ({ page, assignment }) => {
+  await assignment.setRemainingScope("a", .3); await assignment.setDemand("a", null); await assignment.setHolidaysEnabled(false); await page.goto("/");
+  const bar = page.getByRole("region", { name: /^Core forecast timeline/ }).locator('[data-timeline-project="linear:a"].counted-project');
+  const box = await bar.boundingBox();
+  expect(box!.width).toBeLessThan(4);
+  const target = await page.evaluate(({ x, y }) => (document.elementFromPoint(x, y)?.closest("button") as HTMLElement | null)?.dataset.timelineProject,
+    { x: box!.x + 10, y: box!.y + box!.height / 2 });
+  expect(target).toBe("linear:a");
+  await page.mouse.click(box!.x + 10, box!.y + box!.height / 2);
+  await expect(page.getByRole("dialog", { name: "API foundation", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  for (const edge of ["start", "end"] as const) {
+    await bar.evaluate((element, value) => {
+      const item = element as HTMLElement; item.dataset.hitEdge = value;
+      item.style.left = value === "start" ? "0" : "auto"; item.style.right = value === "end" ? "0" : "auto";
+    }, edge);
+    await bar.scrollIntoViewIfNeeded();
+    const [edgeBox, track] = await Promise.all([bar.boundingBox(), bar.locator("xpath=..").boundingBox()]);
+    expect(edge === "start" ? edgeBox!.x : edgeBox!.x + edgeBox!.width).toBeCloseTo(edge === "start" ? track!.x : track!.x + track!.width, 0);
+    const edgeTarget = await page.evaluate(({ x, y }) => (document.elementFromPoint(x, y)?.closest("button") as HTMLElement | null)?.dataset.timelineProject,
+      { x: edge === "start" ? edgeBox!.x + 23 : edgeBox!.x + edgeBox!.width - 23, y: edgeBox!.y + edgeBox!.height / 2 });
+    expect(edgeTarget, edge).toBe("linear:a");
+  }
+});
+
+test("immediate prerequisites reuse forecast geometry and connect locally without duplicate charge", async ({ page, assignment }, testInfo) => {
+  await assignment.seedDerivedChain(); await page.goto("/");
+  const launch = page.locator('[data-timeline-outcome="00000000-0000-4000-8000-000000000001"]');
+  const prerequisite = launch.locator('[data-timeline-project="linear:a"][data-derived-prerequisite="true"]');
+  const successor = launch.locator('[data-timeline-project="linear:c"]');
+  await expect(prerequisite).toContainText("Prerequisite"); await expect(prerequisite).toHaveAttribute("title", /Immediate prerequisite for Rollout.*Required for delivery/);
+  await expect(successor).toHaveAttribute("title", /After API foundation/);
+  const connector = launch.locator('[data-dependency-from="linear:a"][data-dependency-to="linear:c"]'); await expect(connector).toHaveCount(1);
+  await expect(launch.locator('[data-dependency-from="linear:b"][data-dependency-to="linear:a"]')).toHaveCount(1);
+  await expect(launch.locator('[data-timeline-project="linear:b"]')).toHaveAttribute("title", /Required for delivery/);
+  await expect(page.locator('[data-timeline-project="linear:a"].counted-project')).toHaveCount(1);
+  const region = page.getByRole("region", { name: /^Delivery forecast timeline/ });
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 }); await region.evaluate((element) => { element.scrollLeft = 0; });
+    const [priorBox, successorBox, connectorBox, trackBox] = await Promise.all([prerequisite.boundingBox(), successor.boundingBox(), connector.boundingBox(), launch.locator(".outcome-timeline-track").boundingBox()]);
+    const endpoints = await connector.evaluate((element) => { const path = element as SVGPathElement, matrix = path.getScreenCTM()!;
+      const point = (value: number) => { const item = path.getPointAtLength(value).matrixTransform(matrix); return { x: item.x, y: item.y }; };
+      return { start: point(0), end: point(path.getTotalLength()) }; });
+    expect(priorBox!.x + priorBox!.width).toBeLessThanOrEqual(successorBox!.x + 1);
+    expect(endpoints.start.x).toBeCloseTo(priorBox!.x + priorBox!.width, 0); expect(endpoints.end.x).toBeLessThanOrEqual(successorBox!.x + 1); expect(Math.abs(successorBox!.x - endpoints.end.x)).toBeLessThan(7);
+    expect(connectorBox!.y).toBeGreaterThanOrEqual(trackBox!.y); expect(connectorBox!.y + connectorBox!.height).toBeLessThanOrEqual(trackBox!.y + trackBox!.height);
+    await launch.scrollIntoViewIfNeeded(); await page.screenshot({ path: testInfo.outputPath(`dependency-timeline-${width}.png`) });
+  }
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" }); await prerequisite.focus(); await expect(prerequisite).toBeFocused();
+  await expect(connector).not.toHaveCSS("stroke", "none");
+  const beforeScroll = await Promise.all([prerequisite.boundingBox(), connector.boundingBox()]); await region.evaluate((element) => { element.scrollLeft = 160; });
+  const afterScroll = await Promise.all([prerequisite.boundingBox(), connector.boundingBox()]);
+  expect(afterScroll[0]!.x - beforeScroll[0]!.x).toBeCloseTo(afterScroll[1]!.x - beforeScroll[1]!.x, 0);
+  await prerequisite.click(); await expect(page.getByRole("dialog", { name: "API foundation", exact: true })).toBeVisible();
+});
+
+test("optional contributions and their derived prerequisites stay optional without a fabricated connector", async ({ page, assignment }) => {
+  await assignment.shareProjects(); await assignment.seedOptionalDerived(); await page.goto("/");
+  const foundation = page.locator('[data-timeline-outcome="00000000-0000-4000-8000-000000000002"]');
+  const contribution = foundation.locator('[data-timeline-project="linear:b"]');
+  const prerequisite = foundation.locator('[data-timeline-project="linear:d"][data-derived-prerequisite="true"]');
+  await expect(contribution).toHaveAttribute("aria-label", /Optional context for this outcome/);
+  await expect(prerequisite).toHaveAttribute("aria-label", /Prerequisite reference.*Optional context for this outcome/);
+  await expect(prerequisite).not.toHaveAttribute("aria-label", /Required for delivery/);
+  await expect(foundation.locator('[data-dependency-from="linear:d"][data-dependency-to="linear:b"]')).toHaveCount(0);
 });

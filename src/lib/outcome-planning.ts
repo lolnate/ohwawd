@@ -1,4 +1,6 @@
-export type OutcomePlacement = { id: string; title: string; stream_id?: string | null; stream_position?: number | null; created_at?: string | Date };
+import type { OutcomeLifecycle } from "./outcome-completion";
+
+export type OutcomePlacement = { id: string; title: string; stream_id?: string | null; stream_position?: number | null; created_at?: string | Date; lifecycle?: OutcomeLifecycle };
 export type OutcomeProjectLink = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
 export type OwnedProject = { id: string; project_id: string; name: string; stream_id: string | null; selected: boolean; capacity_outcome_id?: string | null; sequence_position?: number | null };
 
@@ -33,11 +35,21 @@ export function projectCodes(projects: { id: string; name: string }[]): Map<stri
   return new Map([...groups].flatMap(([code, ids]) => ids.map((id, index) => [id, ids.length > 1 ? `${code}-${index + 1}` : code] as [string, string])));
 }
 
-export function outcomeRows<P extends OwnedProject, O extends OutcomePlacement>(streamId: string, packages: P[], outcomes: O[], links: OutcomeProjectLink[]) {
+export function outcomeRows<P extends OwnedProject, O extends OutcomePlacement>(streamId: string, packages: P[], outcomes: O[], links: OutcomeProjectLink[], dependencies: { predecessorId: string; successorId: string }[] = []) {
   const order = (a: P, b: P) => (a.sequence_position ?? Infinity) - (b.sequence_position ?? Infinity) || a.id.localeCompare(b.id);
-  const rows: { id: string; title: string; outcome: O | null; projects: P[] }[] = outcomes.filter((outcome) => outcome.stream_id === streamId).sort((a, b) => (a.stream_position ?? Infinity) - (b.stream_position ?? Infinity)).map((outcome) => ({ id: outcome.id, title: outcome.title, outcome,
-    projects: packages.filter((item) => links.some((link) => link.outcome_id === outcome.id && link.project_id === item.project_id)).sort(order) }));
+  const rows: { id: string; title: string; outcome: O | null; projects: P[]; derivedProjectIds: string[]; unavailablePrerequisiteIds: string[]; immediateEdges: { predecessorId: string; successorId: string }[] }[] = outcomes.filter((outcome) => outcome.stream_id === streamId).sort((a, b) => (a.stream_position ?? Infinity) - (b.stream_position ?? Infinity)).map((outcome) => {
+    const direct = packages.filter((item) => links.some((link) => link.outcome_id === outcome.id && link.project_id === item.project_id));
+    const directIds = new Set(direct.map((item) => item.id));
+    const directEdges = dependencies.filter((edge) => directIds.has(edge.successorId)).filter((edge, index, all) => all.findIndex((item) => item.predecessorId === edge.predecessorId && item.successorId === edge.successorId) === index);
+    const derivedProjectIds = [...new Set(directEdges.map((edge) => edge.predecessorId).filter((id) => !directIds.has(id)))];
+    const derived = derivedProjectIds.map((id) => packages.find((item) => item.id === id)).filter((item): item is P => !!item);
+    const visibleIds = new Set([...directIds, ...derived.map((item) => item.id)]);
+    const immediateEdges = dependencies.filter((edge) => directIds.has(edge.successorId) || visibleIds.has(edge.predecessorId) && visibleIds.has(edge.successorId))
+      .filter((edge, index, all) => all.findIndex((item) => item.predecessorId === edge.predecessorId && item.successorId === edge.successorId) === index);
+    return { id: outcome.id, title: outcome.title, outcome, projects: [...direct, ...derived].sort(order), derivedProjectIds,
+      unavailablePrerequisiteIds: derivedProjectIds.filter((id) => !visibleIds.has(id)), immediateEdges };
+  });
   const other = packages.filter((item) => item.selected && item.stream_id === streamId && !outcomes.some((outcome) => outcome.id === item.capacity_outcome_id && outcome.stream_id === streamId)).sort(order);
-  if (other.length) rows.push({ id: `other:${streamId}`, title: "Other selected work", outcome: null, projects: other });
+  if (other.length) rows.push({ id: `other:${streamId}`, title: "Other selected work", outcome: null, projects: other, derivedProjectIds: [], unavailablePrerequisiteIds: [], immediateEdges: [] });
   return rows;
 }

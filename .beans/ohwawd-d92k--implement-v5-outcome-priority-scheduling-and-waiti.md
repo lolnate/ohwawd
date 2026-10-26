@@ -5,14 +5,14 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-10-25T18:37:50Z
-updated_at: 2026-10-25T21:01:00Z
+updated_at: 2026-10-26T01:20:17Z
 parent: ohwawd-5q71
 blocked_by:
     - ohwawd-sug7
 ---
 
 OpenSpec: implement-outcome-first-board.
-References: openspec/changes/implement-outcome-first-board/design.md (Decision 4); openspec/changes/implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/implement-outcome-first-board/tasks.md (3.1).
+References: openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md (Decision 4); openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/stream-sequencing/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/specs/project-assignment/spec.md; openspec/changes/archive/2026-10-25-implement-outcome-first-board/tasks.md (3.1).
 
 - [x] Feed outcome rank, exclusive ownership and roadmap state to the scheduler; share effective required-closure and actual-completion predicates for subsequent lifecycle work.
 - [x] Carry started work, then choose one eligible project per stream by required tier, owner rank, scoped sequence and stable ID; retain finish-to-start, capacity conservation, no borrowing and next-cycle unlocking.

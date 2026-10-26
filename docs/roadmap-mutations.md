@@ -1,6 +1,6 @@
 # Activated roadmap mutation contracts
 
-Task: **ohwawd-sug7**, under **ohwawd-5q71**. Source: `openspec/changes/implement-outcome-first-board/design.md`, Decisions 2–3, 7–8. Migration **7** activates the tested [foundation conversion](roadmap-migration.md) through the normal versioned migrator. No existing database was migrated during development verification.
+Task: **ohwawd-sug7**, under **ohwawd-5q71**. Source: `openspec/changes/archive/2026-10-25-implement-outcome-first-board/design.md`, Decisions 2–3, 7–8. Migration **7** activates the tested [foundation conversion](roadmap-migration.md) through the normal versioned migrator. No existing database was migrated during development verification.
 
 ## Atomicity and concurrency
 

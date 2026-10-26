@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { completionEvidence, evidenceHash, type CompletionEvidence, type CompletionProject, type OutcomeLifecycle } from "./outcome-completion";
+import { completionEvidence, evidenceHash, type CompletionEvidence, type CompletionProject, type OutcomeLifecycle, type OutcomeLifecycleEvent } from "./outcome-completion";
 import type { EffectiveEdge } from "./delivery-scope";
 import { HttpError } from "./security";
 type Client = Pick<PoolClient, "query">;
 type Marker = { outcome_id: string; completed_at: Date | string | null; lifecycle_version: string | number; scope_signature: string | null; review_needed: boolean; review_reasons: string[] };
+type EventRow = { outcome_id: string; action: OutcomeLifecycleEvent["action"]; actor: string; lifecycle_version: string | number; created_at: Date | string };
 const iso = (value: Date | string | null) => value ? new Date(value).toISOString() : null;
 
 async function lifecycleContext(client: Client) {
-  const [outcomes, projects, links, dependencies, markers] = await Promise.all([
+  const [outcomes, projects, links, dependencies, markers, events] = await Promise.all([
     client.query<{ id: string }>("SELECT id FROM outcome ORDER BY id"),
     client.query<CompletionProject>(`SELECT w.id,p.name,p.status,p.needs_review AS "needsReview",p.cross_team AS "crossTeam",p.external_blockers AS "externalBlockers",
       (SELECT COUNT(*)::integer FROM linear_issue_cache i WHERE i.project_id=w.project_id AND i.state_type NOT IN ('completed','canceled')) AS "openIssueCount",
@@ -19,12 +20,15 @@ async function lifecycleContext(client: Client) {
     client.query<{ outcome_id: string; project_id: string; requirement: "minimum" | "optional" }>("SELECT outcome_id,project_id,requirement FROM outcome_project_link ORDER BY outcome_id,project_id"),
     client.query<EffectiveEdge>('SELECT predecessor_id AS "predecessorId",successor_id AS "successorId",waived FROM package_dependency ORDER BY predecessor_id,successor_id,source'),
     client.query<Marker>("SELECT outcome_id,completed_at,lifecycle_version,scope_signature,review_needed,review_reasons FROM outcome_lifecycle ORDER BY outcome_id"),
+    client.query<EventRow>("SELECT outcome_id,action,actor,lifecycle_version,created_at FROM outcome_lifecycle_event ORDER BY outcome_id,lifecycle_version"),
   ]);
   const source = new Map(projects.rows.map((item) => [item.id, item]));
   const saved = new Map(markers.rows.map((item) => [item.outcome_id, item]));
   const byOutcome = new Map<string, { projectId: string; requirement: "minimum" | "optional" }[]>();
   for (const link of links.rows) byOutcome.set(link.outcome_id, [...(byOutcome.get(link.outcome_id) ?? []), { projectId: link.project_id, requirement: link.requirement }]);
-  return { ids: outcomes.rows.map((item) => item.id), saved,
+  const history = new Map<string, OutcomeLifecycleEvent[]>();
+  for (const event of events.rows) history.set(event.outcome_id, [...(history.get(event.outcome_id) ?? []), { action: event.action, actor: event.actor, lifecycleVersion: Number(event.lifecycle_version), createdAt: new Date(event.created_at).toISOString() }]);
+  return { ids: outcomes.rows.map((item) => item.id), saved, history,
     evidence: (id: string) => completionEvidence(byOutcome.get(id) ?? [], source, dependencies.rows) };
 }
 
@@ -33,12 +37,12 @@ function reviewReasons(evidence: CompletionEvidence, marker?: Marker) {
   return [...new Set([...(marker.review_reasons ?? []), ...(marker.scope_signature !== evidence.scopeSignature ? ["Required delivery scope changed after completion."] : []), ...evidence.reasons])];
 }
 
-function lifecycle(id: string, evidence: CompletionEvidence, marker?: Marker): OutcomeLifecycle {
+function lifecycle(id: string, evidence: CompletionEvidence, marker?: Marker, history: OutcomeLifecycleEvent[] = []): OutcomeLifecycle {
   const completedAt = iso(marker?.completed_at ?? null), lifecycleVersion = Number(marker?.lifecycle_version ?? 0);
   const reasons = reviewReasons(evidence, marker);
   const { evidenceSignature, ...publicEvidence } = evidence;
   return { ...publicEvidence, outcomeId: id, completedAt, lifecycleVersion, completedScopeSignature: marker?.scope_signature ?? null,
-    reviewNeeded: !!completedAt && (!!marker?.review_needed || reasons.length > 0), reviewReasons: reasons,
+    reviewNeeded: !!completedAt && (!!marker?.review_needed || reasons.length > 0), reviewReasons: reasons, history,
     eligibilityToken: evidenceHash({ outcomeId: id, scopeSignature: evidence.scopeSignature, evidenceSignature, lifecycleVersion,
       completedAt, completedScopeSignature: marker?.scope_signature ?? null, reviewNeeded: marker?.review_needed ?? false }) };
 }
@@ -47,7 +51,7 @@ function lifecycle(id: string, evidence: CompletionEvidence, marker?: Marker): O
  * merely because a workspace business-history record still exists. */
 export async function getOutcomeLifecycles(client: Client): Promise<Map<string, OutcomeLifecycle>> {
   const context = await lifecycleContext(client);
-  return new Map(context.ids.map((id) => [id, lifecycle(id, context.evidence(id), context.saved.get(id))]));
+  return new Map(context.ids.map((id) => [id, lifecycle(id, context.evidence(id), context.saved.get(id), context.history.get(id))]));
 }
 
 /** Call after the final relevant write, inside its workspace-locked transaction.
@@ -80,7 +84,7 @@ export async function saveOutcomeCompletion(client: Client, id: string, input: u
   await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
   const context = await lifecycleContext(client);
   if (!context.ids.includes(id)) throw new HttpError(404, "Outcome not found.");
-  const evidence = context.evidence(id), marker = context.saved.get(id), current = lifecycle(id, evidence, marker);
+  const evidence = context.evidence(id), marker = context.saved.get(id), current = lifecycle(id, evidence, marker, context.history.get(id));
   if (body.expectedLifecycleVersion !== current.lifecycleVersion || typeof body.eligibilityToken !== "string" || body.eligibilityToken !== current.eligibilityToken) throw new HttpError(409, "Completion evidence or lifecycle state changed. Refresh the outcome and review the current evidence.", { code: "OUTCOME_EVIDENCE_CONFLICT", lifecycle: current });
   if (body.completed && current.completedAt) throw new HttpError(409, "This outcome is already completed. Reopen it before recording a new completion.", { code: "OUTCOME_ALREADY_COMPLETED", lifecycle: current });
   if (!body.completed && !current.completedAt) throw new HttpError(409, "This outcome is already open.", { code: "OUTCOME_ALREADY_OPEN", lifecycle: current });

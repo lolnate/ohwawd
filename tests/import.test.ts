@@ -20,6 +20,7 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
   const input = (projects: ImportedProject[]) => ({ encryptedKey: "ciphertext", viewer: { id: "viewer", name: "Owner" }, team: { id: "team-a", name: "A" }, projects });
   const client = db as unknown as PoolClient;
   const initial = project("one", "Original");
+  initial.remainingScope = 106;
   initial.dependencies = ["two"];
   const initialResult = await saveImport(client, { ...input([initial, project("two", "Second")]), cycles: [{ id: "cycle-1", teamId: "team-a", number: 44, name: null, startsAt: new Date("2026-10-01T00:00:00Z"), endsAt: new Date("2026-10-15T00:00:00Z"), completedAt: new Date("2026-10-15T00:00:00Z"), cycleDays: 14, completedPoints: 21 },
     { id: "cycle-2", teamId: "team-a", number: 45, name: null, startsAt: new Date("2026-10-19T00:00:00Z"), endsAt: new Date("2026-10-26T00:00:00Z"), completedAt: null, cycleDays: 7, completedPoints: null }],
@@ -38,10 +39,11 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
   await db.query("UPDATE work_package SET stream_id='stream-a',priority_rank=7 WHERE project_id='one'");
   await db.query("UPDATE linear_project_cache SET in_scope=false WHERE linear_id='one'");
   const changed = project("one", "Renamed");
+  changed.remainingScope = 90;
   changed.issues[0].estimate = 3;
   const changedResult = await saveImport(client, input([changed]));
   assert.deepEqual(changedResult.report.updatedProjects, [{
-    id: "one", name: "Renamed", previousName: "Original", changes: ["name", "issues", "dependencies"],
+    id: "one", name: "Renamed", previousName: "Original", changes: ["name", "remaining scope", "issues", "dependencies"],
   }]);
   assert.deepEqual(changedResult.report.newlyMissingProjects, [{ id: "two", name: "Second", changes: ["missing from Linear"] }]);
   assert.equal(changedResult.report.unchangedProjects, 0);
@@ -57,6 +59,7 @@ test("repeat import upserts by Linear ID and preserves shared outcome links", as
   assert.equal((await db.query("SELECT * FROM outcome_project_link WHERE project_id='one'")).rows.length, 2);
   assert.equal((await db.query("SELECT * FROM package_dependency WHERE source='linear'")).rows.length, 0);
   assert.equal((await db.query<{ estimate: string }>("SELECT estimate FROM linear_issue_cache WHERE project_id='one'")).rows[0].estimate, "3");
+  assert.equal((await db.query<{ remaining_scope: string }>("SELECT remaining_scope FROM linear_project_cache WHERE linear_id='one'")).rows[0].remaining_scope, "90");
   const unchangedResult = await saveImport(client, input([changed]));
   assert.equal(unchangedResult.report.unchangedProjects, 1);
   assert.equal(unchangedResult.report.stillMissingProjects, 1);
