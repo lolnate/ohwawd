@@ -18,6 +18,7 @@ import "./outcome-sequencing.css";
 import "./workspace-settings.css";
 import "./outcome-catalog.css";
 import "./outcome-workspace.css";
+import "./roadmap-board.css";
 
 export const metadata: Metadata = { title: "Oh, WAWD!", description: "Outcomes and Linear work, connected." };
 

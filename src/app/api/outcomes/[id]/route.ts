@@ -1,5 +1,6 @@
 import { transaction } from "@/lib/db";
 import { HttpError, requireOwner, requireSameOrigin, responseError, validDateString } from "@/lib/security";
+import { deleteOutcome } from "@/lib/roadmap-mutations";
 
 function outcomeFields(body: Record<string, unknown>) {
   const title = typeof body.title === "string" ? body.title.trim() : "";
@@ -42,11 +43,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     await requireSameOrigin(request);
     const { id } = await context.params;
     validId(id);
-    await transaction(async (client) => {
-      await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
-      const result = await client.query("DELETE FROM outcome WHERE id=$1", [id]);
-      if (!result.rowCount) throw new HttpError(404, "Outcome not found.");
-    });
-    return Response.json({ deleted: true });
+    const body = await request.json().catch(() => null);
+    return Response.json(await transaction((client) => deleteOutcome(client, id, body?.planningToken)));
   } catch (error) { return responseError(error); }
 }

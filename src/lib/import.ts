@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type { ImportedCycle, ImportedProject, LinearCycleSettings } from "./linear";
 import { HttpError } from "./security";
+import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
 
 export type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 export type ImportResult = {
@@ -151,6 +152,7 @@ export async function saveImport(
       settings?.timezone ?? "America/New_York", settings?.cyclesEnabled ?? false, settings?.cycleDuration ?? null,
       settings?.cycleStartDay ?? null, settings?.cycleCooldownTime ?? null, settings?.upcomingCycleCount ?? null, saveCycles]);
   if (saveCycles && settings?.timezone) await client.query("UPDATE workspace SET timezone=$1 WHERE id=1", [settings.timezone]);
+  await reconcileOutcomeCompletions(client, "Linear sync");
   return { imported: input.projects.length, crossTeam: input.projects.filter((project) => project.crossTeam).length, report };
 }
 

@@ -1,4 +1,4 @@
-export type OutcomePlacement = { id: string; title: string; stream_id?: string | null; created_at?: string | Date };
+export type OutcomePlacement = { id: string; title: string; stream_id?: string | null; stream_position?: number | null; created_at?: string | Date };
 export type OutcomeProjectLink = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
 export type OwnedProject = { id: string; project_id: string; name: string; stream_id: string | null; selected: boolean; capacity_outcome_id?: string | null; sequence_position?: number | null };
 
@@ -35,7 +35,7 @@ export function projectCodes(projects: { id: string; name: string }[]): Map<stri
 
 export function outcomeRows<P extends OwnedProject, O extends OutcomePlacement>(streamId: string, packages: P[], outcomes: O[], links: OutcomeProjectLink[]) {
   const order = (a: P, b: P) => (a.sequence_position ?? Infinity) - (b.sequence_position ?? Infinity) || a.id.localeCompare(b.id);
-  const rows: { id: string; title: string; outcome: O | null; projects: P[] }[] = outcomes.filter((outcome) => outcome.stream_id === streamId).map((outcome) => ({ id: outcome.id, title: outcome.title, outcome,
+  const rows: { id: string; title: string; outcome: O | null; projects: P[] }[] = outcomes.filter((outcome) => outcome.stream_id === streamId).sort((a, b) => (a.stream_position ?? Infinity) - (b.stream_position ?? Infinity)).map((outcome) => ({ id: outcome.id, title: outcome.title, outcome,
     projects: packages.filter((item) => links.some((link) => link.outcome_id === outcome.id && link.project_id === item.project_id)).sort(order) }));
   const other = packages.filter((item) => item.selected && item.stream_id === streamId && !outcomes.some((outcome) => outcome.id === item.capacity_outcome_id && outcome.stream_id === streamId)).sort(order);
   if (other.length) rows.push({ id: `other:${streamId}`, title: "Other selected work", outcome: null, projects: other });

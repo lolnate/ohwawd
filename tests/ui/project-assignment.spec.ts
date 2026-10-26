@@ -75,7 +75,7 @@ test("stale drop reloads saved order and retains a usable focused project", asyn
   assignment.invalidateNextMove();
   const transfer = await page.evaluateHandle(() => { const data = new DataTransfer(); data.setData("text/plain", "linear:a"); return data; });
   await page.locator('[data-drop-stream="core"][data-before="linear:b"]').dispatchEvent("drop", { dataTransfer: transfer });
-  await expect(page.locator("#sequencing-board").getByRole("alert")).toContainText("sequence or dependencies changed");
+  await expect(page.locator("#sequencing-board").getByRole("alert")).toContainText("project sequence, outcome priority or dependencies changed");
   await expect(page.getByRole("list", { name: "Core project sequence" }).locator("article").first()).toContainText("Web experience");
   await expect(page.getByRole("button", { name: "Drag API foundation", exact: true })).toBeFocused();
 });

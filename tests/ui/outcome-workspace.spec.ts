@@ -294,6 +294,41 @@ test("successful external refresh closes removed outcomes while failed refresh r
   expect((await assignment.board()).outcomes[0].owner).toBe("Saved owner");
 });
 
+test("stale planning tokens retain both section drafts and explicit refresh allows reviewed retry", async ({ page, assignment }) => {
+  await assignment.activateRoadmap();
+  const dialog = await open(page);
+  await dialog.getByRole("button", { name: "Edit details", exact: true }).click();
+  await dialog.getByLabel("Notes").fill("Keep this metadata draft");
+  await dialog.getByRole("button", { name: "Projects", exact: true }).click();
+  await dialog.getByRole("button", { name: "Manage projects" }).click();
+  await dialog.getByLabel("Rollout requirement").selectOption("optional");
+  await assignment.setDemand("c", 7);
+  await dialog.getByRole("button", { name: "Save links", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("planning context changed");
+  await expect(dialog.getByLabel("Rollout requirement")).toHaveValue("optional");
+  await dialog.getByRole("button", { name: "Review latest planning context" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Workspace refreshed." })).toBeVisible();
+  await dialog.getByRole("button", { name: "Save links", exact: true }).click();
+  await expect(dialog).toContainText("Links saved.");
+  await dialog.getByRole("button", { name: /Details/ }).click();
+  await expect(dialog.getByLabel("Notes")).toHaveValue("Keep this metadata draft");
+  expect((await assignment.board()).links[0].requirement).toBe("optional");
+});
+
+test("removing an owning link reports excluded candidate work in the shared sidebar workflow", async ({ page, assignment }) => {
+  await assignment.activateRoadmap();
+  const dialog = await open(page);
+  await dialog.getByRole("button", { name: "Projects", exact: true }).click();
+  await dialog.getByRole("button", { name: "Manage projects" }).click();
+  await dialog.getByRole("checkbox", { name: /Rollout/ }).uncheck();
+  await dialog.getByRole("button", { name: "Save links", exact: true }).click();
+  await expect(dialog).toContainText("Links saved.");
+  await dialog.getByRole("button", { name: "Close outcome" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Needs assignment: Rollout" })).toContainText("future demand is excluded");
+  const project = (await assignment.board()).packages.find((item) => item.project_id === "c")!;
+  expect([project.roadmap_state, project.selected, project.capacity_outcome_id, project.stream_id]).toEqual(["candidate", false, null, null]);
+});
+
 for (const width of [1440, 768, 390]) {
   test(`sidebar long-content visual and keyboard walkthrough at ${width}px`, async ({ page, assignment }, testInfo) => {
     await assignment.seedCatalog();

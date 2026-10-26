@@ -3,8 +3,9 @@
 title: Integrate manual completion into the unified outcome sidebar
 status: todo
 type: task
+priority: normal
 created_at: 2026-10-25T18:39:05Z
-updated_at: 2026-10-25T18:39:05Z
+updated_at: 2026-10-25T21:42:31Z
 parent: ohwawd-5q71
 blocked_by:
     - ohwawd-0lzq
@@ -21,3 +22,7 @@ References: openspec/changes/implement-outcome-first-board/design.md (Decisions 
 - [ ] Verify actually-ready versus forecast-only, optional/empty scope, reopen and sticky review after source/link changes, rejected/stale proof, saved-refresh-failed retry, dismissed completion with newer opening, dirty sections and Board opener fallback in browser tests; retain existing catalog/sidebar acceptance coverage, update product/convention docs and run typecheck plus affected tests.
 
 Completion: manual completion is an explicit business action coordinated with the shipped outcome sidebar, never a global Save or another overlay.
+
+## Completion-service handoff
+
+PUT /api/outcomes/[id]/completion accepts only completed, expectedLifecycleVersion and eligibilityToken, returning {saved:true,lifecycle}. State/Board outcome.lifecycle exposes ready/reasons/blockers, direct/effective required IDs, current/stored scope signatures, completedAt/version, sticky review context and token. Link/create accepted responses also include lifecycle. Apply these accepted snapshots without letting captured metadata or another section overwrite newer lifecycle evidence after refresh failure. ready is actual-work eligibility, not auto-completion; completed outcomes require explicit reopen before another completion. 409 responses provide current lifecycle evidence; 422 is current proof but unfinished/reconciliation-needed work. Reuse captured-submission serialization/generation/focus/refresh-only behavior; no new overlay. docs/outcome-lifecycle.md and tests/ui/outcome-completion-api.spec.ts document and exercise the contract.

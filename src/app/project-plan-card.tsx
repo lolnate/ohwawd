@@ -4,14 +4,18 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { PackageForecast } from "@/lib/forecast";
 import { linearPriorityLabel, type ExtraScope, type ScopeReadiness } from "@/lib/project-scope";
 import { placementError, type QueueState, type Placement } from "@/lib/sequencing";
+import type { StoredRoadmapFields } from "@/lib/roadmap-planning";
+import type { BoardOutcome } from "./board";
+import ProjectRoadmapControls from "./project-roadmap-controls";
 
-export type BoardProject = { id: string; project_id: string; name: string; status: string; url: string; stream_id: string | null;
+export type BoardProject = Partial<StoredRoadmapFields> & { id: string; project_id: string; name: string; status: string; url: string; stream_id: string | null;
   capacity_outcome_id?: string | null; description?: string;
   selected: boolean; sequence_position: number | null; linear_priority: number | null; pause_reason: string;
   cross_team: boolean; needs_review: boolean; in_scope: boolean };
 
 type Props = { item: BoardProject; streams: { id: string; name: string }[]; sequencing: QueueState; projection?: PackageForecast;
   embedded?: boolean;
+  outcomes?: BoardOutcome[]; links?: { outcome_id: string; project_id: string }[]; onOpenOutcome?: (id: string, section?: "details" | "projects") => void;
   extra?: ExtraScope; readiness?: ScopeReadiness; unknown: string[]; busy: boolean; cycleText: (index: number | null | undefined) => string;
   resolution: { label: string; run: () => void }; onOpenProjects?: () => void;
   onSave: (change: Record<string, unknown>, message: string) => Promise<boolean>;
@@ -20,7 +24,7 @@ type Props = { item: BoardProject; streams: { id: string; name: string }[]; sequ
 const fmt = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 
 export default function ProjectPlanCard({ item, streams, sequencing, projection, extra, readiness, unknown, busy, cycleText, resolution, embedded = false,
-  onOpenProjects, onSave, onMove, onDragStart, onDragEnd }: Props) {
+  onOpenProjects, onSave, onMove, onDragStart, onDragEnd, outcomes = [], links = [], onOpenOutcome }: Props) {
   const [location, setLocation] = useState(!item.selected ? "deferred" : item.stream_id || "");
   const [beforeId, setBeforeId] = useState("auto");
   const [reason, setReason] = useState(item.pause_reason);
@@ -32,7 +36,7 @@ export default function ProjectPlanCard({ item, streams, sequencing, projection,
   const placement: Placement = { packageId: item.id, streamId: location && location !== "deferred" ? location : null, selected: location !== "deferred",
     ...(location && location !== "deferred" && beforeId !== "auto" ? { beforeId: beforeId || null } : {}) };
   const error = placementError(sequencing, placement);
-  const lane = sequencing.packages.filter((candidate) => candidate.selected && candidate.streamId === item.stream_id).sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || a.id.localeCompare(b.id));
+  const lane = sequencing.packages.filter((candidate) => candidate.selected && candidate.streamId === item.stream_id && (!sequencing.outcomeScoped || candidate.ownerId === item.capacity_outcome_id)).sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || a.id.localeCompare(b.id));
   const index = lane.findIndex((candidate) => candidate.id === item.id);
   const up: Placement = { packageId: item.id, streamId: item.stream_id, selected: true, beforeId: lane[index - 1]?.id };
   const down: Placement = { packageId: item.id, streamId: item.stream_id, selected: true, beforeId: lane[index + 2]?.id ?? null };
@@ -71,7 +75,7 @@ export default function ProjectPlanCard({ item, streams, sequencing, projection,
     }}>Review scope</button>}
     {(item.cross_team || item.needs_review) && <div className="blocker-line"><p className="warning">{item.cross_team ? "Cross-team work needs decomposition." : "Missing from latest import."}</p><button className="text-button" onClick={onOpenProjects}>Review source</button></div>}
     <details className="project-plan-details" ref={detailsRef} open={embedded || undefined}><summary>Plan this project</summary>
-      <form onSubmit={(event) => { event.preventDefault(); void onMove(placement, reason); }}>
+      {sequencing.outcomeScoped ? <ProjectRoadmapControls item={item} outcomes={outcomes} streams={streams} links={links} sequencing={sequencing} busy={busy} onSave={onSave} onOpenOutcome={onOpenOutcome} /> : <form onSubmit={(event) => { event.preventDefault(); void onMove(placement, reason); }}>
         <div className="board-fields"><label>Location<select aria-label="Location" value={location} onChange={(event) => { setLocation(event.target.value); setBeforeId("auto"); }}>
           <option value="">Needs assignment</option>{streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}<option value="deferred">Deferred</option>
         </select></label>
@@ -84,7 +88,7 @@ export default function ProjectPlanCard({ item, streams, sequencing, projection,
         {location === "deferred" && <label>Pause rationale (optional)<input value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} /></label>}
         {error && <p className="warning">{error}</p>}
         <button disabled={busy || !!error}>Move / save placement</button>
-      </form>
+      </form>}
       <form className="extra-scope-editor" onSubmit={(event) => { event.preventDefault(); void onSave({ type: "extraScope", packageId: item.id, points: points === "" ? 0 : Number(points), notes }, `${item.name} extra scope saved.`); }}>
         <h4>Extra scope</h4><p>Remaining work beyond estimated Linear issues. A positive budget covers the current unestimated issues and keeps the forecast provisional.</p>
         <div className="board-fields"><label>Extra scope points<input type="number" min="0" max="100000" step="0.001" value={points} onChange={(event) => setPoints(event.target.value)} placeholder="No extra scope" /></label>

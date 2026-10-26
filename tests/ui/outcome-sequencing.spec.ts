@@ -122,7 +122,7 @@ test("outcomes can be unassigned and reassigned without stealing other capacity 
   const group = page.locator("#stream-work-core .assignment-group").filter({ has: page.locator("strong").filter({ hasText: /^Foundation$/ }) });
   await group.getByRole("button", { name: "Unassign outcome", exact: true }).click();
   await expect(page.locator(`[data-timeline-outcome="${foundation}"]`)).toHaveCount(0);
-  await expect(page.locator('[data-timeline-outcome="other:core"]')).toContainText("8 pts counted here");
+  await expect(page.locator('[data-timeline-outcome="other:core"]')).not.toContainText("pts counted here");
   await page.getByLabel("Assign Foundation to stream", { exact: true }).selectOption("delivery");
   await expect(page.locator(`#stream-delivery [data-timeline-outcome="${foundation}"]`)).toBeVisible();
   const board = await assignment.board();

@@ -64,7 +64,7 @@ test("server rejects stale placement tokens and a failed bulk plan writes no par
     const client = database as unknown as PoolClient;
     const token = sequenceToken(await sequencingState(client));
     await placeProjects(client, [{ packageId: "c", streamId: "one", selected: true, beforeId: "a" }], token);
-    await assert.rejects(() => placeProjects(client, [{ packageId: "a", streamId: "two", selected: true }], token), /sequence or dependencies changed/);
+    await assert.rejects(() => placeProjects(client, [{ packageId: "a", streamId: "two", selected: true }], token), /project sequence, outcome priority or dependencies changed/);
     const before = await sequencingState(client);
     await assert.rejects(() => placeProjects(client, [{ packageId: "a", streamId: "two", selected: true }, { packageId: "missing", streamId: "two", selected: true }]), /Project not found/);
     assert.deepEqual(await sequencingState(client), before);

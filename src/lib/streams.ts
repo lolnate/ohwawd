@@ -2,16 +2,19 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getBoard } from "./board";
 import { ensureSchema, db } from "./db";
-import { compareSnapshots, stablePreviewBoard } from "./scenarios";
+import { compareSnapshots, stablePreviewBoard, captureScenarioBoard, type ScenarioSnapshot } from "./scenarios";
 import { HttpError } from "./security";
 import { placeProjects, sequencingState } from "./sequence-store";
+import { roadmapActive } from "./planning-token";
+import { placeRoadmapOutcome } from "./roadmap-mutations";
+import { assertRoadmapInvariants } from "./roadmap-store";
 
 type StreamClient = Pick<PoolClient, "query">;
 type StreamRow = {
   id: string; name: string; position: number; wip_limit: number; allocation: number;
   active: boolean; retired_at: Date | null; retirement_reason: string; package_count?: number;
 };
-type ActiveDraft = { id: string; edit_version: string | number; draft_source_at: Date };
+type ActiveDraft = { id: string; edit_version: string | number; draft_source_at: Date; draft_snapshot: ScenarioSnapshot };
 type Migration = { packageId: string; targetStreamId: string | null };
 
 async function useDatabase(client?: StreamClient): Promise<StreamClient> {
@@ -42,7 +45,7 @@ function canonicalFingerprint(value: unknown): string {
 }
 
 async function activeDraft(database: StreamClient, lock = false): Promise<ActiveDraft | null> {
-  const result = await database.query<ActiveDraft>(`SELECT scenario.id,scenario.edit_version,scenario.draft_source_at
+  const result = await database.query<ActiveDraft>(`SELECT scenario.id,scenario.edit_version,scenario.draft_source_at,scenario.draft_snapshot
     FROM workspace_scenario_state state JOIN scenario ON scenario.id=state.active_scenario_id
     WHERE state.workspace_id=1${lock ? " FOR UPDATE OF scenario" : ""}`);
   return result.rows[0] ?? null;
@@ -67,9 +70,11 @@ async function requireDraftVersion(database: StreamClient, expectedVersion: unkn
 async function saveActiveDraft(database: StreamClient, draft: ActiveDraft | null): Promise<number | null> {
   if (!draft) return null;
   const board = await getBoard(database);
+  // A stream edit is not permission to silently convert a legacy saved draft.
+  if (board.calculationVersion === "v5" && draft.draft_snapshot.calculationVersion !== "v5") return Number(draft.edit_version);
   const updated = await database.query<{ edit_version: string | number }>(`UPDATE scenario SET draft_snapshot=$3::jsonb,
     edit_version=edit_version+1,updated_at=now() WHERE id=$1 AND edit_version=$2 RETURNING edit_version`,
-  [draft.id, draft.edit_version, JSON.stringify(board)]);
+  [draft.id, draft.edit_version, JSON.stringify(captureScenarioBoard(board, draft.draft_snapshot))]);
   if (!updated.rowCount) throw new HttpError(409, "The active scenario changed during the stream update.", { code: "EDIT_VERSION_CONFLICT" });
   return Number(updated.rows[0].edit_version);
 }
@@ -109,7 +114,7 @@ function parseMigrations(value: unknown, packages: { id: string }[], activeIds: 
   return migrations;
 }
 
-async function retirementState(database: StreamClient, id: string, migrationInput: unknown) {
+async function retirementState(database: StreamClient, id: string, migrationInput: unknown, targetStreamId?: unknown) {
   const target = await database.query<StreamRow>(`SELECT id,name,position,wip_limit,allocation::float,active,retired_at,retirement_reason
     FROM stream WHERE id=$1`, [id]);
   const retiring = target.rows[0];
@@ -120,9 +125,12 @@ async function retirementState(database: StreamClient, id: string, migrationInpu
     FROM work_package package JOIN linear_project_cache project ON project.linear_id=package.project_id
     WHERE package.stream_id=$1 ORDER BY project.name`, [id])).rows;
   const activeIds = new Set(activeStreams.map((item) => item.id));
+  if (targetStreamId !== undefined && targetStreamId !== null && (typeof targetStreamId !== "string" || targetStreamId === id || !activeIds.has(targetStreamId))) throw new HttpError(400, "Choose an active retirement destination.");
+  const retirementTarget = targetStreamId as string | null | undefined;
   const migrations = parseMigrations(migrationInput === undefined
-    ? packages.map((item) => ({ packageId: item.id, targetStreamId: null }))
+    ? packages.map((item) => ({ packageId: item.id, targetStreamId: retirementTarget ?? null }))
     : migrationInput, packages, activeIds, id);
+  if (retirementTarget !== undefined && migrations.some((item) => item.targetStreamId !== retirementTarget)) throw new HttpError(400, "Package destinations must match the selected retirement destination.");
   const packageIds = packages.map((item) => item.id);
   const projectIds = packages.map((item) => item.project_id);
   const outcomes = (await database.query<{ id: string; title: string }>(`SELECT DISTINCT outcome.id,outcome.title FROM outcome
@@ -139,24 +147,38 @@ async function retirementState(database: StreamClient, id: string, migrationInpu
   const draftReferences = scenarios.rows.filter((item) => references(item.draft_snapshot)).map((item) => ({ id: item.id, name: item.name, active: item.id === draft?.id }));
   const revisionReferences = revisions.rows.filter((item) => references(item.snapshot)).map((item) => ({ id: item.id, name: item.scenario_name, revisionNumber: item.revision_number }));
   const beforeBoard = await getBoard(database);
-  const tokenState = { board: stablePreviewBoard(beforeBoard), migrations, draftReferences, revisionReferences,
+  const tokenState = { board: stablePreviewBoard(beforeBoard), migrations, retirementTarget, draftReferences, revisionReferences,
     activeDraft: draft && { id: draft.id, editVersion: Number(draft.edit_version) } };
-  return { retiring, activeStreams, packages, migrations, outcomes, dependencies, draftReferences, revisionReferences,
+  return { retiring, activeStreams, packages, migrations, retirementTarget, outcomes, dependencies, draftReferences, revisionReferences,
     previewToken: canonicalFingerprint(tokenState), beforeBoard };
 }
 
-async function applyRetirementRows(database: StreamClient, id: string, migrations: Migration[], reason: string): Promise<void> {
+async function applyRetirementRows(database: StreamClient, id: string, migrations: Migration[], reason: string, retirementTarget?: string | null): Promise<void> {
   const state = await sequencingState(database);
   for (const migration of migrations) {
     if (state.packages.find((item) => item.id === migration.packageId)?.streamId !== id) throw new HttpError(409, "A package assignment changed after the preview. Preview retirement again.", { code: "STREAM_PREVIEW_STALE" });
   }
-  await placeProjects(database, migrations.map((migration) => ({ packageId: migration.packageId, streamId: migration.targetStreamId,
+  if (await roadmapActive(database)) {
+    const outcomes = (await database.query<{ id: string }>("SELECT id FROM outcome WHERE stream_id=$1 ORDER BY stream_position,id", [id])).rows;
+    const ownership = (await database.query<{ id: string; capacity_outcome_id: string | null }>("SELECT id,capacity_outcome_id FROM work_package WHERE stream_id=$1", [id])).rows;
+    for (const outcome of outcomes) {
+      const destinations = new Set(ownership.filter((item) => item.capacity_outcome_id === outcome.id).map((item) => migrations.find((entry) => entry.packageId === item.id)?.targetStreamId ?? null));
+      if (destinations.size > 1) throw new HttpError(400, "An owning outcome and all its projects must move together to one destination.");
+      // Empty outcomes use the common retirement destination, or become unassigned.
+      const common = new Set(migrations.map((item) => item.targetStreamId));
+      const destination = destinations.size ? [...destinations][0] : retirementTarget !== undefined ? retirementTarget : common.size === 1 ? [...common][0] : null;
+      await placeRoadmapOutcome(database, { outcomeId: outcome.id, streamId: destination });
+    }
+  } else {
+    await placeProjects(database, migrations.map((migration) => ({ packageId: migration.packageId, streamId: migration.targetStreamId,
     selected: state.packages.find((item) => item.id === migration.packageId)!.selected })));
-  await database.query("UPDATE work_package SET capacity_outcome_id=NULL WHERE capacity_outcome_id IN (SELECT id FROM outcome WHERE stream_id=$1)", [id]);
-  await database.query("UPDATE outcome SET stream_id=NULL WHERE stream_id=$1", [id]);
+    await database.query("UPDATE work_package SET capacity_outcome_id=NULL WHERE capacity_outcome_id IN (SELECT id FROM outcome WHERE stream_id=$1)", [id]);
+    await database.query("UPDATE outcome SET stream_id=NULL WHERE stream_id=$1", [id]);
+  }
   await database.query("UPDATE stream SET active=false,allocation=0,retired_at=now(),retirement_reason=$2 WHERE id=$1 AND active=true", [id, reason]);
   const remaining = await orderedActiveStreams(database);
   await writeOrder(database, remaining.map((item) => item.id));
+  await assertRoadmapInvariants(database);
 }
 
 export async function listStreams(client?: StreamClient) {
@@ -209,15 +231,15 @@ export async function reorderStreams(input: { streamIds?: unknown; actor?: unkno
   return { activeScenarioVersion: version };
 }
 
-export async function previewStreamRetirement(idValue: unknown, input: { migrations?: unknown }, client?: StreamClient) {
+export async function previewStreamRetirement(idValue: unknown, input: { migrations?: unknown; targetStreamId?: unknown }, client?: StreamClient) {
   const database = await useDatabase(client);
   const id = streamId(idValue);
-  const state = await retirementState(database, id, input.migrations);
+  const state = await retirementState(database, id, input.migrations, input.targetStreamId);
   const { beforeBoard, ...impact } = state;
   await database.query("SAVEPOINT stream_retirement_preview");
   let after;
   try {
-    await applyRetirementRows(database, id, state.migrations, "Preview");
+    await applyRetirementRows(database, id, state.migrations, "Preview", state.retirementTarget);
     after = await getBoard(database);
   } finally {
     await database.query("ROLLBACK TO SAVEPOINT stream_retirement_preview");
@@ -226,18 +248,18 @@ export async function previewStreamRetirement(idValue: unknown, input: { migrati
   return { ...impact, comparison: compareSnapshots(beforeBoard, after) };
 }
 
-export async function retireStream(idValue: unknown, input: { migrations?: unknown; previewToken?: unknown; reason?: unknown; actor?: unknown; expectedScenarioVersion?: unknown }, client?: StreamClient) {
+export async function retireStream(idValue: unknown, input: { migrations?: unknown; targetStreamId?: unknown; previewToken?: unknown; reason?: unknown; actor?: unknown; expectedScenarioVersion?: unknown }, client?: StreamClient) {
   const database = await useDatabase(client);
   const id = streamId(idValue);
   await database.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
   const draft = await requireDraftVersion(database, input.expectedScenarioVersion);
-  const state = await retirementState(database, id, input.migrations);
+  const state = await retirementState(database, id, input.migrations, input.targetStreamId);
   if (typeof input.previewToken !== "string" || input.previewToken !== state.previewToken) {
     throw new HttpError(409, "The stream or its assignments changed after the preview. Preview retirement again.", { code: "STREAM_PREVIEW_STALE" });
   }
   const reason = text(input.reason, "Retirement reason", 1000);
   const actor = "Owner";
-  await applyRetirementRows(database, id, state.migrations, reason);
+  await applyRetirementRows(database, id, state.migrations, reason, state.retirementTarget);
   const version = await saveActiveDraft(database, draft);
   await recordEvent(database, id, "retired", actor, reason, { migrations: state.migrations, allocationReturned: state.retiring.allocation });
   return { streamId: id, activeScenarioVersion: version };

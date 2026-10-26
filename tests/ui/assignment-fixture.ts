@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import { schemaSql } from "../../src/lib/db";
-import { getBoard } from "../../src/lib/board";
+import { getBoard, assignPackagesToStream } from "../../src/lib/board";
 import { saveImport } from "../../src/lib/import";
 import { placeProjects, requireSequenceToken } from "../../src/lib/sequence-store";
 import { saveExtraScope, saveScopingWindow } from "../../src/lib/scope-store";
@@ -13,8 +13,20 @@ import { saveHolidayPreset, saveWeeklyAvailability } from "../../src/lib/weekly-
 import { addStream, listStreams } from "../../src/lib/streams";
 import { assignOutcomeToStream, replaceOutcomeLinks, transferProjectOwnership } from "../../src/lib/outcome-ownership";
 import { saveCapacityProfile } from "../../src/lib/capacity-store";
+import { deleteOutcome, changeRoadmapMembership } from "../../src/lib/roadmap-mutations";
+import { requirePlanningToken } from "../../src/lib/planning-token";
+import { activateRoadmapPlanning } from "../../src/lib/roadmap-store";
+import { saveOutcomeCompletion, reconcileOutcomeCompletions } from "../../src/lib/outcome-lifecycle";
+import { saveDependency } from "../../src/lib/dependency-store";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
+  activateRoadmap: () => Promise<void>;
+  setProjectCompleted: (projectId: string, completed: boolean) => Promise<void>;
+  moveOutcome: (outcomeId: string, streamId: string, beforeOutcomeId?: string) => Promise<void>;
+  changeMembership: (projectId: string, action: string, outcomeId?: string) => Promise<void>;
+  seedLegacyScenario: () => Promise<string>;
+  seedOutcomeBoard: () => Promise<void>;
+  seedManyBoardOutcomes: (count: number) => Promise<string>;
   setDemand: (projectId: string, points: number | null) => Promise<void>; requireProject: (projectId: string) => Promise<void>; pauseUnassigned: () => Promise<void>;
   configureCycles: (options: { visibleOffset?: number; importedCount?: number; enabled?: boolean }) => Promise<void>;
   shareProjects: () => Promise<void>; changeOwner: (outcomeId: string) => Promise<void>;
@@ -33,6 +45,11 @@ export const test = base.extend<{ assignment: Controls }>({
     let evaluatedAt = new Date("2026-11-05T23:59:59Z");
     let invalidateNextMove = false;
     const board = () => getBoard(client, undefined, evaluatedAt);
+    async function outcomeWrite<T>(write: () => Promise<T>) {
+      await database.query("BEGIN");
+      try { const result = await write(); await database.query("COMMIT"); return result; }
+      catch (error) { await database.query("ROLLBACK"); throw error; }
+    }
     try {
       await database.exec(schemaSql);
       await database.query("INSERT INTO workspace(id) VALUES(1)");
@@ -64,44 +81,55 @@ export const test = base.extend<{ assignment: Controls }>({
           let json: unknown;
           if (path === "/api/session") json = { authenticated: true };
           else if (path === "/api/board") {
+            let affectedCandidates: { id: string; name: string }[] = [];
             if (request.method() === "PUT") {
+              if (body.type === "package" && invalidateNextMove) { invalidateNextMove = false; await outcomeWrite(() => placeProjects(client, [{ packageId: "linear:b", streamId: "core", selected: true, beforeId: "linear:a" }])); }
+              await outcomeWrite(async () => {
               if (body.type === "package") {
-                if (invalidateNextMove) { invalidateNextMove = false; await placeProjects(client, [{ packageId: "linear:b", streamId: "core", selected: true, beforeId: "linear:a" }]); }
                 await requireSequenceToken(client, body.sequenceToken);
-                await placeProjects(client, [{ packageId: body.id, streamId: body.streamId, selected: body.selected, beforeId: body.beforeId }]);
+                await placeProjects(client, [{ packageId: body.id, streamId: body.streamId, selected: body.selected, beforeId: body.beforeId, outcomeId: body.outcomeId }]);
                 if (body.reason !== undefined) await database.query("UPDATE work_package SET pause_reason=$2 WHERE id=$1", [body.id, body.reason]);
               } else if (body.type === "extraScope") await saveExtraScope(client, body);
               else if (body.type === "ownership") await transferProjectOwnership(client, body);
-              else if (body.type === "outcomeAssignment") await assignOutcomeToStream(client, body);
+              else if (body.type === "outcomeAssignment") { const result = await assignOutcomeToStream(client, body); affectedCandidates = result?.affectedCandidates ?? []; }
+              else if (body.type === "roadmapMembership") await changeRoadmapMembership(client, body);
+              else if (body.type === "assignment") { await requireSequenceToken(client, body.sequenceToken); await assignPackagesToStream(client, body.streamId, body.packageIds, body.outcomeId); }
+              else if (body.type === "dependency") await saveDependency(client, body);
                else if (body.type === "capacity") await saveCapacityProfile(client, body);
                else if (body.type === "scoping") await saveScopingWindow(client, body.leadDays);
               else if (body.type === "weeklyAvailability") await saveWeeklyAvailability(client, body);
               else if (body.type === "holidayPreset") await saveHolidayPreset(client, body.enabled);
               else throw new Error(`Unmocked board mutation ${body.type}`);
+              });
             }
-            json = await board();
+            json = { ...await board(), affectedCandidates };
           } else if (path === "/api/state") {
             const current = await board();
             json = { connection: { viewer_name: "Owner", team_id: "team", team_name: "Product", last_imported_at: seenAt.toISOString() },
               projects: current.packages.map((item) => ({ ...item, id: item.project_id, package_id: item.id, description: "", issue_count: 1,
-                unestimated_open_issues: item.project_id === "d" ? 1 : 0, estimated_open_points: 5 })), outcomes: current.outcomes, links: current.links, streams: current.streams, timezone: current.timezone };
-          } else if (path === "/api/streams") json = request.method() === "POST" ? await addStream(body, client) : await listStreams(client);
+                unestimated_open_issues: item.project_id === "d" ? 1 : 0, estimated_open_points: 5 })), outcomes: current.outcomes, links: current.links, streams: current.streams, timezone: current.timezone, planningToken: current.planningToken, roadmapPlanningMigrated: current.roadmapPlanningMigrated, roadmapConversionFeedback: current.roadmapConversionFeedback };
+          } else if (/^\/api\/projects\/[^/]+\/scope$/.test(path)) { await database.query("UPDATE linear_project_cache SET in_scope=$2 WHERE linear_id=$1", [decodeURIComponent(path.split("/")[3]), body.inScope]); json = { saved: true }; }
+          else if (path === "/api/projects/scope") { await database.query("UPDATE linear_project_cache SET in_scope=$2 WHERE linear_id=ANY($1::text[])", [body.projectIds, body.inScope]); json = { saved: true }; }
+          else if (path === "/api/streams") json = request.method() === "POST" ? await addStream(body, client) : await listStreams(client);
           else if (path === "/api/outcomes" && request.method() === "POST") {
             const id = randomUUID();
             await database.query("INSERT INTO outcome(id,title,description,owner,success_signal,needed_by) VALUES($1,$2,$3,$4,$5,$6)",
               [id, body.title, body.description, body.owner, body.successSignal, body.neededBy || null]);
             for (const link of body.links || []) await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES($1,$2,$3)", [id, link.projectId, link.requirement]);
-            json = { id };
+            const accepted = await board();
+            json = { id, planningToken: accepted.planningToken, lifecycle: accepted.outcomes.find((item) => item.id === id)?.lifecycle };
           } else if (path.startsWith("/api/outcomes/")) {
             const id = path.split("/")[3];
-            if (path.endsWith("/links") && request.method() === "PUT") {
-              await replaceOutcomeLinks(client, id, body.links);
+            if (path.endsWith("/completion") && request.method() === "PUT") {
+              json = await outcomeWrite(() => saveOutcomeCompletion(client, id, body));
+            } else if (path.endsWith("/links") && request.method() === "PUT") {
+              json = await outcomeWrite(async () => { await requirePlanningToken(client, body.planningToken); return replaceOutcomeLinks(client, id, body.links); });
             } else if (request.method() === "PUT") {
               await database.query("UPDATE outcome SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6 WHERE id=$1",
                 [id, body.title, body.description, body.owner, body.successSignal, body.neededBy || null]);
-            } else if (request.method() === "DELETE") await database.query("DELETE FROM outcome WHERE id=$1", [id]);
+            } else if (request.method() === "DELETE") json = await outcomeWrite(() => deleteOutcome(client, id, body.planningToken));
             else throw new Error(`Unmocked outcome route ${path}`);
-            json = { saved: true };
+            json ??= { saved: true };
           }
           else if (path === "/api/scenarios/compare") {
             const parse = (value: string) => { const [kind, id] = value.split(":"); return { kind: kind as "draft" | "revision", id }; };
@@ -109,17 +137,54 @@ export const test = base.extend<{ assignment: Controls }>({
           } else if (path === "/api/scenarios") json = request.method() === "POST" ? { scenario: await createScenario(body, client) } : await listScenarios(client);
           else if (/\/api\/scenarios\/[^/]+/.test(path)) {
             const id = path.split("/")[3];
-            if (path.endsWith("/activate")) json = await activateScenario(id, body, client);
+            if (path.endsWith("/activate")) json = { scenario: await outcomeWrite(() => activateScenario(id, body, client)) };
             else if (path.endsWith("/publish")) json = await publishScenario(id, body, client);
             else if (request.method() === "PUT") json = await saveScenario(id, body, client);
             else throw new Error(`Unmocked scenario route ${path}`);
           } else return route.fulfill({ status: 404, json: { error: `Unmocked ${path}` } });
           await route.fulfill({ json });
         } catch (error) {
-          await route.fulfill({ status: error instanceof HttpError ? error.status : 500, json: { error: error instanceof Error ? error.message : String(error) } });
+          await route.fulfill({ status: error instanceof HttpError ? error.status : 500, json: { error: error instanceof Error ? error.message : String(error), ...(error instanceof HttpError ? error.details : {}) } });
         }
       });
       await use({ board, time: (value) => { evaluatedAt = new Date(value); }, invalidateNextMove: () => { invalidateNextMove = true; },
+        activateRoadmap: async () => { await outcomeWrite(() => activateRoadmapPlanning(client)); },
+        seedOutcomeBoard: async () => {
+          await database.query("UPDATE stream SET allocation=CASE WHEN id='core' THEN 1 ELSE 0 END");
+          await database.query("UPDATE capacity_profile SET baseline=10,holidays_enabled=false WHERE workspace_id=1");
+          await database.query(`UPDATE outcome SET stream_id='core',created_at=CASE id
+            WHEN '00000000-0000-4000-8000-000000000001' THEN '2026-10-24T00:00:00Z'::timestamptz
+            WHEN '00000000-0000-4000-8000-000000000003' THEN '2026-10-23T00:00:00Z'::timestamptz
+            ELSE '2026-10-22T00:00:00Z'::timestamptz END
+            WHERE id IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003')`);
+          await database.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES('00000000-0000-4000-8000-000000000003','b','minimum') ON CONFLICT(outcome_id,project_id) DO UPDATE SET requirement='minimum'");
+          await database.query("UPDATE work_package SET capacity_outcome_id='00000000-0000-4000-8000-000000000003',sequence_position=1 WHERE project_id='b'");
+          await database.query("UPDATE work_package SET stream_id='core',sequence_position=1 WHERE project_id='c'");
+        },
+        seedManyBoardOutcomes: async (count) => {
+          const start = Number((await database.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM outcome WHERE stream_id='core'")).rows[0].count);
+          let last = "";
+          for (let index = 0; index < count; index++) { last = randomUUID(); await database.query("INSERT INTO outcome(id,title,stream_id,stream_position) VALUES($1,$2,'core',$3)", [last, `Outcome ${index + 1} · ${"Long outcome definition for keyboard and narrow-screen planning ".repeat(4)}`.slice(0, 197), start + index + 1]); }
+          return last;
+        },
+        moveOutcome: async (outcomeId, streamId, beforeOutcomeId) => { const current = await board(); await outcomeWrite(() => assignOutcomeToStream(client, { outcomeId, streamId, beforeOutcomeId, sequenceToken: current.sequenceToken, ownershipToken: current.ownershipToken })); },
+        changeMembership: async (projectId, action, outcomeId) => { const current = await board(); await outcomeWrite(() => changeRoadmapMembership(client, { packageId: `linear:${projectId}`, action, outcomeId, sequenceToken: current.sequenceToken, planningToken: current.planningToken })); },
+        seedLegacyScenario: async () => {
+          const current = JSON.parse(JSON.stringify(await board())); current.calculationVersion = "v4";
+          for (const item of current.packages) { delete item.roadmap_state; delete item.roadmap_conversion; if (item.project_id === "a") delete item.capacity_outcome_id; }
+          for (const item of current.outcomes) { delete item.stream_position; delete item.lifecycle; }
+          const id = randomUUID();
+          await database.query("INSERT INTO scenario(id,workspace_id,name,draft_source_at,draft_source_snapshot,draft_snapshot) VALUES($1,1,'Legacy option',$2,'{}',$3::jsonb)", [id, current.forecast.sourceAt, JSON.stringify(current)]);
+          await database.query(`INSERT INTO scenario_revision(id,scenario_id,revision_number,draft_edit_version,calculation_version,source_at,source_snapshot,snapshot,rationale,author)
+            VALUES($1,$2,1,1,'v4',$3,'{}',$4::jsonb,'Historical option','Owner')`, [randomUUID(), id, current.forecast.sourceAt, JSON.stringify(current)]);
+          return id;
+        },
+        setProjectCompleted: async (projectId, completed) => { await outcomeWrite(async () => {
+          await database.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+          await database.query("UPDATE linear_project_cache SET status=$2 WHERE linear_id=$1", [projectId, completed ? "completed" : "started"]);
+          await database.query("UPDATE linear_issue_cache SET state_type=$2 WHERE project_id=$1", [projectId, completed ? "completed" : "started"]);
+          await reconcileOutcomeCompletions(client, "Linear sync");
+        }); },
         addSourceConflict: async () => { await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','linear')"); },
         setDemand: async (projectId, points) => { await database.query("UPDATE linear_issue_cache SET estimate=$2 WHERE project_id=$1", [projectId, points]); },
         setCapacity: async (baseline, coreAllocation = 0.5) => {

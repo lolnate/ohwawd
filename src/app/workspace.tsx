@@ -9,13 +9,17 @@ import OutcomeDelivery from "./outcome-delivery";
 import OutcomeCatalog, { focusOutcomeSection, type CatalogContext } from "./outcome-catalog";
 import WorkspaceSettings, { type SettingsRequest, type SettingsTarget } from "./workspace-settings";
 import OutcomeWorkspace, { type OutcomeRequest } from "./outcome-workspace";
+import type { OutcomeMove } from "./outcome-board-controls";
+import type { RoadmapConversion, StoredRoadmapFields } from "@/lib/roadmap-planning";
+import type { OutcomeLifecycle } from "@/lib/outcome-completion";
 
 type Team = { id: string; name: string; key: string };
-type Project = { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
+type Project = Partial<StoredRoadmapFields> & { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
 type OutcomeFields = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null };
-type Outcome = OutcomeFields & { stream_id: string | null; created_at: string };
+type Outcome = OutcomeFields & { stream_id: string | null; stream_position?: number | null; created_at: string; lifecycle?: OutcomeLifecycle };
 type Link = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
-type State = { connection: { viewer_name: string; team_id: string; team_name: string; last_imported_at: string } | null; projects: Project[]; outcomes: Outcome[]; links: Link[]; streams: { id: string; name: string }[]; timezone: string };
+type State = { connection: { viewer_name: string; team_id: string; team_name: string; last_imported_at: string } | null; projects: Project[]; outcomes: Outcome[]; links: Link[]; streams: { id: string; name: string }[]; timezone: string;
+  roadmapPlanningMigrated?: boolean; roadmapConversionFeedback?: (RoadmapConversion & { packageId: string })[]; planningToken?: string };
 type Preview = { id: string; name: string; status: string };
 type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 type ImportResult = { imported: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
@@ -46,7 +50,7 @@ export default function App() {
   const [deliveryBoard, setDeliveryBoard] = useState<BoardState | null>(null);
   const [boardUpdate, setBoardUpdate] = useState<BoardState | null>(null);
   const [deliveryError, setDeliveryError] = useState("");
-  const [boardFocus, setBoardFocus] = useState<{ id: string; request: number } | null>(null);
+  const [boardFocus, setBoardFocus] = useState<{ id: string; request: number; inspect?: boolean } | null>(null);
   const [key, setKey] = useState("");
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamId, setTeamId] = useState("");
@@ -61,7 +65,7 @@ export default function App() {
   const [catalogContext, setCatalogContext] = useState<CatalogContext>({ ids: [], clear: () => {} });
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatuses, setProjectStatuses] = useState<string[]>([]);
-  const [projectPreset, setProjectPreset] = useState<"needs" | "active" | "completed" | "hidden" | "all">("needs");
+  const [projectPreset, setProjectPreset] = useState<"needs" | "active" | "completed" | "hidden" | "all" | "dismissed">("needs");
   const [projectSort, setProjectSort] = useState<"planning" | "name" | "status" | "points">("planning");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [syncReport, setSyncReport] = useState<ImportResult["report"] | null>(null);
@@ -158,6 +162,15 @@ export default function App() {
     setActiveView("board");
     setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
   }
+  function inspectProjectOnBoard(id: string) {
+    setActiveView("board"); setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1, inspect: true }));
+  }
+  function openBoardOutcome(id: string, opener: HTMLElement | null, fallbackId: string, section: "details" | "projects" = "details") {
+    const generation = ++outcomeGeneration.current;
+    const open = () => { if (generation === outcomeGeneration.current && !document.querySelector("dialog[open]")) setOutcomeRequest({ generation, id, opener, fallback: "catalog", fallbackId, section }); };
+    if (state?.outcomes.some((outcome) => outcome.id === id)) open();
+    else void reload().then(open).catch(() => setError("Could not load saved outcome definitions. Retry the workspace refresh before opening this outcome."));
+  }
 
   function inspectOutcome(outcome: OutcomeFields, fallback: "catalog" | "delivery" = "catalog") {
     setOutcomeRequest({ generation: ++outcomeGeneration.current, id: outcome.id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback });
@@ -180,22 +193,34 @@ export default function App() {
     setNotice(`${projectIds.length} project${projectIds.length === 1 ? "" : "s"} ${inScope ? "restored to" : "hidden from"} planning lists.`);
   }
 
+  async function moveOutcome(move: OutcomeMove): Promise<void> {
+    if (!deliveryBoard) throw new Error("Board planning data is not available. Refresh the Board and try again.");
+    try {
+      const board = await api<BoardState>("/api/board", "PUT", { type: "outcomeAssignment", ...move, sequenceToken: deliveryBoard.sequenceToken, ownershipToken: deliveryBoard.ownershipToken, planningToken: deliveryBoard.planningToken });
+      setDeliveryBoard(board); setBoardUpdate(board); await reload();
+    } catch (reason) {
+      try { const board = await api<BoardState>("/api/board"); setDeliveryBoard(board); setBoardUpdate(board); }
+      catch { /* Retain the last good Board while reporting the original write failure. */ }
+      throw reason;
+    }
+  }
+
   const statuses = [...new Set(state?.projects.map((project) => project.status) ?? [])].sort();
   const statusKey = statuses.join("\0");
   useEffect(() => {
     setProjectStatuses((current) => current.filter((status) => statuses.includes(status)));
   }, [statusKey]);
   const terminalProject = (project: Project) => /completed|done|finished|canceled|cancelled/i.test(project.status);
-  const activeProject = (project: Project) => !terminalProject(project) && (!!project.stream_id || /started|active|in progress/i.test(project.status));
-  const needsPlanning = (project: Project) => project.in_scope && !terminalProject(project) && (project.needs_review || !project.stream_id || project.unestimated_open_issues > 0);
-  const presetMatches = (project: Project) => projectPreset === "needs" ? needsPlanning(project) : projectPreset === "active" ? project.in_scope && activeProject(project) : projectPreset === "completed" ? project.in_scope && terminalProject(project) : projectPreset === "hidden" ? !project.in_scope : project.in_scope;
+  const activeProject = (project: Project) => !terminalProject(project) && (!state?.roadmapPlanningMigrated || project.roadmap_state === "included") && (!!project.stream_id || /started|active|in progress/i.test(project.status));
+  const needsPlanning = (project: Project) => project.in_scope && !terminalProject(project) && (!state?.roadmapPlanningMigrated || !["deferred", "dismissed"].includes(project.roadmap_state ?? "")) && (project.needs_review || !project.stream_id || project.unestimated_open_issues > 0);
+  const presetMatches = (project: Project) => projectPreset === "needs" ? needsPlanning(project) : projectPreset === "active" ? project.in_scope && activeProject(project) : projectPreset === "completed" ? project.in_scope && terminalProject(project) : projectPreset === "hidden" ? !project.in_scope : projectPreset === "dismissed" ? project.in_scope && project.roadmap_state === "dismissed" : project.in_scope;
   const visibleProjects = (state?.projects.filter((project) =>
     presetMatches(project) &&
     (!projectStatuses.length || projectStatuses.includes(project.status)) &&
     project.name.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase()),
   ) ?? []).sort((left, right) => projectSort === "name" ? left.name.localeCompare(right.name) : projectSort === "status" ? left.status.localeCompare(right.status) || left.name.localeCompare(right.name) : projectSort === "points" ? right.estimated_open_points - left.estimated_open_points || left.name.localeCompare(right.name) : Number(right.needs_review) - Number(left.needs_review) || right.unestimated_open_issues - left.unestimated_open_issues || Number(!right.stream_id) - Number(!left.stream_id) || left.name.localeCompare(right.name));
   const hiddenCount = state?.projects.filter((project) => !project.in_scope).length ?? 0;
-  const presetCounts = { needs: state?.projects.filter(needsPlanning).length ?? 0, active: state?.projects.filter((project) => project.in_scope && activeProject(project)).length ?? 0, completed: state?.projects.filter((project) => project.in_scope && terminalProject(project)).length ?? 0, hidden: hiddenCount, all: state?.projects.filter((project) => project.in_scope).length ?? 0 };
+  const presetCounts = { needs: state?.projects.filter(needsPlanning).length ?? 0, active: state?.projects.filter((project) => project.in_scope && activeProject(project)).length ?? 0, completed: state?.projects.filter((project) => project.in_scope && terminalProject(project)).length ?? 0, hidden: hiddenCount, all: state?.projects.filter((project) => project.in_scope).length ?? 0, dismissed: state?.projects.filter((project) => project.in_scope && project.roadmap_state === "dismissed").length ?? 0 };
   const allVisibleSelected = visibleProjects.length > 0 && visibleProjects.every((project) => selectedProjectIds.includes(project.id));
 
   if (signedIn === null) return <main className="shell"><p>Opening workspace…</p></main>;
@@ -220,21 +245,21 @@ export default function App() {
     <section className="panel projects-panel">
       <div className="section-head"><div><h2>Imported projects</h2><p>Linear project IDs stay stable when names and other fields change, preserving planning assignments.</p></div><div className="actions"><span className="count">{state?.projects.length ?? 0}</span><button className="secondary" disabled={busy || !state?.connection} onClick={() => void run(async () => { setSyncReport(null); const result = await api<ImportResult>("/api/linear/import", "POST", { teamId: state!.connection!.team_id }); setSyncReport(result.report); await reload(); setNotice(`${result.imported} projects synced from Linear. Local planning choices and outcome links were preserved.`); }, "Syncing projects, issues, dependencies, and cycles from Linear…")}>Sync Linear</button></div></div>
       {syncReport && <SyncReport report={syncReport} />}
-      <div className="project-presets" role="group" aria-label="Project triage view">{([['needs','Needs planning'],['active','Active'],['completed','Completed'],['hidden','Hidden'],['all','All visible']] as const).map(([id, label]) => <button key={id} className={projectPreset === id ? "active" : ""} aria-pressed={projectPreset === id} onClick={() => { setProjectPreset(id); setSelectedProjectIds([]); }}>{label}<span>{presetCounts[id]}</span></button>)}</div>
+      <div className="project-presets" role="group" aria-label="Project triage view">{([['needs','Needs planning'],['active','Active'],['completed','Completed'],['hidden','Hidden'],['all','All visible']] as const).map(([id, label]) => <button key={id} className={projectPreset === id ? "active" : ""} aria-pressed={projectPreset === id} onClick={() => { setProjectPreset(id); setSelectedProjectIds([]); }}>{label}<span>{presetCounts[id]}</span></button>)}{state?.roadmapPlanningMigrated && <button aria-pressed={projectPreset === "dismissed"} className={projectPreset === "dismissed" ? "active" : ""} onClick={() => { setProjectPreset("dismissed"); setSelectedProjectIds([]); }}>Dismissed<span>{presetCounts.dismissed}</span></button>}</div>
       <div className="project-filters">
         <label>Search<input type="search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Project name" /></label>
         <StatusFilter statuses={statuses} selected={projectStatuses} onChange={setProjectStatuses} />
         <label>Sort<select value={projectSort} onChange={(event) => setProjectSort(event.target.value as typeof projectSort)}><option value="planning">Planning attention</option><option value="name">Project name</option><option value="status">Linear status</option><option value="points">Open points</option></select></label>
       </div>
-      <p className="meta project-result-summary"><strong>{visibleProjects.length} results</strong> · {projectPreset === "needs" ? "Needs planning" : projectPreset === "active" ? "Active" : projectPreset === "completed" ? "Completed or canceled" : projectPreset === "hidden" ? "Hidden" : "All visible"}{projectStatuses.length ? ` · ${projectStatuses.length} status ${projectStatuses.length === 1 ? "filter" : "filters"}` : " · all statuses"}{projectSearch.trim() ? ` · search “${projectSearch.trim()}”` : ""}. Hide work without removing it from Linear or existing outcomes.</p>
+      <p className="meta project-result-summary"><strong>{visibleProjects.length} results</strong> · {projectPreset === "needs" ? "Needs planning" : projectPreset === "active" ? "Active" : projectPreset === "completed" ? "Completed or canceled" : projectPreset === "hidden" ? "Hidden" : projectPreset === "dismissed" ? "Dismissed from roadmap" : "All visible"}{projectStatuses.length ? ` · ${projectStatuses.length} status ${projectStatuses.length === 1 ? "filter" : "filters"}` : " · all statuses"}{projectSearch.trim() ? ` · search “${projectSearch.trim()}”` : ""}. Hide work without removing it from Linear or existing outcomes.{state?.roadmapPlanningMigrated ? " Plan on Board for explicit inclusion, deferral or off-roadmap dismissal." : ""}</p>
       <div className="project-bulk"><label><input type="checkbox" checked={allVisibleSelected} onChange={(event) => setSelectedProjectIds((current) => event.target.checked ? [...new Set([...current, ...visibleProjects.map((project) => project.id)])] : current.filter((id) => !visibleProjects.some((project) => project.id === id)))} />Select all {visibleProjects.length} results</label><span>{selectedProjectIds.length} selected</span><button className="secondary" disabled={busy || !selectedProjectIds.length} onClick={() => void run(() => setProjectsScope(selectedProjectIds, projectPreset === "hidden"))}>{projectPreset === "hidden" ? "Restore selected" : "Hide selected"}</button>{!!selectedProjectIds.length && <button className="quiet" disabled={busy} onClick={() => setSelectedProjectIds([])}>Clear</button>}</div>
       <div className="project-table-list">{visibleProjects.map((project) => <article className={`project-row${terminalProject(project) ? " terminal" : ""}${selectedProjectIds.includes(project.id) ? " selected" : ""}`} key={project.id}>
-        <label className="project-select"><input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={(event) => setSelectedProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} /><span className="sr-only">Select {project.name}</span></label><div><a href={project.url} target="_blank" rel="noreferrer">{project.name} ↗</a><p>{project.issue_count} issues · {project.estimated_open_points} known open points{project.unestimated_open_issues ? ` · ${project.unestimated_open_issues} unestimated` : ""}{project.stream_id ? " · stream assigned" : " · needs assignment"}</p>{project.cross_team && <span className="inline-warning">Cross-team</span>}{project.needs_review && <span className="inline-warning">Needs review</span>}</div><span className="tag">{project.status}</span><button className="text-button" disabled={busy} onClick={() => void run(() => setProjectScope(project))}>{project.in_scope ? "Hide" : "Restore"}</button>
+        <label className="project-select"><input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={(event) => setSelectedProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} /><span className="sr-only">Select {project.name}</span></label><div><a href={project.url} target="_blank" rel="noreferrer">{project.name} ↗</a><p>{project.issue_count} issues · {project.estimated_open_points} known open points{project.unestimated_open_issues ? ` · ${project.unestimated_open_issues} unestimated` : ""}{state?.roadmapPlanningMigrated ? ` · ${project.roadmap_state}` : project.stream_id ? " · stream assigned" : " · needs assignment"}</p>{project.cross_team && <span className="inline-warning">Cross-team</span>}{project.needs_review && <span className="inline-warning">Needs review</span>}</div><span className="tag">{project.status}</span>{state?.roadmapPlanningMigrated ? <div className="project-row-actions"><button className="text-button" onClick={() => inspectProjectOnBoard(project.package_id)}>Plan on Board</button><button className="text-button" disabled={busy} onClick={() => void run(() => setProjectScope(project))}>{project.in_scope ? "Hide" : "Restore"}</button></div> : <button className="text-button" disabled={busy} onClick={() => void run(() => setProjectScope(project))}>{project.in_scope ? "Hide" : "Restore"}</button>}
       </article>)}
       {!visibleProjects.length && <p className="empty">{state?.projects.length ? "No projects match these filters." : "Projects will appear here after import."}</p>}</div>
     </section></section>
     <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} onOpenBoard={() => setActiveView("board")} refreshKey={boardVersion} /></section>
-    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} updatedState={boardUpdate} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")}
+    <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} updatedState={boardUpdate} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")} onOpenOutcome={openBoardOutcome}
       onOpenOutcomes={openOutcomeDelivery} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}>
       <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-delivery" onClick={(event) => { event.preventDefault(); focusOutcomeSection("delivery"); }}>Outcome delivery</a><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a></nav>
@@ -242,7 +267,7 @@ export default function App() {
       <OutcomeCatalog data={state} error={stateError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onContext={setCatalogContext} />
     </section>
     <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
-    <OutcomeWorkspace request={outcomeRequest} data={state} context={catalogContext} onClose={() => setOutcomeRequest(null)} onView={(id) => setOutcomeRequest({ generation: ++outcomeGeneration.current, id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" })} onRemoved={(id, generation) => {
+    <OutcomeWorkspace request={outcomeRequest} data={state} planning={deliveryBoard} context={catalogContext} onMoveOutcome={moveOutcome} onClose={() => setOutcomeRequest(null)} onView={(id) => setOutcomeRequest({ generation: ++outcomeGeneration.current, id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" })} onRemoved={(id, generation) => {
       if (outcomeRequest?.generation === generation) {
         const index = catalogContext.ids.indexOf(id);
         const next = catalogContext.ids[index + 1] ?? catalogContext.ids[index - 1];
@@ -251,7 +276,7 @@ export default function App() {
         setOutcomeRequest(null);
       }
       setState((current) => current && ({ ...current, outcomes: current.outcomes.filter((item) => item.id !== id), links: current.links.filter((link) => link.outcome_id !== id) }));
-    }} onAccepted={(outcome, links) => setState((current) => current && ({ ...current, outcomes: current.outcomes.some((item) => item.id === outcome.id) ? current.outcomes.map((item) => item.id === outcome.id ? outcome : item) : [...current.outcomes, outcome], links: links ? [...current.links.filter((link) => link.outcome_id !== outcome.id), ...Object.entries(links).map(([project_id, requirement]) => ({ outcome_id: outcome.id, project_id, requirement }))] : current.links }))} onRefresh={refreshOutcomes} />
+    }} onAccepted={(outcome, links, planningToken) => setState((current) => current && ({ ...current, planningToken: planningToken ?? current.planningToken, outcomes: current.outcomes.some((item) => item.id === outcome.id) ? current.outcomes.map((item) => item.id === outcome.id ? outcome : item) : [...current.outcomes, outcome], links: links ? [...current.links.filter((link) => link.outcome_id !== outcome.id), ...Object.entries(links).map(([project_id, requirement]) => ({ outcome_id: outcome.id, project_id, requirement }))] : current.links }))} onRefresh={refreshOutcomes} />
     <footer>Private decision proof · Linear stays read only · Published revisions are immutable.</footer>
   </main>;
 }

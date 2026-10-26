@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ForecastResult } from "@/lib/forecast";
 import { addCalendarDays, cycleLocalDates, planningWeeks, shortCalendarDate, timelineSpan, type CalendarCycle, type CalendarAdjustment, type PlanningWeek, type WeeklyAvailability } from "@/lib/planning-calendar";
 import type { QueueState } from "@/lib/sequencing";
@@ -11,9 +12,21 @@ import { outcomeRows, projectCodes, type OutcomePlacement, type OutcomeProjectLi
 
 type Props = { name: string; streamId: string; projects: BoardProject[]; outcomes: OutcomePlacement[]; links: OutcomeProjectLink[]; streams: { id: string; name: string }[]; forecast: ForecastResult; cycles: CalendarCycle[]; timezone: string; anchorDate: string;
   weeklyAdjustments: WeeklyAvailability[]; holidays: WeeklyAvailability[]; cycleAdjustments: CalendarAdjustment[]; sequencing: QueueState; calendarProjection?: CalendarProjection;
-  onEditWeek: (week: PlanningWeek) => void; onOpenProject: (project: BoardProject) => void };
+  onEditWeek: (week: PlanningWeek) => void; onOpenProject: (project: BoardProject) => void; renderOutcome?: (id: string) => ReactNode; onOpenOutcome?: (id: string, opener: HTMLElement) => void };
 
-export default function StreamTimeline({ name, streamId, projects, outcomes, links, streams, forecast, cycles, timezone, anchorDate, weeklyAdjustments, holidays, cycleAdjustments, sequencing, calendarProjection, onEditWeek, onOpenProject }: Props) {
+export default function StreamTimeline({ name, streamId, projects, outcomes, links, streams, forecast, cycles, timezone, anchorDate, weeklyAdjustments, holidays, cycleAdjustments, sequencing, calendarProjection, onEditWeek, onOpenProject, renderOutcome, onOpenOutcome }: Props) {
+  const labelElements = useRef(new Map<string, HTMLDivElement>());
+  const [labelHeights, setLabelHeights] = useState<Record<string, number>>({});
+  const outcomeKey = outcomes.filter((outcome) => outcome.stream_id === streamId).map((outcome) => outcome.id).join("\0");
+  useLayoutEffect(() => {
+    if (!renderOutcome) return;
+    const update = () => setLabelHeights((current) => {
+      const next = Object.fromEntries([...labelElements.current].map(([id, element]) => [id, Math.ceil(element.getBoundingClientRect().height) + 24]));
+      return JSON.stringify(current) === JSON.stringify(next) ? current : next;
+    });
+    const observer = new ResizeObserver(update); labelElements.current.forEach((element) => observer.observe(element)); update();
+    return () => observer.disconnect();
+  }, [outcomeKey, !!renderOutcome]);
   const weeks = planningWeeks({ cycles, timezone, anchorDate, overrides: weeklyAdjustments, holidays, adjustments: cycleAdjustments });
   const months: { key: string; label: string; count: number }[] = [];
   for (const week of weeks) {
@@ -32,9 +45,9 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
   const countedLocation = (project: BoardProject) => {
     const owner = outcomes.find((outcome) => outcome.id === project.capacity_outcome_id);
     const stream = streams.find((stream) => stream.id === project.stream_id);
-    return !project.selected ? "Deferred; not counted" : `${owner?.title ?? "Other selected work"} · ${stream?.name ?? "Needs assignment"}`;
+    return !project.selected ? `${project.roadmap_state ?? "Deferred"}; not counted` : `${owner?.title ?? "Other selected work"} · ${stream?.name ?? "Needs assignment"}`;
   };
-  return <div className="stream-calendar">
+  return <div className={`stream-calendar${renderOutcome ? " outcome-priority-calendar" : ""}`}>
     <div className="timeline-scroll calendar-scroll" role="region" aria-label={`${name} forecast timeline. Months and weeks; scroll horizontally for later dates.`} tabIndex={0}>
       <table className="month-week-timeline" style={{ "--week-count": weeks.length } as React.CSSProperties}>
         <colgroup><col className="timeline-project-col" />{weeks.map((week) => <col className="timeline-week-col" key={week.start} />)}</colgroup>
@@ -75,7 +88,7 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
             const finalCycle = projection?.finish ? forecast.cycles[projection.finish - 1] : forecast.cycles[lastProgress];
             const end = start && finalCycle ? addCalendarDays(finalCycle.end, 1) : null;
             const span = project.selected && start && end && weeks.length ? timelineSpan(start, end, weeks[0].start, weeks.length) : null;
-            const reason = !project.selected ? "Deferred · not counted" : projection?.finish === 0 ? "Complete before the next forecast cycle" : projection?.reason || "No forecast date yet";
+             const reason = projection?.finish === 0 ? "Complete before the next forecast cycle" : !project.selected ? `${project.roadmap_state ?? "Deferred"} · not counted` : projection?.reason || "No forecast date yet";
             const counted = project.selected && project.stream_id === streamId && (!row.outcome || project.capacity_outcome_id === row.id);
             const optional = links.some((link) => link.outcome_id === row.id && link.project_id === project.project_id && link.requirement === "optional");
             const detail = `${project.name} (${codes.get(project.id)}): ${counted ? `${projection?.demand ?? 0} pts counted here` : `Shared · 0 pts here. Counted in ${countedLocation(project)}`}. ${span ? `Starts ${start}; ${partial ? `simulated progress through ${finalCycle!.end}; continues beyond the simulated calendar without a forecast finish. ${reason}` : `finishes at cycle end ${finalCycle!.end}`}` : reason}${blockers.length ? `. After ${blockers.join(", ")}` : ""}${optional ? ". Optional for this outcome" : ""}${!project.in_scope ? ". Hidden from source view" : ""}${projection?.calendarProjected ? ". Provisional date using projected cycles" : ""}`;
@@ -91,13 +104,11 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
           const sharedTop = 16 + ownedEnds.length * 36 + (sharedEnds.length ? 22 : 0);
           const height = Math.max(72, sharedEnds.length ? sharedTop + sharedEnds.length * 36 + 10 : 26 + ownedEnds.length * 36);
           const unscheduled = entries.filter((entry) => !entry.span);
-          const trackHeight = height + (unscheduled.length ? unscheduled.length * 32 + 5 : 0);
-          const countedPoints = entries.filter((entry) => entry.counted).reduce((sum, entry) => sum + (entry.projection?.demand ?? 0), 0);
+           const trackHeight = Math.max(height + (unscheduled.length ? unscheduled.length * 32 + 5 : 0), labelHeights[row.id] ?? 0);
           const outcomeForecast = forecast.outcomes.find((outcome) => outcome.id === row.id);
           return <tr key={row.id} data-timeline-outcome={row.id}>
-            <th scope="row" className="timeline-project-heading"><strong className="timeline-outcome-title">{row.title}</strong>
-              <span>{countedPoints.toLocaleString()} pts counted here · {entries.length} projects</span>
-              {outcomeForecast && <span>{outcomeForecast.endDate ? `Delivery ${shortCalendarDate(outcomeForecast.endDate)}` : outcomeForecast.status.replaceAll("_", " ")}{outcomeForecast.status === "provisional" ? " · provisional" : ""}</span>}
+             <th scope="row" className="timeline-project-heading">{renderOutcome && row.outcome ? <div className="timeline-outcome-controls-content" ref={(element) => { if (element) labelElements.current.set(row.id, element); else labelElements.current.delete(row.id); }}>{renderOutcome(row.id)}{outcomeForecast && <span>{outcomeForecast.endDate ? `Delivery ${shortCalendarDate(outcomeForecast.endDate)}` : outcomeForecast.status.replaceAll("_", " ")}</span>}</div> : <>{onOpenOutcome && row.outcome ? <button type="button" className="text-button timeline-outcome-title" onClick={(event) => onOpenOutcome(row.id, event.currentTarget)}>{row.title}</button> : <strong className="timeline-outcome-title">{row.title}</strong>}
+                {outcomeForecast && <span>{outcomeForecast.endDate ? `Delivery ${shortCalendarDate(outcomeForecast.endDate)}` : outcomeForecast.status.replaceAll("_", " ")}{outcomeForecast.status === "provisional" ? " · provisional" : ""}</span>}</>}
             </th>
             <td colSpan={weeks.length} className="timeline-track-cell"><div className="timeline-track outcome-timeline-track" style={{ height: trackHeight }}>
               {weeks.map((week, index) => <span key={week.start} aria-hidden="true" data-week-band={week.start}

@@ -8,8 +8,8 @@ The Board renders outcome rows but schedules by a separate project queue, omits 
 
 - **BREAKING:** require one owning outcome for included roadmap projects; distinguish imported candidates, included work, deferred roadmap work and dismissed off-roadmap work. Dismissed/candidate demand is excluded, while unfinished prerequisites remain unresolved.
 - **BREAKING:** persist outcome order per stream and use it in calculation **v5**. Preserve one execution slot per stream, finish-to-start dependencies, additive estimates and conserved capacity. Required delivery work precedes optional-only work; rank prioritizes eligible work rather than guaranteeing finish order.
-- Provide outcome drag/drop and equivalent before/after, keyboard and stream-move controls. Restrict project ordering to its owning outcome and make cross-owner moves explicit ownership transfers.
-- Derive immediate prerequisite references without adding saved links, retain full effective dependency closure for delivery, show row-local thin dependency connectors and actionable waiting/bypass explanations.
+- Provide outcome drag/drop on the Board and equivalent before/after and stream-move controls in the shared outcome sidebar. Restrict project ordering to its owning outcome and make cross-owner moves explicit ownership transfers.
+- Derive immediate prerequisite references without adding saved links, retain full effective dependency closure for delivery, and show row-local thin dependency connectors with accessible dependency context outside the sticky outcome label.
 - Add manual Mark complete/Reopen actions in clean saved outcome-sidebar Details. Require actual reconciled completion of minimum-required work and its effective prerequisites; keep lifecycle markers separate from forecasts and scheduling eligibility.
 - Migrate live data conservatively, adapt editable legacy scenarios with an explicit conversion notice, and preserve every published result/version.
 

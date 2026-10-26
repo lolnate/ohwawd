@@ -1,0 +1,35 @@
+.outcome-board-controls { position: relative; min-width: 0; font-size: .8rem; line-height: 1.5; font-weight: 400; overflow-wrap: anywhere; }
+.outcome-priority-head { display: flex; align-items: flex-start; gap: 8px; }
+.outcome-priority-head .outcome-drag-handle { flex: 0 0 auto; padding: 6px; cursor: grab; }
+.outcome-priority-head .timeline-outcome-title { min-width: 0; width: 100%; padding: 4px 0; text-align: left; white-space: normal; font-weight: 750; }
+.project-roadmap-controls fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 8px; }
+.outcome-board-controls button, .project-roadmap-controls label, .project-roadmap-controls select { min-width: 0; max-width: 100%; }
+.timeline-outcome-controls-content > span { display: block; font-size: .75rem; line-height: 1.4; color: var(--color-text-muted); font-weight: 400; margin-top: 6px; overflow-wrap: anywhere; }
+.outcome-priority-calendar .calendar-scroll { max-height: none; overflow-y: hidden; }
+/* Reserve hit areas before dragging so newly revealed targets do not move
+   underneath the pointer, including when timeline labels are remeasured. */
+.outcome-drop-target { height: 24px; padding: 2px 4px; margin: 4px 0; border: 1px dashed transparent; color: var(--color-text-muted); font-size: 0; overflow: hidden; white-space: nowrap; }
+.outcome-board-controls > .outcome-drop-target { position: absolute; z-index: 2; left: 0; right: 0; height: 18px; margin: 0; padding: 0 4px; }
+.outcome-board-controls > .outcome-drop-target[data-drop-outcome-side="before"] { top: -9px; }
+.outcome-board-controls > .outcome-drop-target[data-drop-outcome-side="after"] { bottom: -9px; }
+.outcome-drop-target.drag-active { border-color: var(--color-action); background: var(--color-selection-bg); color: var(--color-action); font-size: .75rem; }
+.roadmap-owned-work .project-drop-target, .roadmap-triage .project-drop-target { height: 36px; min-height: 36px; padding: 8px; margin: 4px 0; white-space: nowrap; text-overflow: ellipsis; }
+.unassigned-outcome-controls { padding: 12px 0; border-bottom: 1px solid var(--color-border); max-width: 440px; }
+.owning-outcome-work { padding: 12px 0; border-top: 1px solid var(--color-border); }
+.roadmap-owned-work > p { padding: 0 12px; }
+.roadmap-triage { margin-top: 20px; }
+.roadmap-triage .board-shelves { display: block; margin: 12px 0; }
+.roadmap-triage .shelf-projects { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.project-roadmap-controls { padding: 12px 0; min-width: 0; }
+.project-roadmap-controls .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.roadmap-link-guidance { margin-top: 12px; }
+.project-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.outcome-placement { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-border); }
+.outcome-placement fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
+[id^="board-stream-title-"], #board-roadmap-triage-title, #board-unassigned-outcomes-title { scroll-margin-top: 125px; }
+@media(max-width:760px) {
+  .project-roadmap-controls input, .project-roadmap-controls select { font-size: 16px; }
+  .outcome-board-controls button { min-height: 44px; }
+  .outcome-drag-handle { min-width: 44px; }
+  .outcome-priority-head { gap: 4px; }
+}

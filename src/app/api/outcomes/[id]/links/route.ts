@@ -1,6 +1,7 @@
-import { db, ensureSchema, transaction } from "@/lib/db";
+import { transaction } from "@/lib/db";
 import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib/security";
 import { replaceOutcomeLinks } from "@/lib/outcome-ownership";
+import { requirePlanningToken } from "@/lib/planning-token";
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   try {
@@ -19,15 +20,14 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       ids.add(link.projectId);
       links.push(link);
     }
-    await ensureSchema();
-    await transaction(async (client) => {
-      await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+    const result = await transaction(async (client) => {
+      await requirePlanningToken(client, body.planningToken);
       const outcome = await client.query("SELECT id FROM outcome WHERE id=$1 FOR UPDATE", [id]);
       if (!outcome.rowCount) throw new HttpError(404, "Outcome not found.");
       const projects = await client.query<{ linear_id: string }>("SELECT linear_id FROM linear_project_cache WHERE linear_id=ANY($1::text[])", [[...ids]]);
       if (projects.rowCount !== ids.size) throw new HttpError(400, "A selected project is not imported.");
-      await replaceOutcomeLinks(client, id, links);
+      return replaceOutcomeLinks(client, id, links);
     });
-    return Response.json({ saved: true });
+    return Response.json(result);
   } catch (error) { return responseError(error); }
 }

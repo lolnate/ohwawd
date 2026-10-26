@@ -3,21 +3,26 @@ import type { PoolClient } from "pg";
 import { getBoard } from "./board";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./security";
-import { adaptLegacyPlanning } from "./legacy-planning";
+import { adaptLegacyPlanning, adaptScopePlanning, adaptRoadmapPlanning } from "./legacy-planning";
+import { roadmapActive } from "./planning-token";
+import { normalizeOutcomeRanks, detachOutcomeWork } from "./roadmap-mutations";
+import { assertRoadmapInvariants } from "./roadmap-store";
+import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
 import { replaceOutcomeLinks } from "./outcome-ownership";
 import { clearIncompatibleOutcomeOwners } from "./sequence-store";
 
-export const calculationVersion = "v4";
+export const calculationVersion = "v5";
 
 type ScenarioClient = Pick<PoolClient, "query">;
 type BoardSnapshot = Awaited<ReturnType<typeof getBoard>>;
+export type ScenarioSnapshot = BoardSnapshot & { outcomeCatalogIds?: string[] };
 type ScenarioRow = {
   id: string;
   name: string;
   edit_version: string | number;
   draft_source_at: Date;
   draft_source_snapshot: unknown;
-  draft_snapshot: BoardSnapshot;
+  draft_snapshot: ScenarioSnapshot;
   archived: boolean;
   created_at: Date;
   updated_at: Date;
@@ -29,7 +34,7 @@ type RevisionRow = {
   draft_edit_version: string | number;
   calculation_version: string;
   source_at: Date;
-  snapshot: BoardSnapshot;
+  snapshot: ScenarioSnapshot;
   rationale: string;
   author: string;
   published_at: Date;
@@ -84,20 +89,31 @@ function sourceSnapshot(board: BoardSnapshot) {
   };
 }
 
-function planningState(original: BoardSnapshot, reference?: BoardSnapshot) {
-  const board = adaptLegacyPlanning(original);
+export function captureScenarioBoard(board: BoardSnapshot, prior?: ScenarioSnapshot): ScenarioSnapshot {
+  if (board.calculationVersion !== "v5") return board;
+  return { ...board, outcomeCatalogIds: [...new Set([...(prior?.outcomeCatalogIds ?? prior?.outcomes.map((item) => item.id) ?? []), ...board.outcomes.map((item) => item.id)])].sort() };
+}
+
+function planningState(original: ScenarioSnapshot, reference?: ScenarioSnapshot, outcomeMode = original.calculationVersion === "v5") {
+  const board = outcomeMode ? adaptRoadmapPlanning(original) : adaptLegacyPlanning(original);
   const packageIds = reference ? new Set(reference.packages.map((item) => item.id)) : null;
+  if (packageIds && outcomeMode) for (const item of board.packages) {
+    if (item.roadmap_state !== "candidate" || item.pause_reason || board.extraScopes.some((extra) => extra.package_id === item.id)) packageIds.add(item.id);
+  }
   const linearEdges = reference ? new Set(reference.dependencies.filter((edge) => edge.source === "linear")
     .map((edge) => `${edge.predecessor_id}\0${edge.successor_id}`)) : null;
   return {
     packages: board.packages.filter((item) => !packageIds || packageIds.has(item.id)).map((item) => ({ id: item.id, streamId: item.stream_id, selected: item.selected,
-      sequence: item.sequence_position ?? null, reason: item.pause_reason, capacityOutcomeId: item.capacity_outcome_id ?? null })).sort((a, b) => a.id.localeCompare(b.id)),
+      sequence: item.sequence_position ?? null, reason: item.pause_reason, capacityOutcomeId: item.capacity_outcome_id ?? null,
+      ...(outcomeMode ? { roadmapState: item.roadmap_state ?? null } : {}) })).sort((a, b) => a.id.localeCompare(b.id)),
     streams: board.streams.map((item) => ({ id: item.id, name: item.name, position: item.position,
       wip: item.wip_limit, allocation: item.allocation })).sort((a, b) => a.id.localeCompare(b.id)),
     links: board.links.map((item) => ({ outcomeId: item.outcome_id, projectId: item.project_id, requirement: item.requirement }))
       .sort((a, b) => `${a.outcomeId}\0${a.projectId}`.localeCompare(`${b.outcomeId}\0${b.projectId}`)),
     outcomes: board.outcomes.map((item) => ({ id: item.id, title: item.title, description: item.description,
-      owner: item.owner, successSignal: item.success_signal, neededBy: item.needed_by, streamId: item.stream_id ?? null })).sort((a, b) => a.id.localeCompare(b.id)),
+      owner: item.owner, successSignal: item.success_signal, neededBy: item.needed_by, streamId: item.stream_id ?? null,
+      ...(outcomeMode ? { streamPosition: item.stream_position ?? null } : {}) })).sort((a, b) => a.id.localeCompare(b.id)),
+    ...(outcomeMode ? { outcomeCatalogIds: [...new Set([...(original.outcomeCatalogIds ?? reference?.outcomeCatalogIds ?? []), ...board.outcomes.map((item) => item.id)])].sort() } : {}),
     capacity: board.capacity,
     adjustments: board.adjustments.map((item) => ({ cycleId: item.linear_cycle_id, availability: item.availability, reserve: item.reserve }))
       .sort((a, b) => a.cycleId.localeCompare(b.cycleId)),
@@ -124,7 +140,7 @@ function fingerprint(value: unknown): string {
 
 export function stablePreviewBoard(board: BoardSnapshot) {
   const { evaluatedAt: _clock, scoping: _readiness, ...stable } = board;
-  return stable;
+  return { ...stable, outcomes: stable.outcomes.map(({ lifecycle: _lifecycle, ...outcome }) => outcome) };
 }
 
 function streamConflicts(snapshot: BoardSnapshot, registry: StreamRegistry) {
@@ -141,7 +157,7 @@ async function currentStreamRegistry(database: ScenarioClient): Promise<StreamRe
   return new Map(streams.rows.map((stream) => [stream.id, { name: stream.name, active: stream.active }]));
 }
 
-function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: ReturnType<typeof revisionSummary>[], registry: StreamRegistry) {
+function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: ReturnType<typeof revisionSummary>[], registry: StreamRegistry, targetVersion: string) {
   return {
     id: row.id,
     name: row.name,
@@ -152,7 +168,11 @@ function scenarioSummary(row: ScenarioRow, currentSourceAt: string, revisions: R
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     streamConflicts: streamConflicts(row.draft_snapshot, registry),
-    conversionNotice: row.draft_snapshot.calculationVersion === "v4" ? null : row.draft_snapshot.calculationVersion === "v3"
+    calculationVersion: row.draft_snapshot.calculationVersion ?? "v0", currentCalculationVersion: targetVersion,
+    requiresConversion: row.draft_snapshot.calculationVersion !== targetVersion,
+    conversionNotice: row.draft_snapshot.calculationVersion === targetVersion ? null : targetVersion === "v5"
+      ? "This draft requires v5 outcome-priority conversion. Load it to review inferred ownership, excluded Needs assignment candidates and scoped dependency conflicts, then explicitly save the board (or accept a reviewed rebase) before publishing. Retired start/rank/must-include controls remain unapplied."
+      : row.draft_snapshot.calculationVersion === "v3"
       ? "This draft predates one-project-per-stream scheduling. Loading recalculates its forecast sequentially; save the board to capture the v4 plan."
       : row.draft_snapshot.calculationVersion === "v2"
       ? "This draft predates projected cycles and sequential stream scheduling. Loading uses the current Linear cadence and marks projected dates provisional; save the board to capture the v4 plan."
@@ -209,7 +229,7 @@ async function summaryFor(database: ScenarioClient, id: string) {
     database.query<RevisionRow>("SELECT * FROM scenario_revision WHERE scenario_id=$1 ORDER BY revision_number", [id]),
     currentStreamRegistry(database),
   ]);
-  return scenarioSummary(row, sourceAt, revisions.rows.map(revisionSummary), registry);
+  return scenarioSummary(row, sourceAt, revisions.rows.map(revisionSummary), registry, await roadmapActive(database) ? calculationVersion : "v4");
 }
 
 export async function listScenarios(client?: ScenarioClient) {
@@ -227,7 +247,8 @@ export async function listScenarios(client?: ScenarioClient) {
   return {
     baselineRevisionId: baseline.rows[0]?.revision_id ?? null,
     activeScenarioId: activeId,
-    activeDraftDirty: !!active && fingerprint(planningState(active.draft_snapshot)) !== fingerprint(planningState(board, active.draft_snapshot)),
+    activeDraftDirty: !!active && (active.draft_snapshot.calculationVersion !== board.calculationVersion ||
+      fingerprint(planningState(active.draft_snapshot, undefined, board.calculationVersion === "v5")) !== fingerprint(planningState(board, active.draft_snapshot, board.calculationVersion === "v5"))),
     currentSourceAt: sourceAt,
     creationReadiness: {
       ready: board.forecast.ready,
@@ -235,7 +256,7 @@ export async function listScenarios(client?: ScenarioClient) {
       warnings: board.reconciliationWarnings.map((warning) => warning.message),
     },
     scenarios: scenarios.rows.map((row) => scenarioSummary(row, sourceAt,
-      revisions.rows.filter((revision) => revision.scenario_id === row.id).map(revisionSummary), registry)),
+      revisions.rows.filter((revision) => revision.scenario_id === row.id).map(revisionSummary), registry, board.calculationVersion)),
   };
 }
 
@@ -248,9 +269,12 @@ export async function createScenario(input: { name: string }, client?: ScenarioC
     code: "SCENARIO_BOARD_NOT_READY", blockers: [...board.forecast.setup, ...board.forecast.errors],
   });
   const id = randomUUID();
+  const activeId = await activeScenarioId(database);
+  const prior = activeId ? (await loadScenario(database, activeId)).draft_snapshot : undefined;
+  const snapshot = captureScenarioBoard(board, prior);
   const result = await database.query(`INSERT INTO scenario(id,workspace_id,name,draft_source_at,draft_source_snapshot,draft_snapshot)
     VALUES($1,1,$2,$3,$4::jsonb,$5::jsonb) ON CONFLICT(workspace_id,name) DO NOTHING RETURNING id`,
-  [id, name, board.forecast.sourceAt, JSON.stringify(sourceSnapshot(board)), JSON.stringify(board)]);
+  [id, name, board.forecast.sourceAt, JSON.stringify(sourceSnapshot(board)), JSON.stringify(snapshot)]);
   if (!result.rowCount) throw new HttpError(409, "A scenario with that name already exists.", { code: "SCENARIO_NAME_CONFLICT" });
   await database.query(`INSERT INTO workspace_scenario_state(workspace_id,active_scenario_id) VALUES(1,$1)
     ON CONFLICT(workspace_id) DO UPDATE SET active_scenario_id=EXCLUDED.active_scenario_id`, [id]);
@@ -276,7 +300,7 @@ export async function saveScenario(id: string, input: { expectedVersion: number;
   if (typeof archived !== "boolean") throw new HttpError(400, "archived must be a boolean.");
   const updated = await database.query(`UPDATE scenario SET name=$3,archived=$4,draft_snapshot=$5::jsonb,
     edit_version=edit_version+1,updated_at=now() WHERE id=$1 AND edit_version=$2 RETURNING edit_version`,
-  [id, expectedVersion, name, archived, JSON.stringify(board)]);
+  [id, expectedVersion, name, archived, JSON.stringify(captureScenarioBoard(board, existing.draft_snapshot))]);
   if (!updated.rowCount) {
     const latest = await loadScenario(database, id);
     throw new ScenarioConflictError(expectedVersion, Number(latest.edit_version));
@@ -311,7 +335,7 @@ export async function rebaseScenario(id: string, input: { expectedVersion: numbe
   const updated = await database.query(`UPDATE scenario SET draft_source_at=$3,draft_source_snapshot=$4::jsonb,
     draft_snapshot=$5::jsonb,edit_version=edit_version+1,updated_at=now()
     WHERE id=$1 AND edit_version=$2 RETURNING edit_version`,
-  [id, expectedVersion, board.forecast.sourceAt, JSON.stringify(sourceSnapshot(board)), JSON.stringify(board)]);
+  [id, expectedVersion, board.forecast.sourceAt, JSON.stringify(sourceSnapshot(board)), JSON.stringify(captureScenarioBoard(board, existing.draft_snapshot))]);
   if (!updated.rowCount) {
     const latest = await loadScenario(database, id);
     throw new ScenarioConflictError(expectedVersion, Number(latest.edit_version));
@@ -327,17 +351,32 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   const scenario = await loadScenario(database, id, true);
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
-  const snapshot = adaptLegacyPlanning(scenario.draft_snapshot);
+  const activeRoadmap = await roadmapActive(database);
+  const snapshot = activeRoadmap ? adaptScopePlanning(scenario.draft_snapshot) : adaptLegacyPlanning(scenario.draft_snapshot);
   const conflicts = streamConflicts(snapshot, await currentStreamRegistry(database));
   if (conflicts.length) throw new HttpError(409, "This draft references retired streams. Restore those streams or create a reconciled draft from the current board.", {
     code: "STREAM_RECONCILIATION_REQUIRED", streamConflicts: conflicts,
   });
 
+  if (activeRoadmap) {
+    const converted = adaptRoadmapPlanning(scenario.draft_snapshot);
+    snapshot.packages = converted.packages; snapshot.outcomes = converted.outcomes;
+    await database.query("SET CONSTRAINTS outcome_stream_position_key DEFERRED");
+    await database.query("UPDATE outcome SET stream_position=stream_position+100000 WHERE stream_id IS NOT NULL");
+  }
+
   for (const item of snapshot.packages) {
-    await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4,pause_reason=$5,capacity_outcome_id=NULL WHERE id=$1`,
+    if (activeRoadmap) await database.query("UPDATE work_package SET roadmap_state='candidate',selected=false,stream_id=NULL,capacity_outcome_id=NULL,sequence_position=NULL,pause_reason=$2 WHERE id=$1", [item.id, item.pause_reason]);
+    else await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4,pause_reason=$5,capacity_outcome_id=NULL WHERE id=$1`,
     [item.id, item.stream_id, item.selected, item.sequence_position ?? null, item.pause_reason]);
   }
-  await database.query(`UPDATE work_package w SET sequence_position=ordered.position FROM
+  const omittedOutcomeIds = activeRoadmap ? (scenario.draft_snapshot.outcomeCatalogIds ?? []).filter((id) => !snapshot.outcomes.some((item) => item.id === id)) : [];
+  for (const outcomeId of omittedOutcomeIds) {
+    await detachOutcomeWork(database, outcomeId);
+    await database.query("DELETE FROM outcome WHERE id=$1", [outcomeId]);
+  }
+  if (omittedOutcomeIds.length) await reconcileOutcomeCompletions(database, "Owner", omittedOutcomeIds);
+  if (!activeRoadmap) await database.query(`UPDATE work_package w SET sequence_position=ordered.position FROM
     (SELECT id,row_number() OVER(PARTITION BY stream_id ORDER BY sequence_position NULLS LAST,id)::integer AS position
       FROM work_package WHERE selected AND stream_id IS NOT NULL) ordered WHERE w.id=ordered.id`);
   const snapshotStreamIds = snapshot.streams.map((stream) => stream.id);
@@ -396,7 +435,10 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   }
 
   for (const outcome of snapshot.outcomes) {
-    await database.query(`INSERT INTO outcome(id,title,description,owner,success_signal,needed_by,stream_id)
+    if (activeRoadmap) await database.query(`INSERT INTO outcome(id,title,description,owner,success_signal,needed_by,stream_id,stream_position,created_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::timestamptz,now())) ON CONFLICT(id) DO UPDATE SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6,stream_id=$7,stream_position=$8,updated_at=now()`,
+    [outcome.id, outcome.title, outcome.description ?? "", outcome.owner ?? "", outcome.success_signal ?? "", outcome.needed_by, outcome.stream_id ?? null, outcome.stream_position ?? null, outcome.created_at ?? null]);
+    else await database.query(`INSERT INTO outcome(id,title,description,owner,success_signal,needed_by,stream_id)
       VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET title=$2,description=$3,owner=$4,success_signal=$5,needed_by=$6,stream_id=$7,updated_at=now()`,
     [outcome.id, outcome.title, outcome.description ?? "", outcome.owner ?? "", outcome.success_signal ?? "", outcome.needed_by, outcome.stream_id ?? null]);
   }
@@ -405,15 +447,20 @@ export async function activateScenario(id: string, input: { expectedVersion: num
     await replaceOutcomeLinks(database, outcome.id, snapshot.links.filter((link) => link.outcome_id === outcome.id && available.rows.some((project) => project.linear_id === link.project_id)).map((link) => ({ projectId: link.project_id, requirement: link.requirement })));
   }
   for (const item of snapshot.packages) {
-    await database.query(`UPDATE work_package w SET capacity_outcome_id=$2 WHERE w.id=$1 AND w.selected
+    if (activeRoadmap) await database.query(`UPDATE work_package SET roadmap_state=$2,selected=$3,stream_id=$4,capacity_outcome_id=$5,sequence_position=$6,roadmap_conversion=$7::jsonb WHERE id=$1`,
+      [item.id, item.roadmap_state, item.selected, item.stream_id, item.capacity_outcome_id, item.sequence_position, item.roadmap_conversion ? JSON.stringify(item.roadmap_conversion) : null]);
+    else await database.query(`UPDATE work_package w SET capacity_outcome_id=$2 WHERE w.id=$1 AND w.selected
       AND EXISTS(SELECT 1 FROM outcome o JOIN outcome_project_link l ON l.outcome_id=o.id
         WHERE o.id=$2 AND l.project_id=w.project_id AND o.stream_id=w.stream_id)`, [item.id, item.capacity_outcome_id ?? null]);
   }
   // Later-imported packages retain their placement, but cannot keep an owner whose stream moved.
   await clearIncompatibleOutcomeOwners(database);
+  if (activeRoadmap) { await normalizeOutcomeRanks(database); await assertRoadmapInvariants(database); }
+  await reconcileOutcomeCompletions(database);
   await database.query(`INSERT INTO workspace_scenario_state(workspace_id,active_scenario_id) VALUES(1,$1)
     ON CONFLICT(workspace_id) DO UPDATE SET active_scenario_id=EXCLUDED.active_scenario_id`, [id]);
-  return summaryFor(database, id);
+  const restored = await getBoard(database);
+  return { ...await summaryFor(database, id), activationFeedback: { conversionFeedback: restored.roadmapConversionFeedback.map((item) => ({ ...item, packageName: restored.packages.find((project) => project.id === item.packageId)?.name ?? item.packageId })), sequenceConflicts: restored.sequenceConflicts, omittedOutcomeIds } };
 }
 
 export async function publishScenario(id: string, input: {
@@ -421,11 +468,12 @@ export async function publishScenario(id: string, input: {
 }, client?: ScenarioClient) {
   const database = await useDatabase(client);
   await database.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+  const targetVersion = await roadmapActive(database) ? calculationVersion : "v4";
   const expectedVersion = validateVersion(input.expectedVersion);
   const scenario = await loadScenario(database, id, true);
   const currentVersion = Number(scenario.edit_version);
   if (currentVersion !== expectedVersion) throw new ScenarioConflictError(expectedVersion, currentVersion);
-  if (scenario.draft_snapshot.calculationVersion !== calculationVersion) throw new HttpError(409, "Load and save this older draft to capture current scheduling assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
+  if (scenario.draft_snapshot.calculationVersion !== targetVersion) throw new HttpError(409, "Load and save this older draft to capture current scheduling assumptions before publishing.", { code: "LEGACY_DRAFT_REQUIRES_SAVE" });
   const rationale = typeof input.rationale === "string" ? input.rationale.trim() : "";
   const author = typeof input.author === "string" ? input.author.trim() : "";
   if (!rationale || rationale.length > 4000) throw new HttpError(400, "Publishing requires a rationale of at most 4000 characters.");
@@ -454,7 +502,7 @@ export async function publishScenario(id: string, input: {
   }
   if (await activeScenarioId(database) === id) {
     const board = await getBoard(database);
-    if (fingerprint(planningState(scenario.draft_snapshot)) !== fingerprint(planningState(board, scenario.draft_snapshot))) {
+    if (fingerprint(planningState(scenario.draft_snapshot, undefined, targetVersion === "v5")) !== fingerprint(planningState(board, scenario.draft_snapshot, targetVersion === "v5"))) {
       throw new HttpError(409, "Save the visible board changes to this draft before publishing.", { code: "DRAFT_HAS_UNSAVED_CHANGES" });
     }
   }
@@ -464,7 +512,7 @@ export async function publishScenario(id: string, input: {
   const inserted = await database.query<RevisionRow>(`INSERT INTO scenario_revision(id,scenario_id,revision_number,draft_edit_version,
     calculation_version,source_at,source_snapshot,snapshot,rationale,author,stale_source_confirmed)
     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11) RETURNING *`,
-  [revisionId, id, number.rows[0].revision_number, expectedVersion, calculationVersion, scenario.draft_source_at,
+  [revisionId, id, number.rows[0].revision_number, expectedVersion, targetVersion, scenario.draft_source_at,
     JSON.stringify(scenario.draft_source_snapshot), JSON.stringify(scenario.draft_snapshot), rationale, author, stale]);
   return revisionSummary(inserted.rows[0]);
 }
@@ -493,9 +541,9 @@ async function resolveSnapshot(database: ScenarioClient, reference: ScenarioRefe
   return { label: `${row.name} r${row.revision_number}`, kind: reference.kind, id: row.id, sourceAt: iso(row.source_at), snapshot: row.snapshot };
 }
 
-export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: BoardSnapshot) {
-  const left = adaptLegacyPlanning(originalLeft);
-  const right = adaptLegacyPlanning(originalRight);
+export function compareSnapshots(originalLeft: ScenarioSnapshot, originalRight: ScenarioSnapshot) {
+  const left = originalLeft.calculationVersion === "v5" ? structuredClone(originalLeft) : adaptLegacyPlanning(originalLeft);
+  const right = originalRight.calculationVersion === "v5" ? structuredClone(originalRight) : adaptLegacyPlanning(originalRight);
   const leftPackages = new Map(left.packages.map((item) => [item.id, item]));
   const rightPackages = new Map(right.packages.map((item) => [item.id, item]));
   const leftStreamNames = new Map(left.streams.map((item) => [item.id, item.name]));
@@ -506,10 +554,12 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     const after = rightPackages.get(id);
     const from = before ? { selected: before.selected, streamId: before.stream_id ? leftStreamNames.get(before.stream_id) ?? "Retired stream" : null,
       sequence: before.sequence_position ?? null, pauseReason: before.pause_reason, capacityOutcomeId: before.capacity_outcome_id ?? null,
-      capacityOutcome: left.outcomes.find((outcome) => outcome.id === before.capacity_outcome_id)?.title ?? null } : null;
+      capacityOutcome: left.outcomes.find((outcome) => outcome.id === before.capacity_outcome_id)?.title ?? null,
+      roadmapState: originalLeft.packages.find((item) => item.id === id)?.roadmap_state ?? null } : null;
     const to = after ? { selected: after.selected, streamId: after.stream_id ? rightStreamNames.get(after.stream_id) ?? "Retired stream" : null,
       sequence: after.sequence_position ?? null, pauseReason: after.pause_reason, capacityOutcomeId: after.capacity_outcome_id ?? null,
-      capacityOutcome: right.outcomes.find((outcome) => outcome.id === after.capacity_outcome_id)?.title ?? null } : null;
+      capacityOutcome: right.outcomes.find((outcome) => outcome.id === after.capacity_outcome_id)?.title ?? null,
+      roadmapState: originalRight.packages.find((item) => item.id === id)?.roadmap_state ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: after?.name ?? before?.name ?? id, from, to }];
   });
   const leftOutcomes = new Map(left.forecast.outcomes.map((item) => [item.id, item]));
@@ -524,11 +574,11 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     const from = before ? { status: before.status, calendarProjected: before.calendarProjected ?? false, endDate: before.endDate, target: before.target, gapCycles: before.gapCycles, reasons: before.reasons,
       title: beforeDefinition?.title ?? null, description: beforeDefinition?.description ?? "", owner: beforeDefinition?.owner ?? "",
       successSignal: beforeDefinition?.success_signal ?? "", neededBy: beforeDefinition?.needed_by ?? null, streamId: beforeDefinition?.stream_id ?? null,
-      streamName: leftStreamNames.get(beforeDefinition?.stream_id ?? "") ?? null } : null;
+      streamName: leftStreamNames.get(beforeDefinition?.stream_id ?? "") ?? null, streamPosition: beforeDefinition?.stream_position ?? null } : null;
     const to = after ? { status: after.status, calendarProjected: after.calendarProjected ?? false, endDate: after.endDate, target: after.target, gapCycles: after.gapCycles, reasons: after.reasons,
       title: afterDefinition?.title ?? null, description: afterDefinition?.description ?? "", owner: afterDefinition?.owner ?? "",
       successSignal: afterDefinition?.success_signal ?? "", neededBy: afterDefinition?.needed_by ?? null, streamId: afterDefinition?.stream_id ?? null,
-      streamName: rightStreamNames.get(afterDefinition?.stream_id ?? "") ?? null } : null;
+      streamName: rightStreamNames.get(afterDefinition?.stream_id ?? "") ?? null, streamPosition: afterDefinition?.stream_position ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, title: outcomeNames.get(id) ?? id, from, to }];
   });
   const leftStreams = new Map(left.streams.map((item) => [item.id, item]));
@@ -583,6 +633,19 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     .map((change) => ({ ...change, name: cycleNames.get(change.id) ?? "Removed cycle" }));
   const weeklyAvailability = namedChanges(left.weeklyAdjustments.map((week) => ({ ...week })), right.weeklyAdjustments.map((week) => ({ ...week })), (week) => week.weekStart)
     .map((change) => ({ ...change, name: `Week of ${change.id}` }));
+  const lifecycleValue = (definition: BoardSnapshot["outcomes"][number] | undefined) => !definition ? null : !definition.lifecycle ? { recorded: false as const } : {
+    recorded: true as const, completedAt: definition.lifecycle.completedAt, lifecycleVersion: definition.lifecycle.lifecycleVersion,
+    ready: definition.lifecycle.ready, reasons: definition.lifecycle.reasons, reviewNeeded: definition.lifecycle.reviewNeeded, reviewReasons: definition.lifecycle.reviewReasons };
+  const lifecycleIds = [...new Set([...originalLeft.outcomes, ...originalRight.outcomes].map((item) => item.id))].sort();
+  const outcomeLifecycles = lifecycleIds.map((id) => ({ id, title: outcomeNames.get(id) ?? id,
+    from: lifecycleValue(originalLeft.outcomes.find((item) => item.id === id)), to: lifecycleValue(originalRight.outcomes.find((item) => item.id === id)) }));
+  const leftManaged = new Set(originalLeft.outcomeCatalogIds ?? originalLeft.outcomes.map((item) => item.id));
+  const rightManaged = new Set(originalRight.outcomeCatalogIds ?? originalRight.outcomes.map((item) => item.id));
+  const managedOutcomes = [...new Set([...leftManaged, ...rightManaged])].sort().flatMap((id) => {
+    const from = { managed: leftManaged.has(id), present: originalLeft.outcomes.some((item) => item.id === id) };
+    const to = { managed: rightManaged.has(id), present: originalRight.outcomes.some((item) => item.id === id) };
+    return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: outcomeNames.get(id) ?? id, from, to }];
+  });
   return {
     calculationVersions: { from: originalLeft.calculationVersion ?? "v0", to: originalRight.calculationVersion ?? "v0" },
     sourceChanged: left.forecast.sourceAt !== right.forecast.sourceAt,
@@ -603,6 +666,8 @@ export function compareSnapshots(originalLeft: BoardSnapshot, originalRight: Boa
     links,
     linearCycles,
     weeklyAvailability,
+    outcomeLifecycles,
+    managedOutcomes,
   };
 }
 

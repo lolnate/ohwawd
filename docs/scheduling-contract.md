@@ -1,8 +1,47 @@
 # Scheduling and scenario contract
 
-## Current calculation: v4
+## Current calculation: v5 for activated roadmap planning
 
-**Planned successor:** [implement-outcome-first-board](../openspec/changes/implement-outcome-first-board/design.md) defines v5 outcome-priority scheduling, explicit roadmap membership and compatibility rules. It is specification/planning work; the current runtime contract below remains v4 until its implementation Beans are delivered and verified. Manual outcome completion will remain a workspace business fact independent of scheduling and scenario activation.
+Activated roadmap Board reads, scenario saves and new publication now use **v5**. [Scenario compatibility](scenario-v5-compatibility.md) preserves membership/ranks/scoped order, explicit legacy conversion and frozen lifecycle history; the temporary publication pause has been removed. Pre-activation reads retain v4 scheduling. Published historical results are never recalculated by this change. Compact Board controls are implemented; immediate-prerequisite timeline appearances/connectors and their visible dependency context remain in the dependent timeline task.
+
+### Inputs and selection
+
+- Each scheduled project has `roadmapState='included'` and one linked owning outcome with a positive saved rank in the same active stream. Candidate, dismissed and deferred demand is excluded; stale `selected` flags cannot include it. Invalid/missing ownership or membership is explained without scheduling an ownerless charge.
+- Expand every outcome's minimum-required links through the full effective dependency closure. Its portfolio-wide union is the **required tier**; other included work is optional tier. An optional project becomes effectively required only through a minimum-required link or a real dependency path, never merely because it appears as a shared reference.
+- Carry the single project already started in a prior simulated cycle while unfinished. Otherwise select one eligible project per stream by `(required tier first, owning outcome rank, project sequence within that owner, stable package ID)`. No rank is donated from a higher-ranked dependent to a lower-ranked prerequisite owner, and Linear priority/manual completion markers are not scheduling inputs.
+- Dependencies remain finish-to-start: a predecessor completing in cycle C unlocks its successor in a later cycle. Actually reconciled-complete work satisfies dependencies before C1 even when excluded from the roadmap. Unfinished excluded or unavailable prerequisites remain unresolved; neither dismissal nor deferral satisfies an edge.
+- Required-tier work can run before a higher-ranked outcome's optional-only work. Started optional work is carried rather than preempted when required work later becomes eligible. Priority therefore does not guarantee finish order.
+
+The approved same-stream example has H ranked 1 owning B, M ranked 2 owning C, L ranked 3 owning A, and A → B. With 5 points each and 10 points/cycle, **C runs in C1, A in C2, B in C3**. Moving L above M produces A, B, C. There is no automatic rank edit or duplicate prerequisite charge.
+
+### Capacity, conflicts and honest dates
+
+The existing availability/calendar, reserve, allocation, thousandth-point rounding, one-project execution slot and no-borrowing rules continue to apply. Unused budget does not start another project in the same stream/cycle. A positive-demand project is not assigned a start in a zero-budget cycle; explicitly estimated zero-demand work still waits for its dependencies and occupies its chosen cycle slot without consuming points. Unknown estimates without acknowledged Extra scope still prevent finite completion. Projected-cycle provenance remains independent of ownership and outcome priority.
+
+Within one owner, source-introduced direct/transitive precedence conflicts preserve saved project order and withhold unfinished dates for that owner. Other valid owners in the same stream remain schedulable subject to their dependencies. Cross-owner same-stream priority inversions are dependency waits rather than queue-order conflicts. Effective dependency cycles remain invalid for forecasting.
+
+### Structured wait and bypass output
+
+Activated `forecast.outcomes[]` has two additive fields (older outputs can lack them):
+
+- **`waiting`**: deduplicated prerequisite identity/full name, owning outcome/stream or excluded/unavailable state, affected `successorIds`, whether it gates required delivery, first/last simulated waiting cycle, eventual `forecastFinish`, unresolved `reason`, and an inspection/include/resume/source-review action. Required scope includes deeper prerequisites; optional-only context does not silently gate delivery. Missing setup uses null cycle context without inventing dates. A finite prerequisite forecast does not mean it is actually complete now.
+- **`priorityBypass`**: each newly selected lower-ranked project, its owner and cycle, plus the more-preferred local owned projects blocked by dependencies and the prerequisite IDs they were waiting for. This records actual simulated choices, not a strict completion-order guarantee. It is not emitted merely for unknown estimates, zero capacity, required-before-optional selection, or non-preemptive carry when a higher-ranked project is independently eligible.
+
+Wait intervals describe dependency constraints encountered during the forecast; they can remain explanatory even when that prerequisite eventually receives a finite forecast. Current saved source facts remain authoritative. The later Board presentation can target project inspection using the supplied prerequisite IDs without parsing prose or requiring connector graphics.
+
+### Shared actual-completion and closure helpers
+
+`src/lib/delivery-scope.ts` exports `isActuallyComplete`, `effectivePredecessors` and `effectiveRequiredClosure` for forecast and subsequent lifecycle work. Actual completion requires completed source status, zero open issues, no remaining Extra scope, no missing-source review, no cross-team decomposition and no unresolved external blockers. A canceled status or a forecast finish is insufficient. Closure retains missing nodes as unresolved scope, deduplicates source/local edges, excludes waived edges and terminates safely on cycles without mutating input data.
+
+Verification is recorded in `ohwawd-d92k` and `tests/outcome-priority-forecast.test.ts`: priority/tier/carry examples, excluded versus actual completion, scoped conflicts, deep/missing/waived constraints, unknown/zero demand, capacity conservation, deterministic tie-breaks and activated PGlite Board/rank/source integration.
+
+Scheduler-core verification passed: typecheck, **116 unit/database tests** (including 18 new outcome-priority/closure/integration cases), production build, **54 affected browser tests**, strict current-spec/change and archived-checklist validation, and whitespace checks. The browser regression suites cover assignment, catalog/sidebar, ownership, workspace organization and Settings editors; new scheduling acceptance evidence comes from pure and activated PGlite tests rather than a completed Board-control walkthrough. No existing database was migrated during this task.
+
+## Legacy calculation: v4 before roadmap activation
+
+**Successor in implementation:** [implement-outcome-first-board](../openspec/changes/implement-outcome-first-board/design.md) defines v5 outcome-priority scheduling, explicit roadmap membership and compatibility rules. Manual outcome completion will remain a workspace business fact independent of scheduling and scenario activation.
+
+The [data foundation](roadmap-migration.md) provides migration 6's additive storage and migration 7's coordinated writer activation. Before activation, nullable fields preserve v4 selection semantics. Activated plans use v5 scheduling and versioned scenario publication. The v4 rules below describe legacy results; existing published inputs/output/version remain frozen. [Mutation contracts](roadmap-mutations.md) document the delivered activation stage.
 
 V4 forecasts execute at most one project per stream per cycle, regardless of outcome or saved legacy WIP limit. Carry unfinished work first; otherwise select the earliest eligible project in queue order, skipping blocked projects. Another project in that stream cannot start until the cycle after its predecessor finishes. Independent streams may run concurrently, unused budgets are not borrowed across streams, and moving a project recalculates its forecast. New streams have WIP one; older saved WIP limits above one cannot enable overlap. Older published revisions retain their frozen results; older editable drafts display a conversion notice and must be loaded and saved before publishing under v4.
 

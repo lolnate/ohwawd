@@ -2,6 +2,7 @@ import type { getBoard } from "./board";
 import { dependencyOrder, type QueuePackage } from "./sequencing";
 import { issueBaseline, type ExtraScope } from "./project-scope";
 import { inferOutcomePlanning } from "./outcome-planning";
+import { convertRoadmapPlanning } from "./roadmap-planning";
 
 type BoardSnapshot = Awaited<ReturnType<typeof getBoard>>;
 type LegacyAllowance = { package_id: string; kind: string; points: number; issue_ids: string[]; rationale: string };
@@ -13,13 +14,21 @@ export function adaptLegacyPlanning(original: BoardSnapshot): BoardSnapshot {
   return { ...snapshot, ...inferred };
 }
 
-function adaptScopePlanning(original: BoardSnapshot): BoardSnapshot {
-  if (original.calculationVersion === "v3" && original.extraScopes) return original;
+/** Editable v5 conversion only. Historical comparisons must not use this to
+ * invent membership/ranks or recalculate a published revision's forecast. */
+export function adaptRoadmapPlanning(original: BoardSnapshot): BoardSnapshot {
+  if (original.calculationVersion === "v5") return structuredClone(original);
+  const snapshot = adaptScopePlanning(original);
+  const converted = convertRoadmapPlanning({ packages: snapshot.packages, outcomes: snapshot.outcomes, links: snapshot.links, streams: snapshot.streams });
+  return { ...snapshot, ...converted };
+}
+
+export function adaptScopePlanning(original: BoardSnapshot): BoardSnapshot {
   const snapshot = structuredClone(original);
   snapshot.weeklyAdjustments ??= [];
   snapshot.holidayWeeks ??= [];
   snapshot.capacity.holidays_enabled ??= false;
-  if (original.extraScopes) { snapshot.calculationVersion = "v3"; return snapshot; }
+  if (original.extraScopes) return snapshot;
   const legacy = original as BoardSnapshot & { allowances?: LegacyAllowance[] };
   const edges = snapshot.dependencies.map((edge) => ({ predecessorId: edge.predecessor_id, successorId: edge.successor_id, waived: edge.waived }));
   const queues: QueuePackage[] = snapshot.packages.map((item) => ({ id: item.id, name: item.name, streamId: item.stream_id, selected: item.selected,
@@ -45,7 +54,7 @@ function adaptScopePlanning(original: BoardSnapshot): BoardSnapshot {
   for (const item of snapshot.packages) {
     item.linear_priority ??= null;
     if (!item.selected) { item.stream_id = null; item.sequence_position = null; }
-    for (const key of ["priority_rank", "must_include", "earliest_cycle", "preferred_cycle", "earliest_linear_cycle_id", "preferred_linear_cycle_id"]) delete item[key];
+    for (const key of ["priority_rank", "must_include", "earliest_cycle", "preferred_cycle", "earliest_linear_cycle_id", "preferred_linear_cycle_id"] as const) delete item[key];
   }
   return snapshot;
 }

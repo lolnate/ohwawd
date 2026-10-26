@@ -96,20 +96,21 @@ Selecting a project block SHALL open the project sidebar with imported facts, es
 ## ADDED Requirements
 
 ### Requirement: Outcome priority has accessible reorder controls
-Outcome rows SHALL support drag/drop, up/down keyboard controls and explicit before/after insertion controls for equivalent rank and stream moves. Every path SHALL apply identical atomic validation and stale-write protection, retain usable focus and announce the result. Outcome rank SHALL represent priority among eligible work, not a dependency or a guaranteed finish order.
+Outcome rows SHALL expose a separate drag handle without inline rank or placement controls. Clean saved Details SHALL expose destination and move-before/move-after controls as the keyboard and touch equivalent. Both paths SHALL use the same validated, stale-protected write. Outcome rank SHALL be a scheduling preference, not a dependency or guaranteed finish order.
 
 #### Scenario: Reorder without dragging
-- **WHEN** the planner moves an outcome before another using touch or keyboard controls
+- **WHEN** the planner opens an outcome and moves it before or after another outcome using the sidebar controls
 - **THEN** its persisted rank, visible row order and scheduling preference match the equivalent drop
 - **AND** reload preserves the order without changing project links or source priority
+- **AND** the result is announced while focus and the open sidebar remain usable
 
 #### Scenario: Lower-ranked owner supplies a higher-ranked prerequisite
 - **WHEN** a higher-ranked outcome waits for a project owned by a lower-ranked outcome
 - **THEN** the saved ranks remain unchanged and dependency-safe scheduling can select eligible lower-ranked work
-- **AND** the higher-ranked row explains the prerequisite and that priority does not guarantee finish order
+- **AND** timeline/project dependency context explains the prerequisite without expanding the sticky outcome label
 
 ### Requirement: Outcome titles open the shared outcome workspace
-Board outcome titles SHALL open saved Details in the same outcome sidebar used by catalog and delivery titles. Reorder handles SHALL be separate from title controls. Opening SHALL retain Board scroll and rank context; dismissal SHALL restore the title or a stable stream heading. Project and outcome sidebars SHALL NOT be stacked.
+Board outcome titles SHALL open saved Details in the same outcome sidebar used by catalog and delivery titles. Compact drag handles SHALL be separate from title controls, and non-drag placement controls SHALL live in saved Details. Opening SHALL retain Board scroll and rank context; dismissal SHALL restore the title or a stable stream heading. Project and outcome sidebars SHALL NOT be stacked.
 
 #### Scenario: Inspect lifecycle from Board
 - **WHEN** the planner activates an outcome title on Board

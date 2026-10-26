@@ -1,11 +1,14 @@
 import { transaction } from "@/lib/db";
 import { assignPackagesToStream, getBoard } from "@/lib/board";
 import { HttpError, requireOwner, requireSameOrigin, responseError } from "@/lib/security";
-import { placeProjects, requireSequenceToken, rejectNewOrderConflicts } from "@/lib/sequence-store";
+import { placeProjects, requireSequenceToken } from "@/lib/sequence-store";
 import { saveExtraScope, saveScopingWindow } from "@/lib/scope-store";
 import { saveHolidayPreset, saveWeeklyAvailability } from "@/lib/weekly-capacity-store";
 import { assignOutcomeToStream, transferProjectOwnership } from "@/lib/outcome-ownership";
 import { saveCapacityProfile } from "@/lib/capacity-store";
+import { changeRoadmapMembership } from "@/lib/roadmap-mutations";
+import { assertRoadmapInvariants } from "@/lib/roadmap-store";
+import { saveDependency } from "@/lib/dependency-store";
 
 const finite = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
@@ -19,6 +22,10 @@ export async function PUT(request: Request): Promise<Response> {
     await requireOwner(); await requireSameOrigin(request);
     const body = await request.json();
     if (!body || typeof body !== "object") throw new HttpError(400, "Invalid board change.");
+    if (["roadmapMembership", "ownership", "outcomeAssignment"].includes(body.type)) for (const field of ["priority", "priorityRank", "priority_rank", "mustInclude", "must_include", "earliestCycle", "preferredCycle", "earliestCycleId", "preferredCycleId", "earliest_cycle", "preferred_cycle", "earliest_linear_cycle_id", "preferred_linear_cycle_id", "earliest", "preferred"]) {
+      if (field in body) throw new HttpError(400, `Unsupported planning control: ${field}. Use outcome priority and scoped project order.`);
+    }
+    let affectedCandidates: { id: string; name: string }[] = [];
     await transaction(async (client) => {
       await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
       if (body.type === "package") {
@@ -36,10 +43,13 @@ export async function PUT(request: Request): Promise<Response> {
         const reason = body.reason === undefined ? row.pause_reason : body.reason;
         if (typeof reason !== "string" || reason.length > 1000) throw new HttpError(400, "Invalid rationale.");
         if (body.beforeId !== undefined && body.beforeId !== null && typeof body.beforeId !== "string") throw new HttpError(400, "Choose an insertion project or end of stream.");
-        await placeProjects(client, [{ packageId: body.id, selected, streamId, beforeId: body.beforeId }]);
+        await placeProjects(client, [{ packageId: body.id, selected, streamId, beforeId: body.beforeId, outcomeId: body.outcomeId }]);
         await client.query("UPDATE work_package SET pause_reason=$2 WHERE id=$1", [body.id, reason.trim()]);
+      } else if (body.type === "roadmapMembership") {
+        await changeRoadmapMembership(client, body);
       } else if (body.type === "outcomeAssignment") {
-        await assignOutcomeToStream(client, body);
+        const result = await assignOutcomeToStream(client, body);
+        affectedCandidates = result?.affectedCandidates ?? [];
       } else if (body.type === "ownership") {
         await transferProjectOwnership(client, body);
       } else if (body.type === "stream") {
@@ -63,7 +73,8 @@ export async function PUT(request: Request): Promise<Response> {
         const packages = await client.query("SELECT id FROM work_package WHERE id=ANY($1::text[]) FOR UPDATE", [body.packageIds]);
         if (packages.rowCount !== body.packageIds.length) throw new HttpError(400, "Every package must exist.");
         // stream_id is scalar, so assigning here moves existing assignments rather than duplicating them.
-        await assignPackagesToStream(client, body.streamId, body.packageIds);
+        if (body.outcomeId !== undefined && typeof body.outcomeId !== "string") throw new HttpError(400, "Choose an owning outcome.");
+        await assignPackagesToStream(client, body.streamId, body.packageIds, body.outcomeId);
       } else if (body.type === "capacity") {
         await saveCapacityProfile(client, body);
       } else if (body.type === "adjustment") {
@@ -90,28 +101,10 @@ export async function PUT(request: Request): Promise<Response> {
       } else if (body.type === "allowance") {
         throw new HttpError(400, "Scope allowances have been replaced by Extra scope points and optional notes.");
       } else if (body.type === "dependency") {
-        const beforeSequence = await requireSequenceToken(client, body.sequenceToken);
-        if (typeof body.predecessorId !== "string" || typeof body.successorId !== "string" || body.predecessorId === body.successorId) throw new HttpError(400, "Choose two different packages.");
-        if (body.action === "remove") { await client.query("DELETE FROM package_dependency WHERE predecessor_id=$1 AND successor_id=$2 AND source='local'", [body.predecessorId, body.successorId]); return; }
-        if (body.action === "waive") {
-          if (typeof body.reason !== "string" || !body.reason.trim()) throw new HttpError(400, "Explain the Linear dependency waiver.");
-          const result = await client.query("UPDATE package_dependency SET waived=true,waiver_reason=$3 WHERE predecessor_id=$1 AND successor_id=$2 AND source='linear'", [body.predecessorId, body.successorId, body.reason.trim()]);
-          if (!result.rowCount) throw new HttpError(404, "Linear dependency not found.");
-          return;
-        }
-        if (body.action === "restore") {
-          const result = await client.query("UPDATE package_dependency SET waived=false,waiver_reason='' WHERE predecessor_id=$1 AND successor_id=$2 AND source='linear'", [body.predecessorId, body.successorId]);
-          if (!result.rowCount) throw new HttpError(404, "Linear dependency not found.");
-          await rejectNewOrderConflicts(client, beforeSequence);
-          return;
-        }
-        if (body.action !== "add") throw new HttpError(400, "Invalid dependency action.");
-        const found = await client.query("SELECT id FROM work_package WHERE id=ANY($1::text[])", [[body.predecessorId, body.successorId]]);
-        if (found.rowCount !== 2) throw new HttpError(400, "Both packages must exist.");
-        await client.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES($1,$2,'local') ON CONFLICT DO NOTHING", [body.predecessorId, body.successorId]);
-        await rejectNewOrderConflicts(client, beforeSequence);
+        await saveDependency(client, body);
       } else throw new HttpError(400, "Unknown board change.");
+      await assertRoadmapInvariants(client);
     });
-    return Response.json(await getBoard());
+    return Response.json({ ...await getBoard(), affectedCandidates });
   } catch (error) { return responseError(error); }
 }

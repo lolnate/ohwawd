@@ -30,14 +30,14 @@ export async function POST(request: Request): Promise<Response> {
       links.push(link);
     }
     const id = randomUUID();
-    await transaction(async (client) => {
+    const result = await transaction(async (client) => {
       await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
       const projects = await client.query<{ linear_id: string }>("SELECT linear_id FROM linear_project_cache WHERE linear_id=ANY($1::text[])", [[...projectIds]]);
       if (projects.rowCount !== projectIds.size) throw new HttpError(400, "A selected project is not imported.");
       await client.query(`INSERT INTO outcome (id,title,description,owner,success_signal,needed_by)
         VALUES ($1,$2,$3,$4,$5,$6)`, [id, title, description, owner, successSignal, neededBy]);
-      await replaceOutcomeLinks(client, id, links);
+      return replaceOutcomeLinks(client, id, links);
     });
-    return Response.json({ id }, { status: 201 });
+    return Response.json({ id, planningToken: result.planningToken, lifecycle: result.lifecycle }, { status: 201 });
   } catch (error) { return responseError(error); }
 }

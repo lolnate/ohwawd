@@ -22,7 +22,8 @@ async function main(): Promise<void> {
     const appliedVersions = new Set(applied.rows.map((row) => row.version));
     for (const migration of migrations) {
       if (appliedVersions.has(migration.version)) continue;
-      await client.query(migration.sql);
+      if (migration.sql) await client.query(migration.sql);
+      if ("up" in migration) await migration.up(client);
       await client.query("INSERT INTO schema_migration(version,name) VALUES($1,$2)", [migration.version, migration.name]);
       console.log(`Applied migration ${migration.version}: ${migration.name}`);
     }

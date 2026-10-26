@@ -158,12 +158,13 @@ New drafts and revisions SHALL store membership, outcome ranks and scoped projec
 ## ADDED Requirements
 
 ### Requirement: Outcome waits and priority bypass are explicit
-Waiting rows SHALL identify unfinished effective prerequisites, their owning location or excluded state, and an inspection action. If lower-ranked work is selected while higher-ranked work is blocked, the higher row SHALL explain the priority bypass without promising completion order. Other reasons such as missing estimates or capacity SHALL remain distinct. Warnings SHALL be accessible without color or drawn connectors.
+Timeline/project dependency context SHALL identify unfinished effective prerequisites, their location or excluded state, and an inspection path. It SHALL remain outside the sticky outcome label. Accessible context SHALL explain priority bypass without promising completion order and distinguish dependency waits from missing estimates or capacity.
 
 #### Scenario: Cross-stream prerequisite delays the highest outcome
 - **WHEN** H's required successor waits for a shared prerequisite in another stream while L runs locally
-- **THEN** H shows Waiting for the named prerequisite and Lower-priority work can run while waiting
+- **THEN** H's timeline/project context identifies the named prerequisite and that lower-priority work can run while waiting
 - **AND** the warning opens the prerequisite details without changing rank or ownership
+- **AND** it remains understandable without color or drawn connectors
 
 #### Scenario: Unresolved excluded prerequisite
 - **WHEN** the prerequisite is unfinished and dismissed or only a candidate
