@@ -444,7 +444,7 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   }
   for (const outcome of snapshot.outcomes) {
     const available = await database.query<{ linear_id: string }>("SELECT linear_id FROM linear_project_cache WHERE linear_id=ANY($1::text[])", [snapshot.links.filter((link) => link.outcome_id === outcome.id).map((link) => link.project_id)]);
-    await replaceOutcomeLinks(database, outcome.id, snapshot.links.filter((link) => link.outcome_id === outcome.id && available.rows.some((project) => project.linear_id === link.project_id)).map((link) => ({ projectId: link.project_id, requirement: link.requirement })));
+    await replaceOutcomeLinks(database, outcome.id, snapshot.links.filter((link) => link.outcome_id === outcome.id && available.rows.some((project) => project.linear_id === link.project_id)).map((link) => ({ projectId: link.project_id, requirement: link.requirement })), { includeUnambiguousCandidates: false });
   }
   for (const item of snapshot.packages) {
     if (activeRoadmap) await database.query(`UPDATE work_package SET roadmap_state=$2,selected=$3,stream_id=$4,capacity_outcome_id=$5,sequence_position=$6,roadmap_conversion=$7::jsonb WHERE id=$1`,

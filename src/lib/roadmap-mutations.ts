@@ -26,6 +26,31 @@ export async function normalizeOutcomeRanks(client: Client) {
       FROM outcome WHERE stream_id IS NOT NULL) r WHERE o.id=r.id`);
 }
 
+export async function includeUnambiguousCandidates(client: Client, outcomeId: string, projectIds?: string[]) {
+  if (!await roadmapActive(client) || projectIds?.length === 0) return [];
+  const outcome = (await client.query<{ stream_id: string }>(`SELECT o.stream_id FROM outcome o
+    JOIN stream s ON s.id=o.stream_id AND s.active WHERE o.id=$1`, [outcomeId])).rows[0];
+  if (!outcome) return [];
+  const candidates = (await client.query<{ id: string }>(`SELECT w.id FROM work_package w
+    JOIN outcome_project_link l ON l.project_id=w.project_id AND l.outcome_id=$1 AND l.requirement='minimum'
+    WHERE w.roadmap_state='candidate'
+      AND ($2::text[] IS NULL OR w.project_id=ANY($2::text[]))
+      AND 1=(SELECT count(*) FROM outcome_project_link links WHERE links.project_id=w.project_id)
+    ORDER BY w.id`, [outcomeId, projectIds ?? null])).rows;
+  if (!candidates.length) return [];
+  await placeProjects(client, candidates.map((item) => ({ packageId: item.id, roadmapState: "included" as const, selected: true, streamId: outcome.stream_id, outcomeId })));
+  return candidates.map((item) => item.id);
+}
+
+export async function includeExistingUnambiguousCandidates(client: Client) {
+  if (!await roadmapActive(client)) return [];
+  const outcomes = (await client.query<{ id: string }>(`SELECT o.id FROM outcome o JOIN stream s ON s.id=o.stream_id AND s.active
+    ORDER BY s.position,o.stream_position,o.id`)).rows;
+  const included: string[] = [];
+  for (const outcome of outcomes) included.push(...await includeUnambiguousCandidates(client, outcome.id));
+  return included;
+}
+
 export async function placeRoadmapOutcome(client: Client, input: { outcomeId: string; streamId: string | null; beforeOutcomeId?: unknown; afterOutcomeId?: unknown }) {
   await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
   const current = (await client.query<{ stream_id: string | null }>("SELECT stream_id FROM outcome WHERE id=$1", [input.outcomeId])).rows[0];
@@ -49,6 +74,7 @@ export async function placeRoadmapOutcome(client: Client, input: { outcomeId: st
     // Deferred return context follows its owner without including its demand.
     await client.query("UPDATE work_package SET stream_id=$2 WHERE capacity_outcome_id=$1 AND roadmap_state='deferred'", [input.outcomeId, input.streamId]);
     await placeProjects(client, owned.map((item) => ({ packageId: item.id, streamId: input.streamId, selected: true, outcomeId: input.outcomeId })));
+    if (current.stream_id === null) await includeUnambiguousCandidates(client, input.outcomeId);
   }
   await normalizeOutcomeRanks(client);
   return { affectedCandidates };

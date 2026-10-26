@@ -109,6 +109,7 @@ test("candidate linking is explicit and include/defer/resume/dismiss/restore con
   const sidebar = page.getByRole("dialog", { name: "Retention", exact: true }); await expect(sidebar).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-current", "true");
   await sidebar.getByRole("button", { name: "Manage projects" }).click(); await sidebar.getByRole("checkbox", { name: /Discovery/ }).check();
+  await sidebar.getByLabel("Discovery requirement").selectOption("optional");
   await sidebar.getByRole("button", { name: "Save links", exact: true }).click(); await expect(sidebar).toContainText("Links saved.");
   expect((await assignment.board()).packages.find((item) => item.project_id === "d")!.roadmap_state).toBe("candidate");
   await sidebar.getByRole("button", { name: "Close outcome" }).click();
@@ -131,9 +132,52 @@ test("candidate linking is explicit and include/defer/resume/dismiss/restore con
   await expect(needsAssignment).toContainText("Discovery");
 });
 
+test("a unique required project becomes counted and reacts immediately to allocation and Extra scope", async ({ page, assignment }) => {
+  await assignment.setDemand("d", 13);
+  await page.goto("/");
+  await row(page, Empty).getByRole("button", { name: "Empty outcome", exact: true }).click();
+  const outcome = page.getByRole("dialog", { name: "Empty outcome", exact: true });
+  await outcome.getByRole("button", { name: "Projects", exact: true }).click();
+  await outcome.getByRole("button", { name: "Manage projects" }).click();
+  await outcome.getByRole("checkbox", { name: /Discovery/ }).check();
+  await outcome.getByRole("button", { name: "Save links", exact: true }).click();
+  await expect(outcome).toContainText("Links saved.");
+  let saved = await assignment.board();
+  let discovery = saved.packages.find((item) => item.project_id === "d")!;
+  expect([discovery.roadmap_state, discovery.selected, discovery.capacity_outcome_id, discovery.stream_id]).toEqual(["included", true, Empty, "delivery"]);
+  await outcome.getByRole("button", { name: "Close outcome" }).click();
+
+  const delivery = page.locator("#stream-delivery");
+  await expect(delivery.locator(".stream-title")).toContainText("1 selected projects · 13 pts counted · 0% capacity");
+  await expect(row(page, Empty)).toContainText("beyond horizon");
+  await page.locator("#stream-settings-core > summary").click();
+  await page.locator("#stream-settings-core").getByLabel("Allocation %").fill("85");
+  await page.locator("#stream-settings-core").getByRole("button", { name: "Save settings" }).click();
+  await page.locator("#stream-settings-delivery > summary").click();
+  await page.locator("#stream-settings-delivery").getByLabel("Allocation %").fill("15");
+  await page.locator("#stream-settings-delivery").getByRole("button", { name: "Save settings" }).click();
+  const bar = row(page, Empty).locator('[data-timeline-project="linear:d"]');
+  await expect(delivery.locator(".stream-title")).toContainText("1 selected projects · 13 pts counted · 15% capacity");
+  await expect(bar).toHaveAttribute("data-counted", "true");
+  await expect(bar).toContainText("13 pts");
+
+  await bar.click();
+  const project = page.getByRole("dialog", { name: "Discovery", exact: true });
+  await project.getByLabel("Extra scope points").fill("140");
+  await project.getByRole("button", { name: "Save extra scope" }).click();
+  await expect(project.getByRole("status")).toContainText("extra scope saved");
+  await expect(delivery.locator(".stream-title")).toContainText("1 selected projects · 153 pts counted · 15% capacity");
+  await expect(bar).toContainText("153 pts");
+  saved = await assignment.board(); discovery = saved.packages.find((item) => item.project_id === "d")!;
+  expect(saved.forecast.packages.find((item) => item.id === discovery.id)!.demand).toBe(153);
+  expect(saved.dependencies.filter((edge) => edge.predecessor_id === discovery.id || edge.successor_id === discovery.id)).toEqual([]);
+});
+
 test("wait inspection restores dismissed prerequisites through explicit ownership without duplicate capacity", async ({ page, assignment }) => {
   await assignment.changeMembership("a", "dismiss"); await page.goto("/");
   await expect(row(page, Launch).locator("details.outcome-waiting, .outcome-bypass")).toHaveCount(0);
+  await expect(row(page, Launch)).toContainText("Blocked · Dismissed");
+  await expect(row(page, Launch).locator('[data-timeline-project="linear:a"]')).toContainText("Dismissed");
   await row(page, Launch).locator('[data-timeline-project="linear:c"]').click();
   let drawer = page.getByRole("dialog", { name: "Rollout", exact: true }); await drawer.getByRole("button", { name: /API foundation/ }).click();
   drawer = page.getByRole("dialog", { name: "API foundation", exact: true }); await expect(drawer).toContainText("dismissed");

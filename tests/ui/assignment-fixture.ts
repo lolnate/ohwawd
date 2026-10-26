@@ -95,8 +95,9 @@ export const test = base.extend<{ assignment: Controls }>({
               } else if (body.type === "extraScope") await saveExtraScope(client, body);
               else if (body.type === "ownership") await transferProjectOwnership(client, body);
               else if (body.type === "outcomeAssignment") { const result = await assignOutcomeToStream(client, body); affectedCandidates = result?.affectedCandidates ?? []; }
-              else if (body.type === "roadmapMembership") await changeRoadmapMembership(client, body);
-              else if (body.type === "assignment") { await requireSequenceToken(client, body.sequenceToken); await assignPackagesToStream(client, body.streamId, body.packageIds, body.outcomeId); }
+               else if (body.type === "roadmapMembership") await changeRoadmapMembership(client, body);
+               else if (body.type === "stream") await database.query("UPDATE stream SET name=$2,allocation=$3,wip_limit=1 WHERE id=$1", [body.id, body.name, body.allocation]);
+               else if (body.type === "assignment") { await requireSequenceToken(client, body.sequenceToken); await assignPackagesToStream(client, body.streamId, body.packageIds, body.outcomeId); }
               else if (body.type === "dependency") await saveDependency(client, body);
                else if (body.type === "capacity") await saveCapacityProfile(client, body);
                else if (body.type === "scoping") await saveScopingWindow(client, body.leadDays);

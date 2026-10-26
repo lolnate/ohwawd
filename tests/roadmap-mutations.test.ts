@@ -7,7 +7,7 @@ import { saveImport } from "../src/lib/import";
 import { getBoard, assignPackagesToStream } from "../src/lib/board";
 import { activateRoadmapPlanning, assertRoadmapInvariants } from "../src/lib/roadmap-store";
 import { assignOutcomeToStream, replaceOutcomeLinks, transferProjectOwnership } from "../src/lib/outcome-ownership";
-import { changeRoadmapMembership, deleteOutcome, placeRoadmapOutcome } from "../src/lib/roadmap-mutations";
+import { changeRoadmapMembership, deleteOutcome, includeExistingUnambiguousCandidates, placeRoadmapOutcome } from "../src/lib/roadmap-mutations";
 import { planningToken, requirePlanningToken } from "../src/lib/planning-token";
 import { placeProjects, sequencingState, rejectNewOrderConflicts } from "../src/lib/sequence-store";
 import { orderConflicts } from "../src/lib/sequencing";
@@ -93,6 +93,47 @@ test("explicit roadmap membership and transfers retain one charge and separate s
   } finally { await f.pg.close(); }
 });
 
+test("a sole minimum-required candidate is included when linking or outcome placement completes its owner", async () => {
+  const f = await fixture();
+  try {
+    await tx(f.client, () => replaceOutcomeLinks(f.client, H, [{ projectId: "a", requirement: "minimum" }, { projectId: "b", requirement: "minimum" }, { projectId: "d", requirement: "minimum" }, { projectId: "x", requirement: "optional" }]));
+    let d = (await f.board()).packages.find((item) => item.project_id === "d")!;
+    assert.deepEqual([d.roadmap_state, d.selected, d.capacity_outcome_id, d.stream_id], ["included", true, H, "core"]);
+
+    await f.membership("d", "candidate");
+    await tx(f.client, () => replaceOutcomeLinks(f.client, H, [{ projectId: "a", requirement: "minimum" }, { projectId: "b", requirement: "minimum" }, { projectId: "x", requirement: "optional" }]));
+    const N = "00000000-0000-4000-8000-000000000011";
+    await f.pg.query("INSERT INTO outcome(id,title) VALUES($1,'New outcome')", [N]);
+    await tx(f.client, () => replaceOutcomeLinks(f.client, N, [{ projectId: "d", requirement: "minimum" }]));
+    assert.equal((await f.board()).packages.find((item) => item.project_id === "d")!.roadmap_state, "candidate");
+    await f.move(N, "delivery");
+    d = (await f.board()).packages.find((item) => item.project_id === "d")!;
+    assert.deepEqual([d.roadmap_state, d.selected, d.capacity_outcome_id, d.stream_id], ["included", true, N, "delivery"]);
+  } finally { await f.pg.close(); }
+});
+
+test("optional and multiply linked candidates remain excluded", async () => {
+  const f = await fixture();
+  try {
+    await tx(f.client, () => replaceOutcomeLinks(f.client, H, [{ projectId: "a", requirement: "minimum" }, { projectId: "b", requirement: "minimum" }, { projectId: "d", requirement: "optional" }, { projectId: "x", requirement: "optional" }]));
+    assert.equal((await f.board()).packages.find((item) => item.project_id === "d")!.roadmap_state, "candidate");
+    await tx(f.client, () => replaceOutcomeLinks(f.client, L, [{ projectId: "a", requirement: "minimum" }, { projectId: "b", requirement: "minimum" }, { projectId: "d", requirement: "minimum" }]));
+    assert.equal((await f.board()).packages.find((item) => item.project_id === "d")!.roadmap_state, "candidate");
+  } finally { await f.pg.close(); }
+});
+
+test("existing sole minimum-required candidates are reconciled conservatively", async () => {
+  const f = await fixture();
+  try {
+    await f.pg.query("INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES($1,'d','minimum')", [H]);
+    assert.equal((await f.board()).packages.find((item) => item.project_id === "d")!.roadmap_state, "candidate");
+    assert.deepEqual(await tx(f.client, () => includeExistingUnambiguousCandidates(f.client)), ["linear:d"]);
+    const d = (await f.board()).packages.find((item) => item.project_id === "d")!;
+    assert.deepEqual([d.roadmap_state, d.selected, d.capacity_outcome_id, d.stream_id], ["included", true, H, "core"]);
+    assert.deepEqual(await tx(f.client, () => includeExistingUnambiguousCandidates(f.client)), []);
+  } finally { await f.pg.close(); }
+});
+
 test("already satisfied project assignments preserve exact scoped preferences", async () => {
   const f = await fixture();
   try {
@@ -148,7 +189,7 @@ test("owner link removal, deletion and unassignment exclude demand without guess
 test("source-introduced scoped conflicts retain order and permit incremental repair without new violations", async () => {
   const f = await fixture();
   try {
-    await tx(f.client, () => replaceOutcomeLinks(f.client, H, ["a", "b", "d", "x"].map((projectId) => ({ projectId, requirement: "minimum" as const }))));
+    await tx(f.client, () => replaceOutcomeLinks(f.client, H, ["a", "b", "d", "x"].map((projectId) => ({ projectId, requirement: projectId === "d" ? "optional" as const : "minimum" as const }))));
     await f.membership("x", "resume"); await f.membership("d", "include", { outcomeId: H });
     await f.pg.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:d','linear:a','linear'),('linear:x','linear:a','linear')");
     let state = await sequencingState(f.client);

@@ -33,7 +33,7 @@ The Settings overlay and approved outcome-sidebar design share this interaction 
 - Saved-data lifecycle actions operate only on persisted evidence. Disable them while any section is editing or dirty, or while another outcome write is pending, and explain the reason near the controls without disabling dismissal.
 - A stale lifecycle response refreshes evidence in place, announces the conflict and focuses the lifecycle region rather than leaving focus on a replaced action.
 - Inspecting a lifecycle blocker closes the outcome sidebar before opening project details. Never stack the dialogs.
-- Compact Board, catalog and delivery rows may show persisted completion/review markers. Readiness, blockers and unplanned evidence remain in saved Details.
+- Compact Board and catalog rows may show persisted completion/review markers. Concise blocker causes remain visible on the Board; full readiness, blocker and unplanned evidence remains in saved Details or project inspection.
 
 Outcome-specific requirements are maintained in the [Outcome Catalog specification](../openspec/specs/outcome-catalog/spec.md); the [archived design](../openspec/changes/archive/2026-10-25-redesign-outcome-catalog/design.md), Decisions 5–7, records the rationale. The sidebar supports title-driven inspection, opening-scoped Details and Projects drafts, section-specific saves/cancels, and explicit mutation results with refresh-only retries. New outcomes save both sections with Create outcome and transition to saved Details without replacing the dialog. A creation completed after dismissal offers View outcome in the workspace notice.
 
@@ -46,6 +46,7 @@ Outcome-specific requirements are maintained in the [Outcome Catalog specificati
 - Keep timeline legends to a compact visual key. Calendar provenance, projection mechanics and other explanatory copy belong in Settings or details and must not repeat below every stream.
 - Keep detailed blockers, source evidence, ownership context and remediation in the project or outcome details pane. Project controls retain complete accessible names and dependency context so connectors are never the only explanation.
 - Unresolved work may use a compact selectable chip without an invented span. It must not stretch across the timeline or force unrelated rows to become taller than their schedule content requires.
+- Dashed project appearances identify their actual accounting state. Use Shared only for included work counted under another owner; use Needs assignment, Deferred or Dismissed for excluded work.
 
 ## Top-level feedback messages
 

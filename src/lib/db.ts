@@ -4,6 +4,7 @@ import { weeklyCapacitySchemaSql } from "./weekly-capacity-schema";
 import { outcomeOwnershipSchemaSql, outcomeOwnershipMigrationSql } from "./outcome-ownership-schema";
 import { roadmapSchemaSql } from "./roadmap-schema";
 import { activateRoadmapPlanning } from "./roadmap-store";
+import { includeExistingUnambiguousCandidates } from "./roadmap-mutations";
 
 declare global {
   // Reuse the pool across Next.js development reloads.
@@ -314,6 +315,7 @@ export const migrations = [
   { version: 6, name: "outcome-roadmap-foundation", sql: roadmapSchemaSql },
   { version: 7, name: "activate-outcome-roadmap", sql: "", up: activateRoadmapPlanning },
   { version: 8, name: "linear-project-remaining-scope", sql: projectRemainingScopeSql },
+  { version: 9, name: "include-unique-required-candidates", sql: "", up: includeExistingUnambiguousCandidates },
 ] as const;
 
 export const latestMigrationVersion = migrations.at(-1)!.version;

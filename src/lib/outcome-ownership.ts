@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { HttpError } from "./security";
 import { placeProjects, requireSequenceToken } from "./sequence-store";
 import { roadmapActive, planningToken } from "./planning-token";
-import { detachOutcomeWork, placeRoadmapOutcome } from "./roadmap-mutations";
+import { detachOutcomeWork, includeUnambiguousCandidates, placeRoadmapOutcome } from "./roadmap-mutations";
 import { reconcileOutcomeCompletions, getOutcomeLifecycles } from "./outcome-lifecycle";
 
 type Client = Pick<PoolClient, "query">;
@@ -63,12 +63,15 @@ export async function assignOutcomeToStream(client: Client, input: { outcomeId?:
 }
 
 /** Retained links must not be deleted: their owner is protected by the composite FK. */
-export async function replaceOutcomeLinks(client: Client, outcomeId: string, links: { projectId: string; requirement: "minimum" | "optional" }[]) {
+export async function replaceOutcomeLinks(client: Client, outcomeId: string, links: { projectId: string; requirement: "minimum" | "optional" }[], options: { includeUnambiguousCandidates?: boolean } = {}) {
   await client.query("SELECT id FROM workspace WHERE id=1 FOR UPDATE");
+  const previous = new Set((await client.query<{ project_id: string }>("SELECT project_id FROM outcome_project_link WHERE outcome_id=$1", [outcomeId])).rows.map((link) => link.project_id));
   const affectedCandidates = await detachOutcomeWork(client, outcomeId, links.map((link) => link.projectId));
   await client.query("DELETE FROM outcome_project_link WHERE outcome_id=$1 AND NOT(project_id=ANY($2::text[]))", [outcomeId, links.map((link) => link.projectId)]);
   for (const link of links) await client.query(`INSERT INTO outcome_project_link(outcome_id,project_id,requirement) VALUES($1,$2,$3)
       ON CONFLICT(outcome_id,project_id) DO UPDATE SET requirement=EXCLUDED.requirement`, [outcomeId, link.projectId, link.requirement]);
+  const addedMinimum = links.filter((link) => link.requirement === "minimum" && !previous.has(link.projectId)).map((link) => link.projectId);
+  const includedCandidates = options.includeUnambiguousCandidates === false ? [] : await includeUnambiguousCandidates(client, outcomeId, addedMinimum);
   await reconcileOutcomeCompletions(client, "Owner", [outcomeId]);
-  return { saved: true, affectedCandidates, planningToken: await planningToken(client), lifecycle: (await getOutcomeLifecycles(client)).get(outcomeId) };
+  return { saved: true, affectedCandidates, includedCandidates, planningToken: await planningToken(client), lifecycle: (await getOutcomeLifecycles(client)).get(outcomeId) };
 }
