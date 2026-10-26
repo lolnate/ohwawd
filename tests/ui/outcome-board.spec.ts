@@ -20,6 +20,23 @@ async function pointerDrop(page: Page, source: Locator, target: Locator) {
 
 test.beforeEach(async ({ assignment }) => { await assignment.shareProjects(); await assignment.seedOutcomeBoard(); await assignment.activateRoadmap(); });
 
+test("top-level Board messages support manual dismissal and close after 20 seconds", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/");
+  await row(page, Foundation).getByRole("button", { name: "Drag outcome Foundation", exact: true }).dragTo(row(page, Retention).locator('[data-drop-outcome-side="before"]'));
+  const message = notice(page);
+  await expect(message).toContainText("Foundation placement saved");
+  await message.getByRole("button", { name: "Dismiss message" }).click();
+  await expect(message).toHaveCount(0);
+
+  await row(page, Retention).getByRole("button", { name: "Drag outcome Retention", exact: true }).dragTo(row(page, Foundation).locator('[data-drop-outcome-side="before"]'));
+  await expect(message).toContainText("Retention placement saved");
+  await page.clock.fastForward(19_000);
+  await expect(message).toBeVisible();
+  await page.clock.fastForward(1_000);
+  await expect(message).toHaveCount(0);
+});
+
 test("pointer outcome order changes actual scheduling and equivalent before/after controls persist", async ({ page, assignment }) => {
   const original = await assignment.board(); expect(original.forecast.packages.find((item) => item.id === "linear:c")!.finish).toBe(3);
   await page.goto("/");

@@ -68,6 +68,9 @@ input[type=checkbox], input[type=radio] { accent-color: var(--color-action); }
 .error, .notice { padding: 12px 15px; border-radius: var(--radius-control); }
 .error { background: var(--color-danger-bg); color: var(--color-danger); }
 .notice { background: var(--color-success-bg); color: var(--color-success); }
+.dismissible-message { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dismissible-message-dismiss { flex: none; width: 32px; height: 32px; margin: -6px -7px -6px 0; padding: 0; background: transparent; border-color: transparent; color: inherit; }
+.dismissible-message-dismiss:hover:not(:disabled) { background: var(--color-surface-hover); border-color: currentColor; }
 .empty { font-size: .9rem; padding: 20px; color: var(--color-text-muted); }
 .auth { max-width: 440px; margin: 12vh auto; }
 .auth h1 { margin-top: 35px; }

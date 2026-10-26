@@ -47,6 +47,12 @@ Outcome-specific requirements are maintained in the [Outcome Catalog specificati
 - Keep detailed blockers, source evidence, ownership context and remediation in the project or outcome details pane. Project controls retain complete accessible names and dependency context so connectors are never the only explanation.
 - Unresolved work may use a compact selectable chip without an invented span. It must not stretch across the timeline or force unrelated rows to become taller than their schedule content requires.
 
+## Top-level feedback messages
+
+- Success and error messages shown at the top of a workspace view remain available for 20 seconds, then dismiss automatically.
+- Each message includes a visible `X` control with an accessible dismissal name so it can be closed immediately.
+- A new message starts a new 20-second interval. In-progress feedback and messages inside editing overlays remain visible for their own lifecycle rather than using this timeout.
+
 ## Centered settings overlays
 
 - Workspace-level settings can use a centered modal opened from the signed-in header. Opening it preserves the active workspace view and its local context.
