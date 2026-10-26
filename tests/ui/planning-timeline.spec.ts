@@ -89,10 +89,16 @@ test("month/week timeline fits several months and keeps project labels sticky du
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => region.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   const rowHeading = table.locator("tbody tr").first().locator("th");
+  const bar = table.locator("tbody tr").first().locator(".calendar-project-bar").first();
   const before = await rowHeading.boundingBox();
-  await region.evaluate((element) => { element.scrollLeft = 600; });
-  const after = await rowHeading.boundingBox();
+  const barBefore = await bar.boundingBox();
+  await region.evaluate((element, scrollLeft) => { element.scrollLeft = scrollLeft; }, Math.max(1, barBefore!.x - before!.x - 20));
+  const [after, barAfter] = await Promise.all([rowHeading.boundingBox(), bar.boundingBox()]);
   expect(Math.abs(after!.x - before!.x)).toBeLessThan(1);
+  expect(barAfter!.x).toBeLessThan(after!.x + after!.width);
+  const overlapOwner = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("th")?.className,
+    { x: Math.max(after!.x, barAfter!.x) + 1, y: barAfter!.y + barAfter!.height / 2 });
+  expect(overlapOwner).toContain("timeline-project-heading");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
   expect((await assignment.board()).holidayWeeks).toHaveLength(3);
 });
