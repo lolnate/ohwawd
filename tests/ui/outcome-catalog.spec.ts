@@ -106,7 +106,7 @@ test("definitions load independently of forecast failure; loading and retryable 
   await page.unroute("**/api/state");
   await catalog.getByRole("button", { name: "Retry catalog load" }).click();
   await expect(catalog.getByRole("status")).toHaveText("55 of 55 outcomes");
-  await expect(page.locator("#outcome-delivery").getByRole("alert")).toContainText("Forecast unavailable");
+  await expect(catalog.locator(".catalog-health").first()).toContainText("Unavailable");
   await catalog.getByLabel("Search outcomes", { exact: true }).fill("Catalog launch");
   await expect(catalog.getByRole("status")).toHaveText("1 of 55 outcomes · Filters active");
   // A successful write followed by a failed definitions read retains the last good catalog.
@@ -148,7 +148,7 @@ for (const width of [1440, 768, 390]) {
       expect(bounds.height).toBeLessThanOrEqual(88);
     }
     await catalog.screenshot({ path: test.info().outputPath(`catalog-${width}.png`) });
-    await page.getByRole("link", { name: "Outcome delivery", exact: true }).click();
-    await expect(page.locator("#outcome-delivery-title")).toBeFocused();
+    await expect(catalog.locator(".catalog-columns")).toContainText("Health");
+    await expect(page.locator("#outcome-delivery")).toHaveCount(0);
   });
 }

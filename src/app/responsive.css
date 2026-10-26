@@ -10,8 +10,6 @@
   .workspace-shell .panel { padding: 13px; }
   .board-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .board-config-row { grid-template-columns: 1fr; }
-  .outcome-forecast-row { grid-template-columns: minmax(0, 1fr); }
-  .outcome-status { text-align: left; }
   .row-actions, .stream-controls { flex-wrap: wrap; }
   .inline-outcome-editor { grid-template-columns: 1fr; }
   .stream-heading { align-items: stretch; flex-direction: column; }

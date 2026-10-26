@@ -5,7 +5,6 @@ import Board, { type BoardState } from "./board";
 import { apiRequest } from "./client-api";
 import ScenarioPanel from "./scenario-panel";
 import StatusFilter from "./status-filter";
-import OutcomeDelivery from "./outcome-delivery";
 import OutcomeCatalog, { focusOutcomeSection, type CatalogContext } from "./outcome-catalog";
 import WorkspaceSettings, { type SettingsRequest, type SettingsTarget } from "./workspace-settings";
 import OutcomeWorkspace, { type OutcomeRequest } from "./outcome-workspace";
@@ -15,7 +14,7 @@ import type { OutcomeLifecycle } from "@/lib/outcome-completion";
 import { mergeOutcomeSnapshot } from "./outcome-lifecycle-view";
 
 type Team = { id: string; name: string; key: string };
-type Project = Partial<StoredRoadmapFields> & { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
+type Project = Partial<StoredRoadmapFields> & { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; capacity_outcome_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
 type OutcomeFields = { id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null };
 type Outcome = OutcomeFields & { stream_id: string | null; stream_position?: number | null; created_at: string; lifecycle?: OutcomeLifecycle };
 type Link = { outcome_id: string; project_id: string; requirement: "minimum" | "optional" };
@@ -152,17 +151,18 @@ export default function App() {
     else { setPreview(null); if (data.teams.length === 1) setTeamId(data.teams[0].id); }
   }
 
-  function openOutcomeDelivery() {
+  function openOutcomeCatalog() {
     setActiveView("outcomes");
     window.requestAnimationFrame(() => {
-      focusOutcomeSection("delivery");
+      focusOutcomeSection("catalog");
     });
   }
 
-  function resolveOutcomeProject(id: string) {
-    setActiveView("board");
-    setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
+  function openProjectNeedsAssignment() {
+    setActiveView("outcomes");
+    window.requestAnimationFrame(() => focusOutcomeSection("needs-assignment"));
   }
+
   function inspectProjectOnBoard(id: string) {
     setActiveView("board"); setBoardFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1, inspect: true }));
   }
@@ -232,6 +232,7 @@ export default function App() {
     project.name.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase()),
   ) ?? []).sort((left, right) => projectSort === "name" ? left.name.localeCompare(right.name) : projectSort === "status" ? left.status.localeCompare(right.status) || left.name.localeCompare(right.name) : projectSort === "points" ? right.estimated_open_points - left.estimated_open_points || left.name.localeCompare(right.name) : Number(right.needs_review) - Number(left.needs_review) || right.unestimated_open_issues - left.unestimated_open_issues || Number(!right.stream_id) - Number(!left.stream_id) || left.name.localeCompare(right.name));
   const hiddenCount = state?.projects.filter((project) => !project.in_scope).length ?? 0;
+  const candidateProjects = state?.roadmapPlanningMigrated ? state.projects.filter((project) => project.roadmap_state === "candidate").sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)) : [];
   const presetCounts = { needs: state?.projects.filter(needsPlanning).length ?? 0, active: state?.projects.filter((project) => project.in_scope && activeProject(project)).length ?? 0, completed: state?.projects.filter((project) => project.in_scope && terminalProject(project)).length ?? 0, hidden: hiddenCount, all: state?.projects.filter((project) => project.in_scope).length ?? 0, dismissed: state?.projects.filter((project) => project.in_scope && project.roadmap_state === "dismissed").length ?? 0 };
   const allVisibleSelected = visibleProjects.length > 0 && visibleProjects.every((project) => selectedProjectIds.includes(project.id));
 
@@ -272,11 +273,18 @@ export default function App() {
     </section></section>
     <section className="workspace-view" hidden={activeView !== "scenarios"}><ScenarioPanel onActivated={reload} onOpenBoard={() => setActiveView("board")} refreshKey={boardVersion} /></section>
     <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} updatedState={boardUpdate} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")} onOpenOutcome={openBoardOutcome}
-      onOpenOutcomes={openOutcomeDelivery} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
+      onOpenOutcomes={openOutcomeCatalog} onOpenNeedsAssignment={openProjectNeedsAssignment} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}>
-      <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-delivery" onClick={(event) => { event.preventDefault(); focusOutcomeSection("delivery"); }}>Outcome delivery</a><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a></nav>
-      <OutcomeDelivery board={deliveryBoard} error={deliveryError} onInspect={(outcome) => inspectOutcome(outcome, "delivery")} onResolveProject={resolveOutcomeProject} />
-      <OutcomeCatalog data={state} error={stateError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onContext={setCatalogContext} />
+      <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a>{state?.roadmapPlanningMigrated && <a href="#outcome-needs-assignment" onClick={(event) => { event.preventDefault(); focusOutcomeSection("needs-assignment"); }}>Needs Assignment</a>}</nav>
+      <OutcomeCatalog data={state} error={stateError} forecast={deliveryBoard?.forecast ?? null} forecastError={deliveryError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onContext={setCatalogContext} />
+      {state?.roadmapPlanningMigrated && <section className="panel project-assignment-panel" id="outcome-needs-assignment" aria-labelledby="outcome-needs-assignment-title">
+        <div className="section-head"><div><h2 id="outcome-needs-assignment-title" tabIndex={-1}>Needs Assignment</h2><p>Projects without an owning outcome are excluded from the roadmap until explicitly included.</p></div><span className="count">{candidateProjects.length}</span></div>
+        <ul className="project-assignment-list">{candidateProjects.map((project) => { const linkCount = state.links.filter((link) => link.project_id === project.id).length; return <li key={project.id}><article>
+          <div><h3>{project.url ? <a href={project.url} target="_blank" rel="noreferrer">{project.name} ↗</a> : project.name}</h3><p>No owning outcome · {linkCount} linked outcome{linkCount === 1 ? "" : "s"}{!project.in_scope ? " · Hidden" : ""}{project.needs_review ? " · Needs review" : ""}</p></div>
+          <span className="tag">{project.status}</span><button type="button" className="secondary" onClick={() => inspectProjectOnBoard(project.package_id)}>Assign outcome</button>
+        </article></li>; })}</ul>
+        {!candidateProjects.length && <p className="empty">No projects are waiting for an owning outcome.</p>}
+      </section>}
     </section>
     <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
     <OutcomeWorkspace request={outcomeRequest} data={state} planning={deliveryBoard} context={catalogContext} onMoveOutcome={moveOutcome} onInspectProject={inspectProjectOnBoard} onClose={() => setOutcomeRequest(null)} onView={(id) => setOutcomeRequest({ generation: ++outcomeGeneration.current, id, opener: document.activeElement instanceof HTMLElement ? document.activeElement : null, fallback: "catalog" })} onRemoved={(id, generation) => {

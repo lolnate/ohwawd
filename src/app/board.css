@@ -2,17 +2,13 @@
 .board-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin: 8px 0 24px; }
 .board-summary > div { background: var(--color-surface-raised); border-radius: var(--radius-panel); padding: 14px; }
 .board-summary strong { display: block; color: var(--color-text); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
-.board-summary small, .outcome-forecast-row small, .cycle-table small { display: block; color: var(--color-text-muted); font-size: .75rem; margin-top: 3px; }
+.board-summary small, .cycle-table small { display: block; color: var(--color-text-muted); font-size: .75rem; margin-top: 3px; }
 .board-settings { border: 1px solid var(--color-border); border-radius: var(--radius-panel); margin: 16px 0; padding: 14px; }
 .board-settings summary, .board-card summary { cursor: pointer; color: var(--color-action); font-weight: 700; }
 .board-settings form, .board-subform { padding-top: 16px; }
 .board-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(145px,1fr)); gap: 10px; }
 .board-settings p, .allowance-editor p { font-size: .85rem; }
 .outcome-forecast { margin: 26px 0; }
-.outcome-forecast-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 13px 0; border-top: 1px solid var(--color-border); }
-.outcome-forecast-row > p { grid-column: 1/-1; font-size: .82rem; margin: 0; color: var(--color-warning); }
-.forecast-pill { display: inline-block; border-radius: var(--radius-bar); background: var(--color-success-bg); color: var(--color-success); padding: 5px 9px; font-size: .78rem; text-transform: capitalize; }
-.forecast-pill.missed, .forecast-pill.unknown { background: var(--color-warning-bg); color: var(--color-warning); }
 .stream-list { display: grid; gap: 18px; }
 .stream-lane { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface-raised); padding: 17px; }
 .stream-heading { display: flex; justify-content: space-between; gap: 15px; align-items: start; }
@@ -49,7 +45,6 @@
   .stream-heading { display: block; }
   .stream-controls { margin-bottom: 14px; }
   .board-shelves { grid-template-columns: 1fr; }
-  .outcome-forecast-row { grid-template-columns: 1fr; }
 }
 .timeline-scroll { overflow-x: auto; margin: 6px 0 14px; }
 .lane-timeline { display: grid; min-width: max-content; gap: 0; background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-control); overflow: hidden; }

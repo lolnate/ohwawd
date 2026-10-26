@@ -24,20 +24,12 @@
 .stream-settings > summary { cursor: pointer; color: var(--color-action); font-size: .75rem; font-weight: 750; text-align: right; }
 .stream-settings[open] { flex: 1 1 auto; }
 .stream-settings .stream-controls { justify-content: flex-end; margin-top: 7px; }
-.target-status { display: block; margin-top: 4px; color: var(--color-text-muted); font-size: .75rem; }
-.target-status.met { color: var(--color-success); }
-.target-status.missed, .target-status.unknown { color: var(--color-warning); }
-.forecast-pill.status-blocked { background: var(--color-danger-bg); color: var(--color-danger); }
-.forecast-pill.status-setup_required, .forecast-pill.status-beyond_horizon { background: var(--color-warning-bg); color: var(--color-warning); }
-.outcome-blocker { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.outcome-blocker p { margin: 0; color: var(--color-danger); font-size: .82rem; }
-.outcome-blocker button { flex: 0 0 auto; }
 .anchor-target { display: block; height: 0; scroll-margin-top: 90px; }
 
 @media (max-width: 760px) {
-  .action-item, .blocker-line, .outcome-blocker { align-items: stretch; flex-direction: column; gap: 5px; }
+  .action-item, .blocker-line { align-items: stretch; flex-direction: column; gap: 5px; }
   .action-item b { align-self: flex-start; }
-  .blocker-line .text-button, .outcome-blocker button { align-self: flex-start; }
+  .blocker-line .text-button { align-self: flex-start; }
   .stream-settings { min-width: 0; }
   .stream-settings > summary { text-align: left; }
 }

@@ -1,6 +1,6 @@
 import { test, expect } from "./assignment-fixture";
 
-test("configurable stream lanes immediately follow Planning attention, followed by stream management", async ({ page, assignment }) => {
+test("legacy configurable stream lanes immediately follow Planning attention, followed by stream management", async ({ page, assignment }) => {
   await page.goto("/");
   const board = page.locator("#sequencing-board");
   await expect(board.locator("#project-streams > .stream-lane")).toHaveCount(2);
@@ -20,24 +20,25 @@ test("configurable stream lanes immediately follow Planning attention, followed 
   expect(await board.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
 });
 
-test("Outcome delivery belongs to Outcomes and shares editing, links, deletion and fresh board forecasts", async ({ page, assignment }) => {
+test("Outcome catalog combines editing, deletion and fresh compact forecast health", async ({ page, assignment }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /^Outcomes/ }).click();
-  const delivery = page.getByRole("region", { name: "Outcome delivery", exact: true });
-  await expect(delivery).toBeVisible();
+  const catalog = page.locator("#outcome-catalog");
+  await expect(page.locator("#outcome-delivery")).toHaveCount(0);
   const initialDate = (await assignment.board()).forecast.outcomes[0].endDate!;
-  await expect(delivery).toContainText(initialDate);
-  await delivery.getByRole("button", { name: "Launch", exact: true }).click();
+  const launch = catalog.locator(".catalog-row").filter({ has: page.getByRole("button", { name: "Launch", exact: true }) });
+  await expect(launch.locator(".catalog-health")).toContainText(initialDate);
+  await launch.getByRole("button", { name: "Launch", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Launch", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await delivery.getByRole("button", { name: "Launch", exact: true }).click();
+  await launch.getByRole("button", { name: "Launch", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Edit details", exact: true }).click();
   await expect(page.getByLabel("Outcome title", { exact: true }).filter({ visible: true })).toBeFocused();
   const editor = page.getByRole("dialog");
   await editor.getByLabel("Outcome title").fill("Launch readiness");
   await editor.getByRole("button", { name: "Save details", exact: true }).click();
-  await expect(delivery).toContainText("Launch readiness");
+  await expect(catalog).toContainText("Launch readiness");
   await editor.getByRole("button", { name: "Close outcome" }).click();
   await expect(page.locator(".catalog-list").getByRole("button", { name: "Launch readiness", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Board/ }).click();
@@ -47,11 +48,11 @@ test("Outcome delivery belongs to Outcomes and shares editing, links, deletion a
   await page.getByRole("button", { name: /^Outcomes/ }).click();
   const changedDate = (await assignment.board()).forecast.outcomes[0].endDate!;
   expect(changedDate).not.toBe(initialDate);
-  await expect(delivery).toContainText(changedDate);
+  const renamed = catalog.locator(".catalog-row").filter({ has: page.getByRole("button", { name: "Launch readiness", exact: true }) });
+  await expect(renamed.locator(".catalog-health")).toContainText(changedDate);
   page.once("dialog", (dialog) => void dialog.accept());
-  await delivery.getByRole("button", { name: "Launch readiness", exact: true }).click();
+  await renamed.getByRole("button", { name: "Launch readiness", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete outcome", exact: true }).click();
-  await expect(delivery).toContainText("Add an outcome, then link its minimum-required projects.");
   await expect(page.locator("#outcome-catalog")).toContainText("No outcomes yet");
 });
 
@@ -82,25 +83,17 @@ test("new outcomes and their project links are created together in the outcome s
   expect(board.links).toContainEqual({ outcome_id: created!.id, project_id: "a", requirement: "optional" });
 });
 
-test("planning blockers open Outcomes and Resolve blocker returns to the right project scope editor", async ({ page, assignment }) => {
+test("planning blockers open the catalog and expose compact blocked health", async ({ page, assignment }) => {
   await assignment.requireProject("a");
   await assignment.setDemand("a", null);
   await assignment.pauseUnassigned();
   await page.goto("/");
   await page.getByRole("button", { name: /Forecast blockers remain/ }).click();
   await expect(page.getByRole("button", { name: /^Outcomes/ })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Outcome delivery", exact: true })).toBeFocused();
-  const delivery = page.getByRole("region", { name: "Outcome delivery", exact: true });
-  await delivery.getByRole("button", { name: "Resolve blocker" }).click();
-  await expect(page.getByRole("button", { name: /^Board/ })).toHaveAttribute("aria-current", "page");
-  const project = page.locator('[data-project-id="linear:a"]');
-  await expect(project.getByLabel("Extra scope points")).toBeFocused();
-  await project.getByLabel("Extra scope points").fill("5");
-  await project.getByRole("button", { name: "Save extra scope" }).click();
-  await expect(page.getByRole("status")).toContainText("extra scope saved");
-  await page.getByRole("button", { name: /^Outcomes/ }).click();
-  await expect(delivery.getByRole("button", { name: "Resolve blocker" })).toHaveCount(0);
-  await expect(delivery).toContainText("provisional");
+  await expect(page.getByRole("heading", { name: "Outcome catalog", exact: true })).toBeFocused();
+  const health = page.locator("#outcome-catalog .catalog-row").filter({ has: page.getByRole("button", { name: "Launch", exact: true }) }).locator(".catalog-health");
+  await expect(health).toContainText("Blocked");
+  await expect(page.locator("#outcome-delivery")).toHaveCount(0);
 });
 
 test("cycle-wide controls explain their scope and link to the separate weekly availability editor", async ({ page, assignment }) => {
@@ -120,12 +113,13 @@ test("cycle-wide controls explain their scope and link to the separate weekly av
   expect((await assignment.board()).capacity.holidays_enabled).toBe(true);
 });
 
-test("Outcomes explains a forecast load failure rather than leaving delivery stuck loading", async ({ page, assignment }) => {
+test("Outcomes keeps the catalog available when forecast health cannot load", async ({ page, assignment }) => {
   await page.route("**/api/board", (route) => route.fulfill({ status: 503, json: { error: "Forecast temporarily unavailable" } }));
   await page.goto("/");
   await page.getByRole("button", { name: /^Outcomes/ }).click();
-  const delivery = page.getByRole("region", { name: "Outcome delivery", exact: true });
-  await expect(delivery.getByRole("alert")).toContainText("Forecast temporarily unavailable");
-  await expect(delivery.getByText("Loading delivery forecasts…")).toHaveCount(0);
+  const catalog = page.locator("#outcome-catalog");
+  await expect(catalog.locator(".catalog-health")).toContainText("Unavailable");
+  await expect(catalog.locator(".catalog-health")).toHaveAttribute("title", "Forecast temporarily unavailable");
+  await expect(page.locator("#outcome-delivery")).toHaveCount(0);
   expect((await assignment.board()).outcomes).toHaveLength(1);
 });

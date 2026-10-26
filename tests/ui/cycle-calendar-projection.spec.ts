@@ -42,8 +42,8 @@ test("projected cycles enable provisional delivery and retain editable weekly ho
   expect(after.forecast.cycles.find((cycle) => cycle.name === "Cycle 50")!.available).toBe(20);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /^Outcomes/ }).click();
-  await expect(page.locator("#outcome-delivery")).toContainText("projected cycles");
-  await expect(page.locator("#outcome-delivery")).toContainText("provisional");
+  await expect(page.locator("#outcome-catalog .catalog-health").first()).toContainText("projected");
+  await expect(page.locator("#outcome-delivery")).toHaveCount(0);
 });
 
 test("disabled cadence retains imported labels and marks genuinely unsupported future weeks", async ({ page, assignment }) => {

@@ -4,19 +4,36 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { indexCatalog, queryCatalog, type CatalogFilters, type CatalogOutcome, type CatalogSort } from "@/lib/outcome-catalog";
 import { millisecondsUntilNextTeamDate, teamLocalDate } from "@/lib/project-scope";
 import { outcomeLifecycleSummary } from "./outcome-lifecycle-view";
+import type { OutcomeForecast } from "@/lib/forecast";
 
 const defaults: CatalogFilters = { search: "", owner: "all", stream: "all", projects: "all", targetDate: "all" };
 type Data = Parameters<typeof indexCatalog>[0] & { timezone: string };
 
-export function focusOutcomeSection(section: "delivery" | "catalog") {
+function forecastHealth(forecast: OutcomeForecast | undefined, error: string) {
+  if (!forecast) return { label: error ? "Unavailable" : "Loading", tone: "neutral", detail: "", title: error || "Forecast is loading." };
+  const title = forecast.reasons.join(" ") || undefined;
+  const detail = [forecast.endDate, forecast.calendarProjected ? "projected" : null].filter(Boolean).join(" · ");
+  if (forecast.status === "blocked") return { label: "Blocked", tone: "danger", detail: "", title };
+  if (forecast.status === "setup_required") return { label: "Setup needed", tone: "warning", detail: "", title };
+  if (forecast.status === "beyond_horizon") return { label: "Beyond horizon", tone: "warning", detail: "", title };
+  if (forecast.status === "unplanned") return { label: "Unplanned", tone: "neutral", detail: "", title };
+  if (forecast.target === "missed") return { label: "At risk", tone: "warning", detail, title };
+  if (forecast.target === "met") return { label: "On target", tone: "success", detail, title };
+  if (forecast.status === "provisional") return { label: "Provisional", tone: "provisional", detail, title };
+  if (forecast.target === "no_target") return { label: "No target", tone: "neutral", detail, title };
+  return { label: "Forecast ready", tone: "success", detail, title };
+}
+
+export function focusOutcomeSection(section: "needs-assignment" | "catalog") {
   const heading = document.getElementById(`outcome-${section}-title`);
   heading?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   heading?.focus({ preventScroll: true });
 }
 
 export type CatalogContext = { ids: string[]; clear: () => void };
-export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onInspect, onContext }: {
+export default function OutcomeCatalog({ data, error, forecast, forecastError, busy, onRetry, onAdd, onInspect, onContext }: {
   data: Data | null; error: string; busy: boolean; onRetry: () => void; onAdd: () => void;
+  forecast: { outcomes: OutcomeForecast[] } | null; forecastError: string;
   onInspect: (outcome: CatalogOutcome) => void; onContext: (context: CatalogContext) => void;
 }) {
   const [filters, setFilters] = useState<CatalogFilters>(defaults);
@@ -38,6 +55,7 @@ export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onIn
   }, [timezone]);
   const index = useMemo(() => indexCatalog(data ?? { outcomes: [], projects: [], links: [], streams: [] }), [data]);
   const rows = useMemo(() => queryCatalog(index, filters, sort, teamLocalDate(now, timezone)), [index, filters, sort, now, timezone]);
+  const forecasts = new Map(forecast?.outcomes.map((item) => [item.id, item]));
   const clear = useCallback(() => setFilters(defaults), []);
   useEffect(() => { onContext({ ids: rows.map((row) => row.id), clear }); }, [rows, clear, onContext]);
   const restricted = !!filters.search.trim() || filters.owner !== "all" || filters.stream !== "all" || filters.projects !== "all" || filters.targetDate !== "all";
@@ -60,14 +78,15 @@ export default function OutcomeCatalog({ data, error, busy, onRetry, onAdd, onIn
         <label>Target date<select aria-label="Target date" value={filters.targetDate} onChange={(event) => change("targetDate", event.target.value as CatalogFilters["targetDate"])}><option value="all">All dates</option><option value="past">Past target date</option><option value="next30">Next 30 days</option><option value="none">No target</option></select></label>
       </div>
       <div className="catalog-results"><p role="status" aria-live="polite">{rows.length} of {index.rows.length} outcomes{restricted ? " · Filters active" : ""}</p>{restricted && <button type="button" className="text-button" onClick={() => setFilters(defaults)}>Clear filters</button>}</div>
-      {!!rows.length && <><div className="catalog-columns" aria-hidden="true"><span>Outcome</span><span>Owner</span><span>Stream</span><span>Needed by</span><span>Projects</span></div>
-        <ul className="catalog-list">{rows.map((row) => <li key={row.id}><article className="catalog-row" id={`outcome-${row.id}`}>
+      {!!rows.length && <><div className="catalog-columns" aria-hidden="true"><span>Outcome</span><span>Owner</span><span>Stream</span><span>Needed by</span><span>Projects</span><span>Health</span></div>
+        <ul className="catalog-list">{rows.map((row) => { const health = forecastHealth(forecasts.get(row.id), forecastError); return <li key={row.id}><article className="catalog-row" id={`outcome-${row.id}`}>
           <h3><button type="button" className="catalog-title" title={row.title} onClick={() => onInspect(row)}>{row.title}</button>{outcomeLifecycleSummary(row.lifecycle) && <small className="outcome-lifecycle-summary">{outcomeLifecycleSummary(row.lifecycle)}</small>}</h3>
           <div className="catalog-cell"><span className="catalog-cell-label">Owner</span><span>{row.owner.trim() || "No owner"}</span></div>
           <div className="catalog-cell"><span className="catalog-cell-label">Stream</span><span>{index.streams.find((stream) => stream.id === row.stream_id)?.name ?? (row.stream_id ? "Unavailable stream" : "Needs assignment")}</span></div>
           <div className="catalog-cell"><span className="catalog-cell-label">Needed by</span>{row.needed_by ? <time dateTime={row.needed_by}>{row.needed_by}</time> : <span>No target</span>}</div>
           <div className="catalog-cell"><span className="catalog-cell-label">Projects</span><span>{row.requiredProjectCount + row.optionalProjectCount ? `${row.requiredProjectCount} required · ${row.optionalProjectCount} optional` : "No projects"}</span></div>
-        </article></li>)}</ul></>}
+          <div className="catalog-cell catalog-health" title={health.title}><span className="catalog-cell-label">Health</span><span className={`catalog-health-label ${health.tone}`}>{health.label}</span>{health.detail && <small>{health.detail}</small>}</div>
+        </article></li>; })}</ul></>}
       {!rows.length && <p className="empty">{index.rows.length ? "No outcomes match these filters. Clear filters to browse all outcomes." : "No outcomes yet. Add an outcome to start the plan."}</p>}
       {!index.rows.length && <button type="button" disabled={busy} onClick={onAdd}>Add outcome</button>}
     </>}

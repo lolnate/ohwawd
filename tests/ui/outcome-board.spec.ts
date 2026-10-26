@@ -53,31 +53,65 @@ test("sidebar placement supports explicit order, stream append and an exact same
   await expect(form).toContainText("Foundation moved to Needs assignment");
   const excluded = (await assignment.board()).packages.find((item) => item.project_id === "a")!;
   expect([excluded.roadmap_state, excluded.selected, excluded.capacity_outcome_id]).toEqual(["candidate", false, null]);
+  await page.getByRole("dialog", { name: "Foundation", exact: true }).getByRole("button", { name: "Close outcome" }).click();
+  const needsAssignment = page.locator(".unassigned-outcomes");
+  await expect(needsAssignment.getByRole("heading", { name: "Needs Assignment", exact: true })).toBeVisible();
+  await expect(needsAssignment).toContainText("Foundation");
+  expect(await page.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("unassigned-outcomes"))).toBe(true);
+  expect(await needsAssignment.evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
 });
 
+for (const width of [768, 390]) {
+  test(`Outcomes Needs Assignment navigation stays focused and contained at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 }); await page.goto("/"); await page.getByRole("button", { name: /^Outcomes/ }).click();
+    await page.getByLabel("Search outcomes", { exact: true }).fill("Retention");
+    await page.getByRole("navigation", { name: "Outcome sections" }).getByRole("link", { name: "Needs Assignment", exact: true }).click();
+    const section = page.locator("#outcome-needs-assignment");
+    await expect(section.getByRole("heading", { name: "Needs Assignment", exact: true })).toBeFocused();
+    await expect(section).toContainText("Discovery");
+    await expect(page.getByLabel("Search outcomes", { exact: true })).toHaveValue("Retention");
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+  });
+}
+
 test("candidate linking is explicit and include/defer/resume/dismiss/restore conserve one charge", async ({ page, assignment }) => {
-  await page.goto("/"); await plan(card(page, "d"));
-  await expect(card(page, "d").getByRole("button", { name: "Include on roadmap", exact: true })).toBeDisabled();
-  await card(page, "d").getByLabel("Outcome for linking Discovery").selectOption(Retention);
-  await card(page, "d").getByRole("button", { name: "Open outcome Projects for linking" }).click();
+  await page.goto("/");
+  await expect(page.locator("#unassigned-work")).toHaveCount(0);
+  await page.getByRole("button", { name: /Projects need outcomes/ }).click();
+  await expect(page.getByRole("button", { name: /^Outcomes/ })).toHaveAttribute("aria-current", "page");
+  const needsAssignment = page.locator("#outcome-needs-assignment");
+  await expect(needsAssignment.getByRole("heading", { name: "Needs Assignment", exact: true })).toBeFocused();
+  await expect(needsAssignment).toContainText("Discovery");
+  await needsAssignment.getByRole("button", { name: "Assign outcome" }).click();
+  await expect(page.getByRole("button", { name: /^Board/ })).toHaveAttribute("aria-current", "page");
+  const candidateDrawer = page.getByRole("dialog", { name: "Discovery", exact: true }); await expect(candidateDrawer).toBeVisible();
+  const candidateCard = candidateDrawer.locator("article.project-plan-card");
+  await expect(candidateCard.getByRole("button", { name: "Include on roadmap", exact: true })).toBeDisabled();
+  await candidateCard.getByLabel("Outcome for linking Discovery").selectOption(Retention);
+  await candidateCard.getByRole("button", { name: "Open outcome Projects for linking" }).click();
   const sidebar = page.getByRole("dialog", { name: "Retention", exact: true }); await expect(sidebar).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-current", "true");
   await sidebar.getByRole("button", { name: "Manage projects" }).click(); await sidebar.getByRole("checkbox", { name: /Discovery/ }).check();
   await sidebar.getByRole("button", { name: "Save links", exact: true }).click(); await expect(sidebar).toContainText("Links saved.");
   expect((await assignment.board()).packages.find((item) => item.project_id === "d")!.roadmap_state).toBe("candidate");
   await sidebar.getByRole("button", { name: "Close outcome" }).click();
-  await card(page, "d").getByLabel("Owning outcome for Discovery").selectOption(Retention); await card(page, "d").getByRole("button", { name: "Include on roadmap", exact: true }).click();
-  await expect(notice(page)).toContainText("Discovery included once in Retention"); await manage(page); await plan(card(page, "d"));
-  await card(page, "d").getByLabel("Extra scope points").fill("4"); await card(page, "d").getByRole("button", { name: "Save extra scope" }).click(); await expect(notice(page)).toContainText("Discovery extra scope saved");
+  await page.getByRole("button", { name: /^Outcomes/ }).click();
+  await needsAssignment.getByRole("button", { name: "Assign outcome" }).click();
+  const drawerCard = page.getByRole("dialog", { name: "Discovery", exact: true }).locator("article.project-plan-card");
+  await drawerCard.getByLabel("Owning outcome for Discovery").selectOption(Retention); await drawerCard.getByRole("button", { name: "Include on roadmap", exact: true }).click();
+  await expect(notice(page)).toContainText("Discovery included once in Retention");
+  await drawerCard.getByLabel("Extra scope points").fill("4"); await drawerCard.getByRole("button", { name: "Save extra scope" }).click(); await expect(notice(page)).toContainText("Discovery extra scope saved");
   expect((await assignment.board()).forecast.selectedKnown).toBe(14);
-  await card(page, "d").getByRole("button", { name: "Defer project" }).click(); await expect(notice(page)).toContainText("deferred"); await plan(card(page, "d"));
+  await drawerCard.getByRole("button", { name: "Defer project" }).click(); await expect(notice(page)).toContainText("deferred");
   expect((await assignment.board()).forecast.selectedKnown).toBe(10);
-  await card(page, "d").getByRole("button", { name: "Resume on roadmap" }).click(); await expect(notice(page)).toContainText("included once"); await plan(card(page, "d"));
-  await card(page, "d").getByRole("button", { name: "Dismiss from roadmap" }).click(); await expect(notice(page)).toContainText("dismissed from roadmap"); await plan(card(page, "d"));
-  await card(page, "d").getByRole("button", { name: "Restore candidate" }).click(); await expect(notice(page)).toContainText("restored to Needs assignment");
+  await drawerCard.getByRole("button", { name: "Resume on roadmap" }).click(); await expect(notice(page)).toContainText("included once");
+  await drawerCard.getByRole("button", { name: "Dismiss from roadmap" }).click(); await expect(notice(page)).toContainText("dismissed from roadmap");
+  await drawerCard.getByRole("button", { name: "Restore candidate" }).click(); await expect(notice(page)).toContainText("restored to Needs assignment");
   const saved = await assignment.board(), discovery = saved.packages.find((item) => item.project_id === "d")!;
   expect([discovery.roadmap_state, discovery.selected, discovery.capacity_outcome_id, saved.forecast.selectedKnown]).toEqual(["candidate", false, null, 10]);
   expect(saved.packages.filter((item) => item.project_id === "d")).toHaveLength(1);
+  await page.getByRole("button", { name: "Close project details" }).click(); await page.getByRole("button", { name: /^Outcomes/ }).click();
+  await expect(needsAssignment).toContainText("Discovery");
 });
 
 test("wait inspection restores dismissed prerequisites through explicit ownership without duplicate capacity", async ({ page, assignment }) => {

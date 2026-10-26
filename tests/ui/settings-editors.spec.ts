@@ -67,7 +67,7 @@ test("capacity validation retains inputs and saved assumptions update Outcomes w
   expect(changed.capacity).toMatchObject({ baseline: 10, reserve: 1, horizon: 8 });
   expect(changed.forecast.outcomes[0].endDate).not.toBe(initialDate);
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("region", { name: "Outcome delivery", exact: true })).toContainText(changed.forecast.outcomes[0].endDate!);
+  await expect(page.locator("#outcome-catalog .catalog-health").first()).toContainText(changed.forecast.outcomes[0].endDate!);
   await page.unroute("**/api/board");
   await openSettings(page);
   await expect(settings(page)).toContainText("Effective baseline: 10 points/cycle");

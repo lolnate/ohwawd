@@ -103,7 +103,7 @@ test("project details, outcome creation and linking keep readable labels, fields
   await expectReadableText(creator);
   await page.screenshot({ path: testInfo.outputPath("outcome-creator.png"), animations: "disabled" });
   await page.keyboard.press("Escape");
-  await page.getByRole("region", { name: "Outcome delivery", exact: true }).getByRole("button", { name: "Launch", exact: true }).click();
+  await page.locator("#outcome-catalog").getByRole("button", { name: "Launch", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "Launch", exact: true });
   await picker.getByRole("button", { name: "Projects", exact: true }).click();
   await picker.getByRole("button", { name: "Manage projects", exact: true }).click();
@@ -151,9 +151,9 @@ test("authentication and load failures remain legible without external font serv
   await page.route("**/api/board", (route) => route.fulfill({ status: 503, json: { error: "Forecast temporarily unavailable" } }));
   await page.reload();
   await page.getByRole("button", { name: /^Outcomes/ }).click();
-  const delivery = page.getByRole("region", { name: "Outcome delivery", exact: true });
-  await expect(delivery.getByRole("alert")).toBeVisible();
-  await expectReadableText(delivery);
+  const catalog = page.locator("#outcome-catalog");
+  await expect(catalog.getByRole("alert")).toBeVisible();
+  await expectReadableText(catalog);
 });
 
 test("enlarged text reflows without losing the Settings close action or workspace navigation", async ({ page, assignment }) => {
