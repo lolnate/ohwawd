@@ -8,7 +8,7 @@ import type { RoadmapState } from "./roadmap-planning";
 export type ForecastPackage = {
   id: string; projectId: string; name: string; status: string; streamId: string | null;
   selected: boolean; sequence?: number | null; ownerOutcomeId?: string | null; roadmapState?: RoadmapState | null;
-  known: number; openIssueCount: number; unknownIssueIds: string[]; crossTeam: boolean; needsReview: boolean; orderReview?: string | null; externalBlockers?: string[];
+  known: number; hasAggregateScope?: boolean; openIssueCount: number; unknownIssueIds: string[]; crossTeam: boolean; needsReview: boolean; orderReview?: string | null; externalBlockers?: string[];
   extraScope?: { points: number; issueIds: string[] };
 };
 export type ForecastStream = { id: string; name: string; allocation: number; wip: number };
@@ -115,7 +115,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     else if (/completed/i.test(item.status) && (item.openIssueCount > 0 || item.extraScope)) reason = "Linear marks this complete but open issues or extra scope remain; reconcile scope.";
     else if (uncovered.length) reason = `${uncovered.length} open issue${uncovered.length === 1 ? " has" : "s have"} no estimate or Extra scope coverage.`;
     else if (!item.streamId || !streamIds.has(item.streamId)) reason = "Needs assignment to an active stream.";
-    else if (!item.openIssueCount && !item.extraScope) reason = "No issue estimate or Extra scope.";
+    else if (!item.hasAggregateScope && !item.openIssueCount && !item.extraScope) reason = "No issue estimate or Extra scope.";
     const result: PackageForecast = { id: item.id, demand, provisional: !!item.extraScope, start: null, finish: null, reason, consumed: [] };
     if (included(item)) { selectedKnown += demand; selectedUnknown += uncovered.length; }
     if (complete) result.finish = 0;

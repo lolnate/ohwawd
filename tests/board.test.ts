@@ -100,6 +100,25 @@ test("aggregate remaining scope produces finite stream demand despite unestimate
   } finally { await database.close(); }
 });
 
+test("aggregate remaining scope produces finite demand without cached open issues", async () => {
+  const database = new PGlite();
+  try {
+    await database.exec(schemaSql); await database.query("INSERT INTO workspace(id) VALUES(1)");
+    await database.query("INSERT INTO stream(id,name,position,allocation) VALUES('core','Core',1,.2)");
+    await database.query("INSERT INTO capacity_profile(workspace_id,baseline,baseline_reason,reserve,horizon,holidays_enabled) VALUES(1,130,'Weekly planning capacity',0,6,false)");
+    const at = new Date("2026-11-01T00:00:00Z");
+    await saveImport(database as unknown as PoolClient, { encryptedKey: "test", viewer: { id: "v", name: "Owner" }, team: { id: "team", name: "Team" },
+      projects: [{ id: "sccf", teamId: "team", name: "Slack Client Communication Foundation", description: "", status: "started", url: "https://linear.app/sccf", updatedAt: at,
+        crossTeam: false, remainingScope: 108, issues: [] }],
+      cycles: Array.from({ length: 6 }, (_, index) => ({ id: `c${index}`, teamId: "team", number: index + 1, name: null,
+        startsAt: new Date(Date.UTC(2026, 10, 2 + index * 7)), endsAt: new Date(Date.UTC(2026, 10, 9 + index * 7)), cycleDays: 7, completedAt: null, completedPoints: null })),
+      cycleSettings: { timezone: "UTC", cyclesEnabled: true, cycleDuration: 1, cycleStartDay: 1, cycleCooldownTime: 0, upcomingCycleCount: 6 } }, at);
+    await placeProjects(database as unknown as PoolClient, [{ packageId: "linear:sccf", streamId: "core", selected: true }]);
+    const projection = (await getBoard(database as unknown as PoolClient)).forecast.packages[0];
+    assert.equal(projection.demand, 108); assert.equal(projection.reason, null); assert.equal(projection.finish, 5); assert.deepEqual(projection.consumed, [26, 26, 26, 26, 4]);
+  } finally { await database.close(); }
+});
+
 test("new Linear dependencies preserve user order and only withhold affected lane dates until repair", async () => {
   const database = new PGlite();
   try {

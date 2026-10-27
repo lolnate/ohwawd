@@ -76,7 +76,7 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
       const extra = extraScopes.rows.find((item) => item.package_id === row.id);
       return { id: row.id, projectId: row.project_id, name: row.name, status: row.status, streamId: row.stream_id,
          selected: row.selected, sequence: row.sequence_position, ownerOutcomeId: row.capacity_outcome_id, roadmapState: row.roadmap_state,
-        known: row.remaining_scope ?? open.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0), openIssueCount: open.length,
+        known: row.remaining_scope ?? open.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0), hasAggregateScope: row.remaining_scope !== null, openIssueCount: open.length,
         unknownIssueIds: row.remaining_scope === null ? open.filter((issue) => issue.estimate === null).map((issue) => issue.linear_id) : [],
           crossTeam: row.cross_team, needsReview: row.needs_review, orderReview: sequenceConflicts.find((conflict) => workspace.rows[0].roadmap_planning_migrated ? conflict.ownerId === row.capacity_outcome_id : conflict.streamId === row.stream_id)?.message, externalBlockers: row.external_blockers,
          extraScope: extra ? { points: extra.points, issueIds: extra.issue_ids } : undefined };
