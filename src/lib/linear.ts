@@ -72,8 +72,8 @@ export function linearReadError(error: unknown, action: string): Response {
   return Response.json({ error: message }, { status: error.type === LinearErrorType.Ratelimited ? 429 : 502 });
 }
 
-export function linearRemainingScope(scope: number, completedScopeHistory: number[]): number | null {
-  const completed = completedScopeHistory.at(-1) ?? 0;
+export function linearRemainingScope(scope: number, completedScopeHistory: number[], completedIssuePoints?: number): number | null {
+  const completed = Math.max(completedScopeHistory.at(-1) ?? 0, completedIssuePoints ?? 0);
   return Number.isFinite(scope) && scope > 0 && Number.isFinite(completed) && completed >= 0 ? Math.max(0, scope - completed) : null;
 }
 
@@ -130,7 +130,8 @@ export function createLinearSource(apiKey: string) {
         let after: string | null = null;
         let projectTeams: { id: string }[] = [];
         let extraTeams = false;
-        let remainingScope: number | null = null;
+        let aggregateScope = 0;
+        let completedScopeHistory: number[] = [];
         const issues: ImportedIssue[] = [];
         do {
           const response: LinearRawResponse<ProjectDetailsResponse> = await client.client.rawRequest<ProjectDetailsResponse, { id: string; after: string | null }>(
@@ -140,7 +141,8 @@ export function createLinearSource(apiKey: string) {
           if (!details) throw new HttpError(502, `Linear did not return details for project ${project.id}.`);
           projectTeams = details.teams.nodes;
           extraTeams = details.teams.pageInfo.hasNextPage;
-          remainingScope = linearRemainingScope(details.scope, details.completedScopeHistory);
+          aggregateScope = details.scope;
+          completedScopeHistory = details.completedScopeHistory;
           if (includeIssues) for (const issue of details.issues.nodes) {
             issues.push({
               id: issue.id, projectId: project.id, teamId: issue.team?.id || "",
@@ -155,6 +157,9 @@ export function createLinearSource(apiKey: string) {
           }
         } while (after);
         if (!projectTeams.some((item) => item.id === teamId)) return null;
+        const completedIssuePoints = includeIssues ? issues.filter((issue) => ["completed", "canceled"].includes(issue.stateType))
+          .reduce((sum, issue) => sum + (issue.estimate ?? 0), 0) : undefined;
+        const remainingScope = linearRemainingScope(aggregateScope, completedScopeHistory, completedIssuePoints);
         const [relations, inverseRelations] = includeIssues ? await Promise.all([
           all(await project.relations({ first: 50 })), all(await project.inverseRelations({ first: 50 })),
         ]) : [[], []];

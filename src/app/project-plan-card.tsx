@@ -11,7 +11,7 @@ import ProjectRoadmapControls from "./project-roadmap-controls";
 export type BoardProject = Partial<StoredRoadmapFields> & { id: string; project_id: string; name: string; status: string; url: string; stream_id: string | null;
   capacity_outcome_id?: string | null; description?: string;
   selected: boolean; sequence_position: number | null; linear_priority: number | null; pause_reason: string;
-  cross_team: boolean; needs_review: boolean; in_scope: boolean };
+  cross_team: boolean; needs_review: boolean; in_scope: boolean; remaining_scope?: number | null };
 
 type Props = { item: BoardProject; streams: { id: string; name: string }[]; sequencing: QueueState; projection?: PackageForecast;
   embedded?: boolean;

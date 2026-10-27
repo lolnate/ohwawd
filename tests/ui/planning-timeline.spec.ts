@@ -168,7 +168,9 @@ test("aggregate remaining scope draws a fractional sequential bar and connector 
   expect(referenceBox!.x + referenceBox!.width).toBeLessThanOrEqual(successorBox!.x + 1);
   await expect(launch.locator('[data-dependency-from="linear:a"][data-dependency-to="linear:c"]')).toHaveCount(1);
   await expect(page.locator("[data-outcome-wait]")).toHaveCount(0); await expect(page.getByText(/^Waiting for /)).toHaveCount(0);
-  await reference.click(); await expect(page.getByRole("dialog", { name: "API foundation", exact: true })).toContainText("106 pts");
+  await reference.click();
+  const drawer = page.getByRole("dialog", { name: "API foundation", exact: true });
+  await expect(drawer).toContainText("106 pts"); await expect(drawer).toContainText("106 remaining aggregate Linear points");
   await page.keyboard.press("Escape");
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 }); await core.scrollIntoViewIfNeeded();

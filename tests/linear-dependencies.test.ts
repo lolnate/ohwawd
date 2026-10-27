@@ -12,6 +12,8 @@ test("Linear project dependency relations retain finish-to-start direction in ei
 test("Linear aggregate scope subtracts completed points without using weighted progress", () => {
   assert.equal(linearRemainingScope(150, [10, 44]), 106);
   assert.equal(linearRemainingScope(40, [50]), 0);
+  assert.equal(linearRemainingScope(108, [], 108), 0);
+  assert.equal(linearRemainingScope(150, [44], 50), 100);
   assert.equal(linearRemainingScope(0, []), null);
   assert.equal(linearRemainingScope(Number.NaN, []), null);
 });
