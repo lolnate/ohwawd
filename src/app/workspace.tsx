@@ -13,6 +13,7 @@ import type { RoadmapConversion, StoredRoadmapFields } from "@/lib/roadmap-plann
 import type { OutcomeLifecycle } from "@/lib/outcome-completion";
 import { mergeOutcomeSnapshot } from "./outcome-lifecycle-view";
 import DismissibleMessage from "./dismissible-message";
+import { isCurrentOrFutureProjectStatus } from "@/lib/project-status";
 
 type Team = { id: string; name: string; key: string };
 type Project = Partial<StoredRoadmapFields> & { id: string; name: string; description: string; status: string; url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; package_id: string; stream_id: string | null; capacity_outcome_id: string | null; issue_count: number; unestimated_open_issues: number; estimated_open_points: number };
@@ -24,11 +25,6 @@ type State = { connection: { viewer_name: string; team_id: string; team_name: st
 type Preview = { id: string; name: string; status: string };
 type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 type ImportResult = { imported: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
-
-function isCurrentOrFutureProjectStatus(status: string): boolean {
-  const normalized = status.trim().toLocaleLowerCase().replace(/[\s_-]+/g, " ");
-  return ["backlog", "todo", "to do", "planned", "in progress", "started", "active"].includes(normalized);
-}
 
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   return apiRequest<T>(path, method, body);

@@ -19,3 +19,9 @@ The Outcomes view SHALL identify candidate projects as Projects without outcomes
 - **WHEN** the planner selects Projects without outcomes in the Outcomes section navigation
 - **THEN** that section heading is scrolled into view and focused
 - **AND** the existing Outcome catalog query state is preserved
+
+#### Scenario: Board attention counts current candidate work
+- **WHEN** candidate projects without outcomes include current or future work and terminal or paused work
+- **THEN** the Board's Projects need outcomes action counts only Backlog, Todo or Planned, and In Progress or Started projects
+- **AND** terminal or paused candidates do not contribute to the Planning Attention open count
+- **AND** the Planning Attention headline does not repeat a candidate-project count

@@ -93,7 +93,11 @@ for (const width of [768, 390]) {
 
 test("projects without outcomes default to current statuses and allow completed work", async ({ page, assignment }) => {
   await assignment.setProjectStatus("d", "completed");
-  await page.goto("/"); await page.getByRole("button", { name: /^Outcomes/ }).click();
+  await page.goto("/");
+  const attention = page.locator(".action-center");
+  await expect(attention.getByRole("button", { name: /Projects need outcomes/ })).toHaveCount(0);
+  await expect(attention.locator("#next-actions-title")).not.toContainText("candidate project");
+  await page.getByRole("button", { name: /^Outcomes/ }).click();
   const section = page.locator("#outcome-needs-assignment");
   await expect(section.getByRole("heading", { name: "Projects without outcomes", exact: true })).toBeVisible();
   await expect(section.getByRole("status")).toHaveText(/0 of 1 projects/);
@@ -107,7 +111,10 @@ test("projects without outcomes default to current statuses and allow completed 
 test("candidate linking is explicit and include/defer/resume/dismiss/restore conserve one charge", async ({ page, assignment }) => {
   await page.goto("/");
   await expect(page.locator("#unassigned-work")).toHaveCount(0);
-  await page.getByRole("button", { name: /Projects need outcomes/ }).click();
+  await expect(page.locator("#next-actions-title")).toHaveText("Review planning attention");
+  const needsOutcomes = page.getByRole("button", { name: /Projects need outcomes/ });
+  await expect(needsOutcomes).toContainText("1 waiting");
+  await needsOutcomes.click();
   await expect(page.getByRole("button", { name: /^Outcomes/ })).toHaveAttribute("aria-current", "page");
   const needsAssignment = page.locator("#outcome-needs-assignment");
   await expect(needsAssignment.getByRole("heading", { name: "Projects without outcomes", exact: true })).toBeFocused();

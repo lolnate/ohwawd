@@ -2,9 +2,18 @@
 .timeline-scroll, .cycle-table-wrap { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; }
 .action-center { margin: 14px 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
 .action-center.ready { border-color: var(--color-success); }
-.action-center .compact-section-head { background: var(--color-selection-bg); }
+.action-center > summary { cursor: pointer; list-style: none; }
+.action-center > summary::-webkit-details-marker { display: none; }
+.action-center .compact-section-head { border-bottom: 0; background: var(--color-selection-bg); }
+.action-center[open] .compact-section-head { border-bottom: 1px solid var(--color-border); }
 .action-center .compact-section-head div { min-width: 0; }
 .action-center .compact-section-head .eyebrow { margin: 0 0 2px; }
+.action-center-status { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; }
+.action-center .compact-section-head .action-center-toggle, .action-center .compact-section-head .action-center-toggle span { color: var(--color-action); font-weight: 750; }
+.action-center-toggle::before { content: "+"; display: inline-block; width: 1em; }
+.action-center[open] .action-center-toggle::before { content: "-"; }
+.action-center-toggle .when-open, .action-center:not([open]) .action-center-toggle .when-closed { display: inline; }
+.action-center-toggle .when-closed, .action-center:not([open]) .action-center-toggle .when-open { display: none; }
 .action-list { display: grid; gap: 1px; background: var(--color-border); }
 .action-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; border-radius: 0; background: var(--color-surface); color: var(--color-text); padding: 11px 13px; text-align: left; }
 .action-item:hover:not(:disabled) { background: var(--color-surface-hover); }
@@ -27,6 +36,7 @@
 .anchor-target { display: block; height: 0; scroll-margin-top: 90px; }
 
 @media (max-width: 760px) {
+  .action-center-status { align-items: flex-end; flex-direction: column; gap: 2px; }
   .action-item, .blocker-line { align-items: stretch; flex-direction: column; gap: 5px; }
   .action-item b { align-self: flex-start; }
   .blocker-line .text-button { align-self: flex-start; }

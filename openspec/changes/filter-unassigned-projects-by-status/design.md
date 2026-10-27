@@ -30,6 +30,10 @@ Extend the shared status filter with an opt-in explicit-selection mode. Existing
 
 Represent untouched filter state separately from an explicit selection. Until the first filter edit, defaults are re-derived from available candidate statuses after refresh. After editing, retain the planner's selection for the signed-in page session while removing values no longer available.
 
+### Reuse the default status scope for Board attention
+
+The Board's Projects need outcomes action uses the same semantic current/future status matcher as the Outcomes default filter. Terminal or paused candidates remain available in Outcomes but do not increase the Board attention count. Candidate work is described by the action row rather than repeated as the section headline; when it is the only attention item, the headline remains generic.
+
 ## Risks / Trade-offs
 
 - [Unrecognized custom current-state label is initially excluded] → Every candidate status remains available in the filter, and recognized aliases cover Linear's standard states.
