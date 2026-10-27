@@ -22,6 +22,9 @@ This project uses **OpenSpec** for specification-driven development and **Beans*
 - Implementation progress and completion status
 - Follow-up work discovered during development
 
+Do NOT use a Bean to track tasks for some situational work like:
+- Quick infrastructure changes (like restarting or tweaking the launch of npm or the server)
+
 OpenSpec is the source of truth for requirements and design. Beans is the source of truth for execution state.
 
 ### When to Use Each System
