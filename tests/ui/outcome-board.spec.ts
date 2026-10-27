@@ -79,17 +79,30 @@ test("sidebar placement supports explicit order, stream append and an exact same
 });
 
 for (const width of [768, 390]) {
-  test(`Outcomes Needs Assignment navigation stays focused and contained at ${width}px`, async ({ page }) => {
+  test(`Projects without outcomes navigation stays focused and contained at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 }); await page.goto("/"); await page.getByRole("button", { name: /^Outcomes/ }).click();
     await page.getByLabel("Search outcomes", { exact: true }).fill("Retention");
-    await page.getByRole("navigation", { name: "Outcome sections" }).getByRole("link", { name: "Needs Assignment", exact: true }).click();
+    await page.getByRole("navigation", { name: "Outcome sections" }).getByRole("link", { name: "Projects without outcomes", exact: true }).click();
     const section = page.locator("#outcome-needs-assignment");
-    await expect(section.getByRole("heading", { name: "Needs Assignment", exact: true })).toBeFocused();
+    await expect(section.getByRole("heading", { name: "Projects without outcomes", exact: true })).toBeFocused();
     await expect(section).toContainText("Discovery");
     await expect(page.getByLabel("Search outcomes", { exact: true })).toHaveValue("Retention");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
   });
 }
+
+test("projects without outcomes default to current statuses and allow completed work", async ({ page, assignment }) => {
+  await assignment.setProjectStatus("d", "completed");
+  await page.goto("/"); await page.getByRole("button", { name: /^Outcomes/ }).click();
+  const section = page.locator("#outcome-needs-assignment");
+  await expect(section.getByRole("heading", { name: "Projects without outcomes", exact: true })).toBeVisible();
+  await expect(section.getByRole("status")).toHaveText(/0 of 1 projects/);
+  await expect(section).not.toContainText("Discovery");
+  await section.locator(".status-filter > summary").click();
+  await section.getByLabel("completed", { exact: true }).check();
+  await expect(section).toContainText("Discovery");
+  await expect(section.getByRole("status")).toHaveText(/1 of 1 projects/);
+});
 
 test("candidate linking is explicit and include/defer/resume/dismiss/restore conserve one charge", async ({ page, assignment }) => {
   await page.goto("/");
@@ -97,7 +110,7 @@ test("candidate linking is explicit and include/defer/resume/dismiss/restore con
   await page.getByRole("button", { name: /Projects need outcomes/ }).click();
   await expect(page.getByRole("button", { name: /^Outcomes/ })).toHaveAttribute("aria-current", "page");
   const needsAssignment = page.locator("#outcome-needs-assignment");
-  await expect(needsAssignment.getByRole("heading", { name: "Needs Assignment", exact: true })).toBeFocused();
+  await expect(needsAssignment.getByRole("heading", { name: "Projects without outcomes", exact: true })).toBeFocused();
   await expect(needsAssignment).toContainText("Discovery");
   await needsAssignment.getByRole("button", { name: "Assign outcome" }).click();
   await expect(page.getByRole("button", { name: /^Board/ })).toHaveAttribute("aria-current", "page");

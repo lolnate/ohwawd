@@ -6,11 +6,11 @@ The Board's project-level Needs Assignment shelf no longer matches the outcome-f
 
 ## What Changes
 
-- Add a Needs Assignment section to Outcomes for candidate projects that do not have an active owning outcome, with an entry point to their existing planning controls.
+- Add a Projects without outcomes section to Outcomes for candidate projects that do not have an active owning outcome, with an entry point to their existing planning controls.
 - Make the Board's Needs Assignment section contain outcomes that have not been assigned to a stream, retaining existing outcome placement controls.
 - Remove candidate projects from the migrated Board triage area while retaining Deferred and Dismissed project triage there.
 - Route Board candidate-attention actions to the new Outcomes section and preserve accessible section focus and responsive behavior.
-- Keep the compact outcome catalog first, add one concise forecast-health column, and place project Needs Assignment below the catalog.
+- Keep the compact outcome catalog first, add one concise forecast-health column, and place Projects without outcomes below the catalog.
 - Remove the separate Outcome delivery section and route outcome forecast attention to the catalog instead.
 - Keep the legacy pre-migration project assignment surface unchanged.
 

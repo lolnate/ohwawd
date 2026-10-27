@@ -4,7 +4,7 @@
 
 See `proposal.md` for motivation. In migrated workspaces, the Board currently renders candidate, deferred and dismissed project shelves through one triage component, while a separate Board block already renders outcomes whose `stream_id` is null. The Outcomes tab already has saved project membership in workspace state and can open the existing Board project drawer by stable package ID.
 
-`roadmapPlanningMigrated` separates the current outcome-first model from legacy project-to-stream assignment. In the current model, `roadmap_state === "candidate"` is the authoritative Needs Assignment classification; checking only for a null capacity owner would incorrectly include intentionally deferred or dismissed work.
+`roadmapPlanningMigrated` separates the current outcome-first model from legacy project-to-stream assignment. In the current model, `roadmap_state === "candidate"` is the authoritative Projects without outcomes classification; checking only for a null capacity owner would incorrectly include intentionally deferred or dismissed work.
 
 ## Goals / Non-Goals
 
@@ -49,14 +49,14 @@ Add a stable Outcomes heading ID to the shared section-focus helper and section 
 
 Pass the already-loaded Board forecast to the catalog without copying it into catalog query state. Derive one short, non-color-only Health label per outcome from forecast status and target fit: blocked/setup/beyond-horizon/unplanned states take precedence, followed by missed/on-target target state, then provisional/no-target/ready states. An absent forecast renders Loading or Unavailable while saved catalog browsing continues.
 
-Render Outcome catalog first and project Needs Assignment second. Remove the separate delivery component and its section navigation; Board forecast-attention actions focus the catalog. This avoids two outcome lists while retaining title-driven inspection and one compact status column.
+Render Outcome catalog first and Projects without outcomes second. Remove the separate delivery component and its section navigation; Board forecast-attention actions focus the catalog. This avoids two outcome lists while retaining title-driven inspection and one compact status column.
 
 ## Risks / Trade-offs
 
 - [Candidate actions briefly switch back to Board for the full project drawer] -> Keep the new Outcomes row explicit about opening project planning; reuse prevents divergent assignment behavior.
 - [Null owner is mistaken for candidate state] -> Filter by migrated roadmap membership, not owner nullability.
 - [Legacy fixtures lose their project assignment shelf] -> Gate the relocation on `roadmapPlanningMigrated` and preserve the legacy branch.
-- [Board attention links target a removed candidate shelf] -> Add a dedicated Outcomes Needs Assignment callback and update migrated focus fallbacks.
+- [Board attention links target a removed candidate shelf] -> Add a dedicated Outcomes Projects without outcomes callback and update migrated focus fallbacks.
 - [Health labels hide detailed remediation] -> Keep labels deliberately compact; full evidence remains in outcome/project details and Board planning attention.
 
 ## Migration Plan

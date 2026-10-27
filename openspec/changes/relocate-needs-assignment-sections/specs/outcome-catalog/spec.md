@@ -3,23 +3,23 @@
 ## ADDED Requirements
 
 ### Requirement: Outcomes surfaces projects needing an owner
-The Outcomes view SHALL provide a Needs Assignment section containing candidate projects without an active owning outcome. Each project SHALL identify its excluded state and provide an entry point to existing project planning controls without changing assignment merely by opening them.
+The Outcomes view SHALL provide a Projects without outcomes section containing candidate projects without an active owning outcome. Each project SHALL identify its excluded state and provide an entry point to existing project planning controls without changing assignment merely by opening them.
 
 #### Scenario: Review an ownerless candidate
 - **WHEN** a migrated workspace contains a candidate project without an active owning outcome
-- **THEN** the project appears in Outcomes under Needs Assignment
+- **THEN** the project appears in Outcomes under Projects without outcomes
 - **AND** it does not appear in the Board's project triage area
 - **AND** opening its planning controls creates no owner, stream assignment or capacity demand
 
 #### Scenario: No projects need an owner
 - **WHEN** a migrated workspace contains no candidate projects
-- **THEN** the Outcomes Needs Assignment section shows an explicit empty state
+- **THEN** the Outcomes Projects without outcomes section shows an explicit empty state
 
 ### Requirement: Outcomes section navigation reaches project assignment
-The Outcomes section navigation SHALL include Outcome catalog and Needs Assignment. Selecting either section SHALL scroll its heading into view and focus it without changing catalog filters or saved planning data.
+The Outcomes section navigation SHALL include Outcome catalog and Projects without outcomes. Selecting either section SHALL scroll its heading into view and focus it without changing catalog filters or saved planning data.
 
 #### Scenario: Navigate directly to candidate projects
-- **WHEN** the planner selects Needs Assignment in the Outcomes section navigation
+- **WHEN** the planner selects Projects without outcomes in the Outcomes section navigation
 - **THEN** its heading is scrolled into view and focused
 - **AND** the existing Outcome catalog query state is preserved
 

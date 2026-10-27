@@ -24,6 +24,7 @@ type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string
   seedOptionalDerived: () => Promise<void>;
   activateRoadmap: () => Promise<void>;
   setProjectCompleted: (projectId: string, completed: boolean) => Promise<void>;
+  setProjectStatus: (projectId: string, status: string) => Promise<void>;
   moveOutcome: (outcomeId: string, streamId: string, beforeOutcomeId?: string) => Promise<void>;
   changeMembership: (projectId: string, action: string, outcomeId?: string) => Promise<void>;
   seedLegacyScenario: () => Promise<string>;
@@ -189,6 +190,7 @@ export const test = base.extend<{ assignment: Controls }>({
           await database.query("UPDATE linear_issue_cache SET state_type=$2 WHERE project_id=$1", [projectId, completed ? "completed" : "started"]);
           await reconcileOutcomeCompletions(client, "Linear sync");
         }); },
+        setProjectStatus: async (projectId, status) => { await database.query("UPDATE linear_project_cache SET status=$2 WHERE linear_id=$1", [projectId, status]); },
         addSourceConflict: async () => { await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','linear')"); },
         seedDerivedChain: async () => {
           await database.query("INSERT INTO package_dependency(predecessor_id,successor_id,source) VALUES('linear:b','linear:a','local')");

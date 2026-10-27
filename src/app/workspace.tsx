@@ -25,6 +25,11 @@ type Preview = { id: string; name: string; status: string };
 type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 type ImportResult = { imported: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
 
+function isCurrentOrFutureProjectStatus(status: string): boolean {
+  const normalized = status.trim().toLocaleLowerCase().replace(/[\s_-]+/g, " ");
+  return ["backlog", "todo", "to do", "planned", "in progress", "started", "active"].includes(normalized);
+}
+
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   return apiRequest<T>(path, method, body);
 }
@@ -66,6 +71,7 @@ export default function App() {
   const [catalogContext, setCatalogContext] = useState<CatalogContext>({ ids: [], clear: () => {} });
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatuses, setProjectStatuses] = useState<string[]>([]);
+  const [candidateProjectStatuses, setCandidateProjectStatuses] = useState<string[] | null>(null);
   const [projectPreset, setProjectPreset] = useState<"needs" | "active" | "completed" | "hidden" | "all" | "dismissed">("needs");
   const [projectSort, setProjectSort] = useState<"planning" | "name" | "status" | "points">("planning");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
@@ -234,6 +240,13 @@ export default function App() {
   ) ?? []).sort((left, right) => projectSort === "name" ? left.name.localeCompare(right.name) : projectSort === "status" ? left.status.localeCompare(right.status) || left.name.localeCompare(right.name) : projectSort === "points" ? right.estimated_open_points - left.estimated_open_points || left.name.localeCompare(right.name) : Number(right.needs_review) - Number(left.needs_review) || right.unestimated_open_issues - left.unestimated_open_issues || Number(!right.stream_id) - Number(!left.stream_id) || left.name.localeCompare(right.name));
   const hiddenCount = state?.projects.filter((project) => !project.in_scope).length ?? 0;
   const candidateProjects = state?.roadmapPlanningMigrated ? state.projects.filter((project) => project.roadmap_state === "candidate").sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)) : [];
+  const candidateStatuses = [...new Set(candidateProjects.map((project) => project.status))].sort();
+  const candidateStatusKey = candidateStatuses.join("\0");
+  useEffect(() => {
+    setCandidateProjectStatuses((current) => current?.filter((status) => candidateStatuses.includes(status)) ?? null);
+  }, [candidateStatusKey]);
+  const selectedCandidateStatuses = candidateProjectStatuses ?? candidateStatuses.filter(isCurrentOrFutureProjectStatus);
+  const visibleCandidateProjects = candidateProjects.filter((project) => selectedCandidateStatuses.includes(project.status));
   const presetCounts = { needs: state?.projects.filter(needsPlanning).length ?? 0, active: state?.projects.filter((project) => project.in_scope && activeProject(project)).length ?? 0, completed: state?.projects.filter((project) => project.in_scope && terminalProject(project)).length ?? 0, hidden: hiddenCount, all: state?.projects.filter((project) => project.in_scope).length ?? 0, dismissed: state?.projects.filter((project) => project.in_scope && project.roadmap_state === "dismissed").length ?? 0 };
   const allVisibleSelected = visibleProjects.length > 0 && visibleProjects.every((project) => selectedProjectIds.includes(project.id));
 
@@ -276,15 +289,16 @@ export default function App() {
     <section className="workspace-view" hidden={activeView !== "board"}><Board refreshKey={boardVersion} updatedState={boardUpdate} onChanged={() => void reload()} onOpenProjects={() => setActiveView("projects")} onOpenOutcome={openBoardOutcome}
       onOpenOutcomes={openOutcomeCatalog} onOpenNeedsAssignment={openProjectNeedsAssignment} onOpenSettings={openSettings} onStateChange={handleBoardStateChange} focusProject={boardFocus} /></section>
     <section className="workspace-view" hidden={activeView !== "outcomes"}>
-      <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a>{state?.roadmapPlanningMigrated && <a href="#outcome-needs-assignment" onClick={(event) => { event.preventDefault(); focusOutcomeSection("needs-assignment"); }}>Needs Assignment</a>}</nav>
+      <nav className="outcome-section-nav" aria-label="Outcome sections"><a href="#outcome-catalog" onClick={(event) => { event.preventDefault(); focusOutcomeSection("catalog"); }}>Outcome catalog</a>{state?.roadmapPlanningMigrated && <a href="#outcome-needs-assignment" onClick={(event) => { event.preventDefault(); focusOutcomeSection("needs-assignment"); }}>Projects without outcomes</a>}</nav>
       <OutcomeCatalog data={state} error={stateError} forecast={deliveryBoard?.forecast ?? null} forecastError={deliveryError} busy={busy} onRetry={() => void run(reload)} onAdd={startAddingOutcome} onInspect={inspectOutcome} onContext={setCatalogContext} />
       {state?.roadmapPlanningMigrated && <section className="panel project-assignment-panel" id="outcome-needs-assignment" aria-labelledby="outcome-needs-assignment-title">
-        <div className="section-head"><div><h2 id="outcome-needs-assignment-title" tabIndex={-1}>Needs Assignment</h2><p>Projects without an owning outcome are excluded from the roadmap until explicitly included.</p></div><span className="count">{candidateProjects.length}</span></div>
-        <ul className="project-assignment-list">{candidateProjects.map((project) => { const linkCount = state.links.filter((link) => link.project_id === project.id).length; return <li key={project.id}><article>
+        <div className="section-head"><div><h2 id="outcome-needs-assignment-title" tabIndex={-1}>Projects without outcomes</h2><p>Candidate projects without an owning outcome are excluded from the roadmap until explicitly included.</p></div><span className="count">{visibleCandidateProjects.length}</span></div>
+        <div className="project-assignment-controls"><StatusFilter label="Project status" statuses={candidateStatuses} selected={selectedCandidateStatuses} onChange={setCandidateProjectStatuses} emptyMeansAll={false} /><p className="meta" role="status">{visibleCandidateProjects.length} of {candidateProjects.length} projects · Change the status filter to review paused, completed, or other candidate work.</p></div>
+        <ul className="project-assignment-list">{visibleCandidateProjects.map((project) => { const linkCount = state.links.filter((link) => link.project_id === project.id).length; return <li key={project.id}><article>
           <div><h3>{project.url ? <a href={project.url} target="_blank" rel="noreferrer">{project.name} ↗</a> : project.name}</h3><p>No owning outcome · {linkCount} linked outcome{linkCount === 1 ? "" : "s"}{!project.in_scope ? " · Hidden" : ""}{project.needs_review ? " · Needs review" : ""}</p></div>
           <span className="tag">{project.status}</span><button type="button" className="secondary" onClick={() => inspectProjectOnBoard(project.package_id)}>Assign outcome</button>
         </article></li>; })}</ul>
-        {!candidateProjects.length && <p className="empty">No projects are waiting for an owning outcome.</p>}
+        {!candidateProjects.length ? <p className="empty">All candidate projects have an owning outcome.</p> : !visibleCandidateProjects.length && <p className="empty">No projects without outcomes match the selected statuses.</p>}
       </section>}
     </section>
     <WorkspaceSettings request={settingsRequest} onClose={() => setSettingsRequest(null)} onChanged={settingsChanged} />
