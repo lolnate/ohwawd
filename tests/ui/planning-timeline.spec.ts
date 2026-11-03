@@ -183,6 +183,79 @@ test("aggregate remaining scope draws a fractional sequential bar and connector 
   await expect(launch.locator('[data-dependency-from="linear:a"][data-dependency-to="linear:c"]')).not.toHaveCSS("stroke", "none");
 });
 
+test("finite bars adapt project names to rendered space without changing their semantics", async ({ page, assignment }) => {
+  await assignment.setDemand("a", 25);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const bar = page.getByRole("region", { name: /^Core forecast timeline/ }).locator('[data-timeline-project="linear:a"].counted-project');
+  const label = bar.locator(".timeline-project-label");
+  const identity = label.locator(".timeline-project-identity");
+  const context = label.locator(".timeline-project-context");
+  const originalWidth = await bar.evaluate((element) => (element as HTMLElement).style.width);
+  const resizeNameSlot = async (fraction: number) => bar.evaluate((element, value) => {
+    const item = element as HTMLElement;
+    const contextRange = document.createRange();
+    contextRange.selectNodeContents(item.querySelector(".timeline-project-context")!);
+    const fixed = contextRange.getBoundingClientRect().width;
+    const fullName = item.querySelector(".timeline-project-name-measure")!.getBoundingClientRect().width;
+    item.style.width = `${fixed + fullName * value + 14}px`;
+  }, fraction);
+
+  await resizeNameSlot(1.1);
+  await expect(label).toHaveAttribute("data-project-label-mode", "full");
+  await expect(identity).toHaveText("API foundation");
+  await expect(context).toContainText("25 pts");
+  await expect(bar).toHaveAttribute("aria-label", /API foundation \(AF\).*25 pts counted here/);
+  await expect(bar).toHaveAttribute("title", /API foundation \(AF\).*25 pts counted here/);
+
+  await resizeNameSlot(.75);
+  await expect(label).toHaveAttribute("data-project-label-mode", "ellipsized");
+  await expect(identity).toHaveText("API foundation");
+  expect(await identity.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+  await resizeNameSlot(.3);
+  await expect(label).toHaveAttribute("data-project-label-mode", "code");
+  await expect(identity).toHaveText("AF");
+  await expect(context).toContainText("25 pts");
+  await bar.evaluate((element) => {
+    const projectIdentity = element.querySelector(".timeline-project-identity")!;
+    (element as HTMLElement).style.width = `${projectIdentity.scrollWidth + 16}px`;
+  });
+  await expect(label).toHaveAttribute("data-project-label-mode", "code");
+  const narrowWidths = await label.evaluate((element) => {
+    const projectIdentity = element.querySelector(".timeline-project-identity")!;
+    const fixedContext = element.querySelector(".timeline-project-context")!;
+    return { identity: projectIdentity.clientWidth, identityContent: projectIdentity.scrollWidth, context: fixedContext.clientWidth, contextContent: fixedContext.scrollWidth };
+  });
+  expect(narrowWidths.identity).toBeGreaterThanOrEqual(narrowWidths.identityContent);
+  expect(narrowWidths.context).toBeLessThan(narrowWidths.contextContent);
+  await expect(bar).toHaveAttribute("aria-label", /API foundation \(AF\)/);
+
+  await resizeNameSlot(1);
+  await expect(label).toHaveAttribute("data-project-label-mode", "full");
+  await label.evaluate((element) => {
+    (element.querySelector(".timeline-project-name-measure") as HTMLElement).style.letterSpacing = "20px";
+    document.fonts.dispatchEvent(new Event("loadingdone"));
+  });
+  await expect(label).toHaveAttribute("data-project-label-mode", "code");
+  await label.evaluate((element) => {
+    (element.querySelector(".timeline-project-name-measure") as HTMLElement).style.letterSpacing = "";
+    document.fonts.dispatchEvent(new Event("loadingdone"));
+  });
+  await expect(label).toHaveAttribute("data-project-label-mode", "full");
+  await bar.evaluate((element, width) => { (element as HTMLElement).style.width = width; }, originalWidth);
+  await expect(bar).toHaveCSS("width", /.+/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await bar.scrollIntoViewIfNeeded();
+  await bar.focus();
+  await expect(bar).toBeFocused();
+  await expect(bar).toHaveAttribute("aria-label", /API foundation \(AF\)/);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
+  await expect(bar).toBeFocused();
+  expect(await bar.evaluate((element) => (element as HTMLElement).style.width)).toBe(originalWidth);
+});
+
 test("tiny fractional bars retain an accurate visual span and a minimum pointer target", async ({ page, assignment }) => {
   await assignment.setRemainingScope("a", .3); await assignment.setDemand("a", null); await assignment.setHolidaysEnabled(false); await page.goto("/");
   const bar = page.getByRole("region", { name: /^Core forecast timeline/ }).locator('[data-timeline-project="linear:a"].counted-project');

@@ -6,7 +6,7 @@ The exact first-proof calculation and state rules are in [scheduling-contract.md
 
 ## Outcome-led sequencing and shared capacity
 
-Each stream's timeline now uses **Outcome** as its primary label column. An outcome is assigned to one stream and contains a sequence of linked project blocks. Compact mnemonic codes identify projects; tooltips and the project sidebar reveal full names. Outcome row labels show the title, counted points, project count and delivery status without a project-key fold-out. Time bars share a sublane when they do not overlap, and unscheduled or deferred projects retain clickable explanations.
+Each stream's timeline now uses **Outcome** as its primary label column. An outcome is assigned to one stream and contains a sequence of linked project blocks. Project bars show full names when they fit, ellipsized names when a useful portion fits, and stable mnemonic codes only for narrow spans; tooltips and the project sidebar always reveal full names. Outcome row labels show the title, counted points, project count and delivery status without a project-key fold-out. Time bars share a sublane when they do not overlap, and unscheduled or deferred projects retain clickable explanations.
 
 Each included project has one linked capacity-owning outcome in the same active stream. Solid blocks count points in that row. Outlined blocks in a separate shared band show the same forecast under every other linked outcome with **0 points counted here**. Shared dependencies still govern outcome delivery. Removing its owning link, deleting its owner or unassigning its owner converts included work to an excluded candidate needing assignment. Stream and portfolio totals use unique work packages, never visual appearances.
 

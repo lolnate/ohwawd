@@ -9,10 +9,50 @@ import { planningCycleLabel, shortLinearCycleLabel } from "@/lib/cycles";
 import type { CalendarProjection } from "@/lib/cycle-projection";
 import { outcomeRows, projectCodes, type OutcomePlacement, type OutcomeProjectLink } from "@/lib/outcome-planning";
 import { outcomeLifecycleSummary } from "./outcome-lifecycle-view";
+import { timelineProjectLabelMode, type TimelineProjectLabelMode } from "@/lib/timeline-project-label";
 
 type Props = { name: string; streamId: string; projects: BoardProject[]; outcomes: OutcomePlacement[]; links: OutcomeProjectLink[]; streams: { id: string; name: string }[]; forecast: ForecastResult; cycles: CalendarCycle[]; timezone: string; anchorDate: string;
   weeklyAdjustments: WeeklyAvailability[]; holidays: WeeklyAvailability[]; cycleAdjustments: CalendarAdjustment[]; sequencing: QueueState; calendarProjection?: CalendarProjection;
   onEditWeek: (week: PlanningWeek) => void; onOpenProject: (project: BoardProject) => void; renderOutcome?: (id: string) => ReactNode; onOpenOutcome?: (id: string, opener: HTMLElement) => void };
+
+function AdaptiveProjectLabel({ name, code, context }: { name: string; code: string; context: string }) {
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const contextRef = useRef<HTMLSpanElement>(null);
+  const nameMeasureRef = useRef<HTMLSpanElement>(null);
+  const [mode, setMode] = useState<TimelineProjectLabelMode>("code");
+
+  useLayoutEffect(() => {
+    const label = labelRef.current, fixedContext = contextRef.current, nameMeasure = nameMeasureRef.current;
+    if (!label || !fixedContext || !nameMeasure) return;
+    let active = true;
+    const update = () => active && setMode((current) => {
+      const style = getComputedStyle(label);
+      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const contextRange = document.createRange();
+      contextRange.selectNodeContents(fixedContext);
+      const available = label.clientWidth - padding - contextRange.getBoundingClientRect().width;
+      const next = timelineProjectLabelMode(available, nameMeasure.getBoundingClientRect().width);
+      return next === current ? current : next;
+    });
+    const observer = new ResizeObserver(update);
+    observer.observe(label);
+    observer.observe(fixedContext);
+    void document.fonts?.ready.then(update);
+    document.fonts?.addEventListener("loadingdone", update);
+    update();
+    return () => {
+      active = false;
+      observer.disconnect();
+      document.fonts?.removeEventListener("loadingdone", update);
+    };
+  }, [name, code, context]);
+
+  return <span className="timeline-project-label" data-project-label-mode={mode} ref={labelRef}>
+    <span className="timeline-project-identity">{mode === "code" ? code : name}</span>
+    <span className="timeline-project-context" ref={contextRef}>{context}</span>
+    <span className="timeline-project-name-measure" aria-hidden="true" ref={nameMeasureRef}>{name}</span>
+  </span>;
+}
 
 export default function StreamTimeline({ name, streamId, projects, outcomes, links, streams, forecast, cycles, timezone, anchorDate, weeklyAdjustments, holidays, cycleAdjustments, sequencing, onEditWeek, onOpenProject, renderOutcome, onOpenOutcome }: Props) {
   const labelElements = useRef(new Map<string, HTMLDivElement>());
@@ -106,7 +146,8 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
             const successors = row.immediateEdges.filter((edge) => edge.predecessorId === project.id).map((edge) => projects.find((item) => item.id === edge.successorId)?.name ?? "unavailable project");
              const label = referenceLabel(project, derived);
              const detail = `${project.name} (${codes.get(project.id)}): ${derived ? `Prerequisite reference · 0 pts here. ${accountingContext(project)}` : counted ? `${projection?.demand ?? 0} pts counted here` : `${label} · 0 pts here. ${accountingContext(project)}`}. ${span ? `Starts ${start}; ${partial ? `simulated progress through ${finalCycle!.end}; continues beyond the simulated calendar without a forecast finish. ${reason}` : `uses ${Math.round(finishFraction * 100)}% of its final cycle ending ${finalCycle!.end}`}` : reason}${successors.length ? `. Immediate prerequisite for ${successors.join(", ")}` : ""}${blockers.length ? `. After ${blockers.join(", ")}` : ""}${row.outcome ? optional ? ". Optional context for this outcome" : ". Required for delivery" : ""}${!project.in_scope ? ". Hidden from source view" : ""}${projection?.calendarProjected ? ". Provisional date using projected cycles" : ""}`;
-             return { project, projection, span, partial, reason, counted, derived, optional, detail, label, blockers, finishFraction, lane: 0 };
+              const context = `${derived ? " · Prerequisite ↗" : counted ? ` · ${projection?.demand ?? 0} pts` : ` · ${label} ↗`}${projection?.calendarProjected ? " *" : ""}${blockers.length ? ` ← ${sequencing.dependencies.filter((edge) => edge.successorId === project.id).map((edge) => codes.get(edge.predecessorId) ?? "?").join(", ")}` : ""}${optional ? " · opt" : derived ? " · req" : ""}${partial ? " · Continues →" : ""}`;
+              return { project, projection, span, partial, reason, counted, derived, optional, detail, label, blockers, finishFraction, context, lane: 0 };
           });
           const ownedEnds: number[] = [], sharedEnds: number[] = [];
           for (const entry of entries.filter((entry) => entry.span).sort((a, b) => a.span!.left - b.span!.left || a.project.id.localeCompare(b.project.id))) {
@@ -146,7 +187,7 @@ export default function StreamTimeline({ name, streamId, projects, outcomes, lin
                 data-derived-prerequisite={entry.derived || undefined} className={`calendar-project-bar outcome-project-block${entry.counted ? " counted-project" : " shared-project"}${entry.derived ? " prerequisite-project" : ""}${entry.partial ? " continuing" : ""}${entry.projection?.provisional ? " provisional" : ""}${entry.projection?.calendarProjected ? " uses-projected-cycles" : ""}`}
                 style={{ left: `${entry.span!.left}%`, width: `${entry.span!.width}%`, top: (entry.counted ? 14 : sharedTop) + entry.lane * 36 }}
                 aria-label={entry.detail} title={entry.detail} onClick={() => onOpenProject(entry.project)}>
-                <span>{codes.get(entry.project.id)}{entry.derived ? " · Prerequisite ↗" : entry.counted ? ` · ${entry.projection?.demand ?? 0} pts` : ` · ${entry.label} ↗`}{entry.projection?.calendarProjected ? " *" : ""}{entry.blockers.length ? ` ← ${sequencing.dependencies.filter((edge) => edge.successorId === entry.project.id).map((edge) => codes.get(edge.predecessorId) ?? "?").join(", ")}` : ""}{entry.optional ? " · opt" : entry.derived ? " · req" : ""}{entry.partial ? " · Continues →" : ""}</span>
+                 <AdaptiveProjectLabel name={entry.project.name} code={codes.get(entry.project.id) ?? entry.project.id} context={entry.context} />
               </button>)}
               {!entries.length && <span className="calendar-row-reason">No linked projects yet</span>}
                 {!!footerCount && <div className="outcome-unscheduled">{unscheduled.map((entry) => <button key={entry.project.id} type="button" data-timeline-project={entry.project.id} data-counted={entry.counted} data-derived-prerequisite={entry.derived || undefined} className={`unscheduled-project${entry.counted ? "" : " shared-project"}${entry.derived ? " prerequisite-project" : ""}`} aria-label={entry.detail} title={entry.detail} onClick={() => onOpenProject(entry.project)}>
