@@ -16,6 +16,18 @@ export type ProjectPreview = { id: string; name: string; status: string };
 
 type ProjectRelation = { type: string; anchorType?: string; relatedAnchorType?: string; projectId?: string; relatedProjectId?: string; archivedAt?: Date | null };
 
+const linearNetworkRetryDelays = [300, 1_000];
+
+export async function retryLinearRead<T>(request: () => Promise<T>, retryDelays = linearNetworkRetryDelays): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await request(); }
+    catch (error) {
+      if (!(error instanceof LinearError) || error.type !== LinearErrorType.NetworkError || attempt >= retryDelays.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+    }
+  }
+}
+
 /** Linear project dependencies use end/start anchors, unlike issue "blocks" relations. */
 export function linearProjectDependencies(relations: ProjectRelation[]): { predecessorId: string; successorId: string }[] {
   const edges = new Map<string, { predecessorId: string; successorId: string }>();
@@ -66,6 +78,8 @@ export function linearReadError(error: unknown, action: string): Response {
   const detail = error.errors?.[0]?.message?.replace(/[\r\n\t]/g, " ").slice(0, 240);
   const message = error.type === LinearErrorType.Ratelimited
     ? "Linear's rate limit was reached. Try again shortly."
+    : error.type === LinearErrorType.NetworkError
+      ? "The application server temporarily lost its connection to Linear. Try the sync again."
     : error.type === LinearErrorType.AuthenticationError || error.type === LinearErrorType.Forbidden
       ? "Linear denied access. Check the API key and its team permissions."
       : `Linear could not ${action}${detail ? `: ${detail}` : ` (${error.type || "unknown error"})`}.`;
@@ -84,24 +98,24 @@ export function createLinearSource(apiKey: string) {
   const client = new LinearClient({ apiKey: apiKey.trim() });
 
   async function all<T>(connection: Connection<T>): Promise<T[]> {
-    while (connection.pageInfo.hasNextPage) await connection.fetchNext();
+    while (connection.pageInfo.hasNextPage) await retryLinearRead(() => connection.fetchNext());
     return connection.nodes;
   }
 
   return {
     async identity(): Promise<{ id: string; name: string }> {
-      const viewer = await client.viewer;
+      const viewer = await retryLinearRead(() => client.viewer);
       return { id: viewer.id, name: viewer.displayName || viewer.name };
     },
     async teams(): Promise<LinearTeam[]> {
-      const teams = await all(await client.teams({ first: 50 }));
+      const teams = await all(await retryLinearRead(() => client.teams({ first: 50 })));
       return teams.map((team) => ({ id: team.id, name: team.name, key: team.key }))
         .sort((a, b) => a.name.localeCompare(b.name));
     },
     async cycles(teamId: string): Promise<{ settings: LinearCycleSettings; cycles: ImportedCycle[] }> {
-      const team = await client.team(teamId);
+      const team = await retryLinearRead(() => client.team(teamId));
       if (!team) throw new HttpError(404, "Linear team was not found.");
-      const cycles = await all(await team.cycles({ first: 50 }));
+      const cycles = await all(await retryLinearRead(() => team.cycles({ first: 50 })));
       return { settings: { timezone: team.timezone, cyclesEnabled: team.cyclesEnabled, cycleDuration: team.cycleDuration,
         cycleStartDay: team.cycleStartDay, cycleCooldownTime: team.cycleCooldownTime, upcomingCycleCount: team.upcomingCycleCount },
         cycles: cycles.map((cycle) => ({
@@ -111,17 +125,17 @@ export function createLinearSource(apiKey: string) {
       })).filter((cycle) => cycle.cycleDays > 0 && (cycle.completedPoints === null || (Number.isFinite(cycle.completedPoints) && cycle.completedPoints >= 0))) };
     },
     async previewProjects(teamId: string): Promise<ProjectPreview[]> {
-      const team = await client.team(teamId);
+      const team = await retryLinearRead(() => client.team(teamId));
       if (!team) throw new HttpError(404, "Linear team was not found.");
-      const projects = await all(await team.projects({ first: 50 }));
+      const projects = await all(await retryLinearRead(() => team.projects({ first: 50 })));
       return projects.map((project) => ({
         id: project.id, name: project.name, status: project.state || "unknown",
       })).sort((a, b) => a.name.localeCompare(b.name));
     },
     async projects(teamId: string, includeIssues: boolean): Promise<ImportedProject[]> {
-      const team = await client.team(teamId);
+      const team = await retryLinearRead(() => client.team(teamId));
       if (!team) throw new HttpError(404, "Linear team was not found.");
-      const projects = await all(await team.projects({ first: 50 }));
+      const projects = await all(await retryLinearRead(() => team.projects({ first: 50 })));
       const result: ImportedProject[] = [];
       // A small concurrency cap keeps a larger team's import responsive without
       // making one API call per issue or flooding Linear with requests.
@@ -134,9 +148,9 @@ export function createLinearSource(apiKey: string) {
         let completedScopeHistory: number[] = [];
         const issues: ImportedIssue[] = [];
         do {
-          const response: LinearRawResponse<ProjectDetailsResponse> = await client.client.rawRequest<ProjectDetailsResponse, { id: string; after: string | null }>(
+          const response: LinearRawResponse<ProjectDetailsResponse> = await retryLinearRead(() => client.client.rawRequest<ProjectDetailsResponse, { id: string; after: string | null }>(
             projectDetailsQuery, { id: project.id, after },
-          );
+          ));
           const details: ProjectDetailsResponse["project"] = response.data?.project ?? null;
           if (!details) throw new HttpError(502, `Linear did not return details for project ${project.id}.`);
           projectTeams = details.teams.nodes;
@@ -161,7 +175,8 @@ export function createLinearSource(apiKey: string) {
           .reduce((sum, issue) => sum + (issue.estimate ?? 0), 0) : undefined;
         const remainingScope = linearRemainingScope(aggregateScope, completedScopeHistory, completedIssuePoints);
         const [relations, inverseRelations] = includeIssues ? await Promise.all([
-          all(await project.relations({ first: 50 })), all(await project.inverseRelations({ first: 50 })),
+          all(await retryLinearRead(() => project.relations({ first: 50 }))),
+          all(await retryLinearRead(() => project.inverseRelations({ first: 50 }))),
         ]) : [[], []];
         const dependencyEdges = linearProjectDependencies([...relations, ...inverseRelations]);
         return {
