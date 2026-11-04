@@ -2,7 +2,7 @@
 
 ## 1. Classification Data Foundation
 
-- [ ] 1.1 Add project-label storage, local classification decisions, nullable non-roadmap membership constraints, and the one-time existing-project Roadmap backfill; implement the shared effective-classification resolver and verify migration, exact-label, ambiguity, provenance, and legacy-plan preservation cases with PGlite tests in `npm test`.
+- [x] 1.1 Add project-label storage, local classification decisions, nullable non-roadmap membership constraints, and the one-time existing-project Roadmap backfill; implement the shared effective-classification resolver and verify migration, exact-label, ambiguity, provenance, and legacy-plan preservation cases with PGlite tests in `npm test`.
 
 ## 2. Linear Issue Evidence
 
