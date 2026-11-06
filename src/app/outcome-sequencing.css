@@ -24,6 +24,7 @@
 .project-drawer-header p { font-size: .8rem; margin: 6px 0 0; }
 .project-drawer-body { padding: 0 24px 28px; }
 .project-drawer-body > section { padding: 22px 0; border-bottom: 1px solid var(--color-border); }
+.project-drawer-body > .project-classification { border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; background: transparent; }
 .project-drawer-body h3 { font-size: .83rem; letter-spacing: .06em; margin: 0 0 12px; text-transform: uppercase; color: var(--color-text-muted); }
 .project-drawer-body p { font-size: .85rem; line-height: 1.65; }
 .project-drawer-body .project-description { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -1,5 +1,16 @@
 import { test, expect } from "./assignment-fixture";
 
+test("switching workspace tabs resets the page scroll position", async ({ page, assignment }) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  await assignment.activateRoadmap();
+  await assignment.seedOngoingWork();
+  await page.goto("/");
+  await page.evaluate(() => { document.body.style.minHeight = "3000px"; window.scrollTo(0, document.documentElement.scrollHeight); });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: /^Linear projects/ }).click();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+});
+
 test("legacy configurable stream lanes immediately follow Planning attention, followed by Ongoing work and stream management", async ({ page, assignment }) => {
   await page.goto("/");
   const board = page.locator("#sequencing-board");

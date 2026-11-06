@@ -26,6 +26,7 @@ export default function ProjectClassificationControl({ project, draft, busy, onD
         : "Linear source labels: neither Roadmap nor Ongoing.";
   const provenance = sourceAuthoritative ? "Linear label" : project.classification_provenance === "local-decision" ? "Local decision" : "Unresolved";
   const savedIntent = project.local_classification ? title(project.local_classification) : "none";
+  const sourceOverridesLocal = sourceAuthoritative && !!project.local_classification && project.local_classification !== project.effective_classification;
   const dirty = draft !== (project.local_classification ?? "");
 
   return <section className="project-classification" data-classification-project={project.project_id}>
@@ -33,7 +34,7 @@ export default function ProjectClassificationControl({ project, draft, busy, onD
       <div><h4>Project classification</h4><p><strong>{title(project.effective_classification ?? "unresolved")}</strong> <span className={`classification-provenance ${project.classification_provenance}`}>{provenance}</span></p></div>
     </div>
     <p className={both ? "classification-source conflict" : "classification-source"}>{sourceContext}</p>
-    {sourceAuthoritative && <p className="classification-override">Linear currently controls the effective classification. Saved local intent ({savedIntent}) is retained but overridden until the source labels become ambiguous.</p>}
+    {sourceOverridesLocal && <p className="classification-override">Linear currently controls the effective classification. Saved local intent ({savedIntent}) is retained but overridden until the source labels become ambiguous.</p>}
     {!sourceAuthoritative && <p className="meta">Choose a durable Oh WAWD classification for ambiguous labels. This saves locally and does not change Linear.</p>}
     <fieldset disabled={busy}>
       <legend>Saved local decision</legend>

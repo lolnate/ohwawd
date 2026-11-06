@@ -80,6 +80,9 @@ export default function App() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [syncReport, setSyncReport] = useState<ImportResult | null>(null);
   const reloadGeneration = useRef(0);
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [activeView]);
   const handleBoardStateChange = useCallback((board: BoardState | null, error: string) => {
     setDeliveryBoard(board); setDeliveryError(error);
   }, []);

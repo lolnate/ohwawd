@@ -39,7 +39,7 @@
 .classification-source.conflict, .classification-override { padding: 8px; border-left: 3px solid var(--color-warning); background: var(--color-warning-bg); color: var(--color-warning); }
 .project-classification fieldset { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; margin: 12px 0; padding: 0; border: 0; }
 .project-classification legend { width: 100%; margin-bottom: 4px; color: var(--color-text-muted); font-size: .8rem; font-weight: 700; }
-.project-classification label { display: inline-flex; align-items: center; gap: 6px; }
+.project-classification label { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; white-space: nowrap; overflow-wrap: normal; }
 .classification-save { max-width: 100%; }
 .project-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .outcome-placement { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-border); }
@@ -66,9 +66,9 @@
 .ongoing-table tbody th > a { font-weight: 750; }
 .ongoing-table tbody td:last-child span, .ongoing-table tbody td:last-child small { display: block; }
 .ongoing-table tbody td:last-child small { margin-top: 3px; color: var(--color-text-subtle); }
-.available-segments { display: flex; align-items: stretch; width: 100%; min-height: 40px; }
+.available-segments { display: flex; align-items: stretch; width: 100%; min-height: 40px; overflow-x: auto; }
 .available-segment, .available-segment-zero, .available-segment-remainder { width: 0; min-width: 0; flex-basis: 0; }
-.available-segment { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 40px; padding: 5px 7px; border: 1px solid currentColor; border-radius: 4px; color: var(--color-text); overflow: hidden; }
+.available-segment { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 108px; min-height: 40px; padding: 5px 7px; border: 1px solid currentColor; border-radius: 4px; color: var(--color-text); overflow: hidden; white-space: nowrap; }
 .available-segment + .available-segment { border-left-width: 0; }
 .available-segment span { overflow: hidden; text-overflow: ellipsis; }
 .available-segment strong { font-family: var(--font-telemetry); font-variant-numeric: tabular-nums; }

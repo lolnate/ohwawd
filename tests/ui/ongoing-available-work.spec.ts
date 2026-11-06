@@ -21,6 +21,9 @@ test("sorts Ready work, retains zero-Ready rows, prints exact values, and uses i
   const widths = await rows.nth(0).locator(".available-segment").evaluateAll((segments) => segments.map((segment) => segment.getBoundingClientRect().width));
   expect(widths[0]).toBeGreaterThan(widths[1] * 1.8);
   expect(Math.abs(widths[1] - widths[2])).toBeLessThan(3);
+  const singleIssueSegment = rows.nth(2).locator(".available-segment");
+  expect((await singleIssueSegment.boundingBox())?.width).toBeGreaterThanOrEqual(107);
+  expect((await singleIssueSegment.locator("span").boundingBox())?.height).toBeLessThan(24);
 
   const attention = section.getByRole("region", { name: "Needs classification" });
   await expect(attention).toContainText("Attention · excluded from Ongoing totals");
