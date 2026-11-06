@@ -33,7 +33,7 @@ test("shows the available-work empty state", async ({ page, assignment }) => {
   await page.goto("/");
   const section = page.getByRole("region", { name: "Ongoing work" });
   await expect(section).toContainText("No projects are currently classified Ongoing");
-  await expect(section.getByRole("table")).toHaveCount(0);
+  await expect(section.getByRole("table", { name: "Ongoing available work" })).toHaveCount(0);
 });
 
 test("keyboard inspection exposes source evidence and restores trigger focus", async ({ page }) => {

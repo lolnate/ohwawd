@@ -234,6 +234,7 @@ export default function Board({ refreshKey, updatedState, onChanged, onOpenOutco
   };
   if (!state) return <section className="panel" id="sequencing-board"><h2>Sequencing board</h2><p>{error || "Loading board…"}</p></section>;
   const ongoingAvailable = state.ongoingWork?.available ?? { rows: [], needsClassificationRows: [] };
+  const ongoingHistory = state.ongoingWork?.completedHistory ?? { range: "recent" as const, cycles: [], rows: [], attentionRows: [], olderCycleCount: 0, missingCycleCoverageCount: 0 };
   const result = state.forecast;
   const futureCycles = state.linearCycles.filter((cycle) => state.futureCycleIds.includes(cycle.id));
   const planningCycles = (state.planningCycles ?? state.linearCycles).filter((cycle) => !cycle.completedAt && Date.parse(cycle.startsAt) > Date.parse(state.cycleAnchorAt));
@@ -388,7 +389,7 @@ export default function Board({ refreshKey, updatedState, onChanged, onOpenOutco
       </div>
     </details>
     {streamSection}
-    <OngoingAvailableWork rows={ongoingAvailable.rows} needsClassificationRows={ongoingAvailable.needsClassificationRows} classificationControl={(row) => {
+    <OngoingAvailableWork rows={ongoingAvailable.rows} needsClassificationRows={ongoingAvailable.needsClassificationRows} completedHistory={ongoingHistory} classificationControl={(row) => {
       const item = state.packages.find((project) => project.project_id === row.projectId);
       return item ? <ProjectClassificationControl project={item} draft={classificationDraft(item)} busy={busy} onDraft={(value) => setClassificationDraft(item, value)} onSave={() => void saveClassification(item)} /> : null;
     }} />

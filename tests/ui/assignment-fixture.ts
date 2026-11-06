@@ -19,13 +19,13 @@ import { activateRoadmapPlanning } from "../../src/lib/roadmap-store";
 import { saveOutcomeCompletion, reconcileOutcomeCompletions } from "../../src/lib/outcome-lifecycle";
 import { saveDependency } from "../../src/lib/dependency-store";
 import { projectClassificationMigrationSql, reconcileProjectClassifications, saveLocalProjectClassification, type ProjectClassification } from "../../src/lib/project-classification";
-import { parseOngoingWorkDetailSelector, readOngoingWorkIssueDetails } from "../../src/lib/ongoing-work-insights";
+import { getOngoingWorkInsights, parseHistoryRange, parseOngoingWorkDetailSelector, readOngoingWorkIssueDetails } from "../../src/lib/ongoing-work-insights";
 import { linearEvidenceMigrationSql } from "../../src/lib/linear-evidence-schema";
-import { completedWorkHistoryMigrationSql } from "../../src/lib/completed-work-history";
+import { completedWorkHistoryMigrationSql, snapshotEligibleCompletedIssues } from "../../src/lib/completed-work-history";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
   invalidateNextClassification: () => void; setClassification: (projectId: string, labels: "roadmap" | "ongoing" | "both" | "neither", local?: ProjectClassification | null) => Promise<void>;
-  seedOngoingWork: () => Promise<void>; clearOngoingWork: () => Promise<void>; failNextOngoingRead: () => void;
+  seedOngoingWork: () => Promise<void>; clearOngoingWork: () => Promise<void>; failNextOngoingRead: () => void; failNextHistoryRead: () => void;
   seedDerivedChain: () => Promise<void>;
   seedOptionalDerived: () => Promise<void>;
   activateRoadmap: () => Promise<void>;
@@ -56,6 +56,7 @@ export const test = base.extend<{ assignment: Controls }>({
     let invalidateNextMove = false;
     let invalidateNextClassification = false;
     let ongoingReadFailures = 0;
+    let historyReadFailures = 0;
     const board = () => getBoard(client, undefined, evaluatedAt);
     async function outcomeWrite<T>(write: () => Promise<T>) {
       await database.query("BEGIN");
@@ -121,6 +122,9 @@ export const test = base.extend<{ assignment: Controls }>({
           } else if (path === "/api/ongoing-work/issues") {
             if (ongoingReadFailures > 0) { ongoingReadFailures -= 1; throw new HttpError(503, "Issue evidence temporarily unavailable"); }
             json = { issues: await readOngoingWorkIssueDetails(client, "team", parseOngoingWorkDetailSelector(url.searchParams)) };
+          } else if (path === "/api/ongoing-work") {
+            if (historyReadFailures > 0) { historyReadFailures -= 1; throw new HttpError(503, "Completed history temporarily unavailable"); }
+            json = await getOngoingWorkInsights(client, "team", parseHistoryRange(url.searchParams));
           } else if (path === "/api/state") {
             const current = await board();
             json = { connection: { viewer_name: "Owner", team_id: "team", team_name: "Product", last_imported_at: seenAt.toISOString() },
@@ -167,6 +171,7 @@ export const test = base.extend<{ assignment: Controls }>({
       });
       await use({ board, time: (value) => { evaluatedAt = new Date(value); }, invalidateNextMove: () => { invalidateNextMove = true; }, invalidateNextClassification: () => { invalidateNextClassification = true; },
         failNextOngoingRead: () => { ongoingReadFailures = 2; },
+        failNextHistoryRead: () => { historyReadFailures = 1; },
         setClassification: async (projectId, labels, local = null) => { await outcomeWrite(async () => {
           await database.query("DELETE FROM linear_project_label_cache WHERE project_id=$1", [projectId]);
           if (labels === "roadmap" || labels === "both") await database.query("INSERT INTO linear_project_label_cache(project_id,label_id,name) VALUES($1,$2,'Roadmap')", [projectId, `roadmap-${projectId}`]);
@@ -191,9 +196,27 @@ export const test = base.extend<{ assignment: Controls }>({
              ('ongoing-a-backlog','a','team','ENG-104','Unestimated backlog issue','https://linear.app/issue/ENG-104',NULL,'backlog',NULL,now(),now(),gen_random_uuid()),
              ('ongoing-a-started','a','team','ENG-105','Work in progress','https://linear.app/issue/ENG-105',5,'started',NULL,now(),now(),gen_random_uuid()),
              ('ongoing-b-ready','b','team','ENG-201','Large ready issue','https://linear.app/issue/ENG-201',8,'unstarted',NULL,now(),now(),gen_random_uuid()),
-             ('ongoing-c-backlog','c','team','ENG-301','Zero-ready backlog','https://linear.app/issue/ENG-301',2,'backlog',NULL,now(),now(),gen_random_uuid()),
-             ('ongoing-d-ready','d','team','ENG-401','Needs classification issue','https://linear.app/issue/ENG-401',NULL,'unstarted',NULL,now(),now(),gen_random_uuid())`);
-           await database.query("INSERT INTO linear_issue_blocker_cache(blocker_id,blocked_issue_id,team_id,last_seen_import_id) VALUES('external-blocker','ongoing-a-blocked','team',gen_random_uuid())");
+              ('ongoing-c-backlog','c','team','ENG-301','Zero-ready backlog','https://linear.app/issue/ENG-301',2,'backlog',NULL,now(),now(),gen_random_uuid()),
+              ('ongoing-d-ready','d','team','ENG-401','Needs classification issue','https://linear.app/issue/ENG-401',NULL,'unstarted',NULL,now(),now(),gen_random_uuid()),
+              ('history-old-known','a','team','ENG-501','Frozen known completion','https://linear.app/issue/ENG-501',5,'completed','2026-09-02T12:00:00Z',now(),now(),gen_random_uuid()),
+              ('history-old-unestimated','a','team','ENG-502','Frozen unestimated completion','https://linear.app/issue/ENG-502',NULL,'completed','2026-09-03T12:00:00Z',now(),now(),gen_random_uuid()),
+              ('history-recent','b','team','ENG-503','Recent completion','https://linear.app/issue/ENG-503',3,'completed','2026-10-21T12:00:00Z',now(),now(),gen_random_uuid()),
+              ('history-recent-unestimated','b','team','ENG-507','Recent unestimated completion','https://linear.app/issue/ENG-507',NULL,'completed','2026-10-22T12:00:00Z',now(),now(),gen_random_uuid()),
+              ('history-needs','d','team','ENG-504','Needs classification completion','https://linear.app/issue/ENG-504',NULL,'completed','2026-10-14T12:00:00Z',now(),now(),gen_random_uuid()),
+              ('history-no-project',NULL,'team','ENG-505','No project completion','https://linear.app/issue/ENG-505',2,'completed','2026-10-07T12:00:00Z',now(),now(),gen_random_uuid()),
+              ('history-uncovered','a','team','ENG-506','Completion outside cycle coverage','https://linear.app/issue/ENG-506',1,'completed','2026-07-01T12:00:00Z',now(),now(),gen_random_uuid())`);
+            await database.query(`INSERT INTO linear_cycle_cache(linear_id,team_id,number,name,starts_at,ends_at,completed_at,last_seen_import_id,active) VALUES
+              ('history-cycle-1','team',41,'Ignition','2026-08-31T00:00:00Z','2026-09-07T00:00:00Z','2026-09-07T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-2','team',42,NULL,'2026-09-07T00:00:00Z','2026-09-14T00:00:00Z','2026-09-14T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-3','team',43,NULL,'2026-09-14T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-4','team',44,NULL,'2026-09-21T00:00:00Z','2026-09-28T00:00:00Z','2026-09-28T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-5','team',45,NULL,'2026-09-28T00:00:00Z','2026-10-05T00:00:00Z','2026-10-05T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-6','team',46,NULL,'2026-10-05T00:00:00Z','2026-10-12T00:00:00Z','2026-10-12T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-7','team',47,'Vector','2026-10-12T00:00:00Z','2026-10-19T00:00:00Z','2026-10-19T00:00:00Z',gen_random_uuid(),true),
+              ('history-cycle-8','team',48,'Horizon','2026-10-19T00:00:00Z','2026-10-26T00:00:00Z','2026-10-26T00:00:00Z',gen_random_uuid(),true)`);
+            await database.query("INSERT INTO linear_issue_blocker_cache(blocker_id,blocked_issue_id,team_id,last_seen_import_id) VALUES('external-blocker','ongoing-a-blocked','team',gen_random_uuid())");
+            await snapshotEligibleCompletedIssues(client, "team", evaluatedAt);
+            await database.query("UPDATE linear_issue_cache SET project_id='b' WHERE linear_id IN ('history-old-known','history-old-unestimated')");
          }); },
          clearOngoingWork: async () => { await outcomeWrite(async () => {
            await database.query("DELETE FROM linear_project_label_cache");
