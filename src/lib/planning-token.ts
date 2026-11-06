@@ -9,16 +9,17 @@ export async function roadmapActive(client: Client): Promise<boolean> {
 
 // Available to saved-definition reads without loading or calculating a forecast.
 export async function planningToken(client: Client): Promise<string> {
-  const results = await Promise.all([
-    client.query("SELECT id,stream_id,stream_position FROM outcome ORDER BY id"),
-    client.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link ORDER BY outcome_id,project_id"),
-    client.query("SELECT id,stream_id,capacity_outcome_id,selected,roadmap_state,sequence_position FROM work_package ORDER BY id"),
-    client.query("SELECT predecessor_id,successor_id,source,waived FROM package_dependency ORDER BY predecessor_id,successor_id,source"),
-    client.query("SELECT id,active FROM stream ORDER BY id"),
-    client.query("SELECT linear_id,status,needs_review,cross_team,external_blockers FROM linear_project_cache ORDER BY linear_id"),
-    client.query("SELECT linear_id,project_id,state_type,estimate FROM linear_issue_cache ORDER BY linear_id"),
-    client.query("SELECT package_id,points,issue_ids FROM package_extra_scope ORDER BY package_id"),
-  ]);
+  const results = [];
+  results.push(await client.query("SELECT id,stream_id,stream_position FROM outcome ORDER BY id"));
+  results.push(await client.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link ORDER BY outcome_id,project_id"));
+  results.push(await client.query(`SELECT id,stream_id,capacity_outcome_id,selected,roadmap_state,sequence_position,
+    local_classification,local_classification_updated_at,local_classification_updated_by FROM work_package ORDER BY id`));
+  results.push(await client.query("SELECT project_id,label_id,name FROM linear_project_label_cache ORDER BY project_id,label_id"));
+  results.push(await client.query("SELECT predecessor_id,successor_id,source,waived FROM package_dependency ORDER BY predecessor_id,successor_id,source"));
+  results.push(await client.query("SELECT id,active FROM stream ORDER BY id"));
+  results.push(await client.query("SELECT linear_id,status,needs_review,cross_team,external_blockers FROM linear_project_cache ORDER BY linear_id"));
+  results.push(await client.query("SELECT linear_id,project_id,state_type,estimate FROM linear_issue_cache ORDER BY linear_id"));
+  results.push(await client.query("SELECT package_id,points,issue_ids FROM package_extra_scope ORDER BY package_id"));
   return createHash("sha256").update(JSON.stringify(results.map((result) => result.rows))).digest("hex");
 }
 

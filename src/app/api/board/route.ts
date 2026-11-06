@@ -9,6 +9,7 @@ import { saveCapacityProfile } from "@/lib/capacity-store";
 import { changeRoadmapMembership } from "@/lib/roadmap-mutations";
 import { assertRoadmapInvariants } from "@/lib/roadmap-store";
 import { saveDependency } from "@/lib/dependency-store";
+import { saveLocalProjectClassification } from "@/lib/project-classification";
 
 const finite = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
@@ -47,6 +48,8 @@ export async function PUT(request: Request): Promise<Response> {
         await client.query("UPDATE work_package SET pause_reason=$2 WHERE id=$1", [body.id, reason.trim()]);
       } else if (body.type === "roadmapMembership") {
         await changeRoadmapMembership(client, body);
+      } else if (body.type === "classification") {
+        await saveLocalProjectClassification(client, body);
       } else if (body.type === "outcomeAssignment") {
         const result = await assignOutcomeToStream(client, body);
         affectedCandidates = result?.affectedCandidates ?? [];

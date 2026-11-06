@@ -10,6 +10,7 @@ import { assertRoadmapInvariants } from "./roadmap-store";
 import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
 import { replaceOutcomeLinks } from "./outcome-ownership";
 import { clearIncompatibleOutcomeOwners } from "./sequence-store";
+import { reconcileProjectClassifications } from "./project-classification";
 
 export const calculationVersion = "v5";
 
@@ -103,9 +104,14 @@ function planningState(original: ScenarioSnapshot, reference?: ScenarioSnapshot,
   const linearEdges = reference ? new Set(reference.dependencies.filter((edge) => edge.source === "linear")
     .map((edge) => `${edge.predecessor_id}\0${edge.successor_id}`)) : null;
   return {
-    packages: board.packages.filter((item) => !packageIds || packageIds.has(item.id)).map((item) => ({ id: item.id, streamId: item.stream_id, selected: item.selected,
-      sequence: item.sequence_position ?? null, reason: item.pause_reason, capacityOutcomeId: item.capacity_outcome_id ?? null,
-      ...(outcomeMode ? { roadmapState: item.roadmap_state ?? null } : {}) })).sort((a, b) => a.id.localeCompare(b.id)),
+    packages: board.packages.filter((item) => !packageIds || packageIds.has(item.id)).map((item) => {
+      const referenceItem = reference?.packages.find((candidate) => candidate.id === item.id);
+      const includeClassification = outcomeMode && "effective_classification" in item && (!referenceItem || "effective_classification" in referenceItem);
+      return { id: item.id, streamId: item.stream_id, selected: item.selected,
+        sequence: item.sequence_position ?? null, reason: item.pause_reason, capacityOutcomeId: item.capacity_outcome_id ?? null,
+        ...(outcomeMode ? { roadmapState: item.roadmap_state ?? null } : {}),
+        ...(includeClassification ? { effectiveClassification: item.effective_classification, localClassification: item.local_classification } : {}) };
+    }).sort((a, b) => a.id.localeCompare(b.id)),
     streams: board.streams.map((item) => ({ id: item.id, name: item.name, position: item.position,
       wip: item.wip_limit, allocation: item.allocation })).sort((a, b) => a.id.localeCompare(b.id)),
     links: board.links.map((item) => ({ outcomeId: item.outcome_id, projectId: item.project_id, requirement: item.requirement }))
@@ -223,26 +229,22 @@ async function requireActiveScenario(database: ScenarioClient, id: string): Prom
 }
 
 async function summaryFor(database: ScenarioClient, id: string) {
-  const [row, sourceAt, revisions, registry] = await Promise.all([
-    loadScenario(database, id),
-    currentSourceAt(database),
-    database.query<RevisionRow>("SELECT * FROM scenario_revision WHERE scenario_id=$1 ORDER BY revision_number", [id]),
-    currentStreamRegistry(database),
-  ]);
+  const row = await loadScenario(database, id);
+  const sourceAt = await currentSourceAt(database);
+  const revisions = await database.query<RevisionRow>("SELECT * FROM scenario_revision WHERE scenario_id=$1 ORDER BY revision_number", [id]);
+  const registry = await currentStreamRegistry(database);
   return scenarioSummary(row, sourceAt, revisions.rows.map(revisionSummary), registry, await roadmapActive(database) ? calculationVersion : "v4");
 }
 
 export async function listScenarios(client?: ScenarioClient) {
   const database = await useDatabase(client);
-  const [scenarios, revisions, baseline, activeId, sourceAt, board, registry] = await Promise.all([
-    database.query<ScenarioRow>("SELECT * FROM scenario ORDER BY archived,name,id"),
-    database.query<RevisionRow>("SELECT * FROM scenario_revision ORDER BY scenario_id,revision_number"),
-    database.query<{ revision_id: string }>("SELECT revision_id FROM workspace_baseline WHERE workspace_id=1"),
-    activeScenarioId(database),
-    currentSourceAt(database),
-    getBoard(database),
-    currentStreamRegistry(database),
-  ]);
+  const scenarios = await database.query<ScenarioRow>("SELECT * FROM scenario ORDER BY archived,name,id");
+  const revisions = await database.query<RevisionRow>("SELECT * FROM scenario_revision ORDER BY scenario_id,revision_number");
+  const baseline = await database.query<{ revision_id: string }>("SELECT revision_id FROM workspace_baseline WHERE workspace_id=1");
+  const activeId = await activeScenarioId(database);
+  const sourceAt = await currentSourceAt(database);
+  const board = await getBoard(database);
+  const registry = await currentStreamRegistry(database);
   const active = scenarios.rows.find((row) => row.id === activeId);
   return {
     baselineRevisionId: baseline.rows[0]?.revision_id ?? null,
@@ -366,6 +368,12 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   }
 
   for (const item of snapshot.packages) {
+    if (activeRoadmap && "effective_classification" in item) {
+      await database.query(`UPDATE work_package SET local_classification=$2,
+        local_classification_updated_at=CASE WHEN $2::text IS NULL THEN NULL ELSE COALESCE($3::timestamptz,now()) END,
+        local_classification_updated_by=CASE WHEN $2::text IS NULL THEN NULL ELSE COALESCE(NULLIF($4::text,''),'Scenario activation') END WHERE id=$1`,
+      [item.id, item.local_classification, item.local_classification_updated_at, item.local_classification_updated_by]);
+    }
     if (activeRoadmap) await database.query("UPDATE work_package SET roadmap_state='candidate',selected=false,stream_id=NULL,capacity_outcome_id=NULL,sequence_position=NULL,pause_reason=$2 WHERE id=$1", [item.id, item.pause_reason]);
     else await database.query(`UPDATE work_package SET stream_id=$2,selected=$3,sequence_position=$4,pause_reason=$5,capacity_outcome_id=NULL WHERE id=$1`,
     [item.id, item.stream_id, item.selected, item.sequence_position ?? null, item.pause_reason]);
@@ -455,7 +463,11 @@ export async function activateScenario(id: string, input: { expectedVersion: num
   }
   // Later-imported packages retain their placement, but cannot keep an owner whose stream moved.
   await clearIncompatibleOutcomeOwners(database);
-  if (activeRoadmap) { await normalizeOutcomeRanks(database); await assertRoadmapInvariants(database); }
+  if (activeRoadmap) {
+    await reconcileProjectClassifications(database, snapshot.packages.map((item) => item.project_id));
+    await normalizeOutcomeRanks(database);
+    await assertRoadmapInvariants(database);
+  }
   await reconcileOutcomeCompletions(database);
   await database.query(`INSERT INTO workspace_scenario_state(workspace_id,active_scenario_id) VALUES(1,$1)
     ON CONFLICT(workspace_id) DO UPDATE SET active_scenario_id=EXCLUDED.active_scenario_id`, [id]);
@@ -555,11 +567,15 @@ export function compareSnapshots(originalLeft: ScenarioSnapshot, originalRight: 
     const from = before ? { selected: before.selected, streamId: before.stream_id ? leftStreamNames.get(before.stream_id) ?? "Retired stream" : null,
       sequence: before.sequence_position ?? null, pauseReason: before.pause_reason, capacityOutcomeId: before.capacity_outcome_id ?? null,
       capacityOutcome: left.outcomes.find((outcome) => outcome.id === before.capacity_outcome_id)?.title ?? null,
-      roadmapState: originalLeft.packages.find((item) => item.id === id)?.roadmap_state ?? null } : null;
+      roadmapState: originalLeft.packages.find((item) => item.id === id)?.roadmap_state ?? null,
+      effectiveClassification: originalLeft.packages.find((item) => item.id === id)?.effective_classification ?? null,
+      localClassification: originalLeft.packages.find((item) => item.id === id)?.local_classification ?? null } : null;
     const to = after ? { selected: after.selected, streamId: after.stream_id ? rightStreamNames.get(after.stream_id) ?? "Retired stream" : null,
       sequence: after.sequence_position ?? null, pauseReason: after.pause_reason, capacityOutcomeId: after.capacity_outcome_id ?? null,
       capacityOutcome: right.outcomes.find((outcome) => outcome.id === after.capacity_outcome_id)?.title ?? null,
-      roadmapState: originalRight.packages.find((item) => item.id === id)?.roadmap_state ?? null } : null;
+      roadmapState: originalRight.packages.find((item) => item.id === id)?.roadmap_state ?? null,
+      effectiveClassification: originalRight.packages.find((item) => item.id === id)?.effective_classification ?? null,
+      localClassification: originalRight.packages.find((item) => item.id === id)?.local_classification ?? null } : null;
     return JSON.stringify(from) === JSON.stringify(to) ? [] : [{ id, name: after?.name ?? before?.name ?? id, from, to }];
   });
   const leftOutcomes = new Map(left.forecast.outcomes.map((item) => [item.id, item]));
@@ -673,7 +689,8 @@ export function compareSnapshots(originalLeft: ScenarioSnapshot, originalRight: 
 
 export async function compareScenarios(left: ScenarioReference, right: ScenarioReference, client?: ScenarioClient) {
   const database = await useDatabase(client);
-  const [resolvedLeft, resolvedRight] = await Promise.all([resolveSnapshot(database, left), resolveSnapshot(database, right)]);
+  const resolvedLeft = await resolveSnapshot(database, left);
+  const resolvedRight = await resolveSnapshot(database, right);
   return {
     left: { kind: resolvedLeft.kind, id: resolvedLeft.id, label: resolvedLeft.label, sourceAt: resolvedLeft.sourceAt },
     right: { kind: resolvedRight.kind, id: resolvedRight.id, label: resolvedRight.label, sourceAt: resolvedRight.sourceAt },

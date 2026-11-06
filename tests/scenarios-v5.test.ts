@@ -15,6 +15,7 @@ import { saveExtraScope } from "../src/lib/scope-store";
 import { addStream, previewStreamRetirement, retireStream, restoreStream } from "../src/lib/streams";
 import { activateScenario, compareScenarios, compareSnapshots, createScenario, listScenarios, previewScenarioRebase, publishScenario, rebaseScenario, saveScenario, stablePreviewBoard, type ScenarioSnapshot } from "../src/lib/scenarios";
 import { HttpError } from "../src/lib/security";
+import { projectClassificationMigrationSql, saveLocalProjectClassification } from "../src/lib/project-classification";
 
 const H = "00000000-0000-4000-8000-000000000001", L = "00000000-0000-4000-8000-000000000002", O = "00000000-0000-4000-8000-000000000003";
 const link = (projectId: string, requirement: "minimum" | "optional" = "minimum") => ({ projectId, requirement });
@@ -234,5 +235,55 @@ test("stream configuration writes cannot silently persist conversion of an old d
     await tx(f.client, () => addStream({ name: "New focus", expectedScenarioVersion: 1 }, f.client));
     assert.equal((await f.pg.query<{ value: string }>("SELECT draft_snapshot::text AS value FROM scenario WHERE id=$1", [plan.id])).rows[0].value, before);
     assert.equal((await listScenarios(f.client)).scenarios[0].editVersion, 1); assert.equal((await listScenarios(f.client)).activeDraftDirty, true);
+  } finally { await f.pg.close(); }
+});
+
+test("editable v5 classification round-trips while current labels stay authoritative and published history stays immutable", async () => {
+  const f = await fixture();
+  try {
+    await f.pg.exec(projectClassificationMigrationSql);
+    await f.pg.query("INSERT INTO linear_project_label_cache(project_id,label_id,name) VALUES('a','roadmap','Roadmap')");
+    await saveLocalProjectClassification(f.client, { projectId: "a", classification: "ongoing", planningToken: await planningToken(f.client) });
+    const plan = await tx(f.client, () => createScenario({ name: "Classification plan" }, f.client));
+    const captured = await f.snapshot(plan.id);
+    const savedProject = captured.packages.find((item) => item.project_id === "a")!;
+    assert.deepEqual([savedProject.effective_classification, savedProject.local_classification, savedProject.roadmap_state], ["roadmap", "ongoing", "included"]);
+    const revision = await f.publish(plan.id);
+    const publishedBefore = (await f.pg.query<{ snapshot: string }>("SELECT snapshot::text FROM scenario_revision WHERE id=$1", [revision.id])).rows[0].snapshot;
+
+    await saveLocalProjectClassification(f.client, { projectId: "a", classification: "roadmap", planningToken: await planningToken(f.client) });
+    await f.membership("a", "candidate");
+    assert.equal((await listScenarios(f.client)).activeDraftDirty, true);
+    await tx(f.client, () => activateScenario(plan.id, { expectedVersion: 1, confirmReplace: true }, f.client));
+    let restored = (await f.board()).packages.find((item) => item.project_id === "a")!;
+    assert.deepEqual([restored.effective_classification, restored.local_classification, restored.roadmap_state, restored.capacity_outcome_id],
+      ["roadmap", "ongoing", "included", H]);
+
+    await f.pg.query("DELETE FROM linear_project_label_cache WHERE project_id='a'");
+    await f.pg.query("INSERT INTO linear_project_label_cache(project_id,label_id,name) VALUES('a','ongoing','Ongoing')");
+    await tx(f.client, () => activateScenario(plan.id, { expectedVersion: 1, confirmReplace: true }, f.client));
+    restored = (await f.board()).packages.find((item) => item.project_id === "a")!;
+    assert.deepEqual([restored.effective_classification, restored.local_classification, restored.roadmap_state, restored.capacity_outcome_id],
+      ["ongoing", "ongoing", null, null]);
+    assert.equal((await f.pg.query("SELECT count(*)::integer AS count FROM outcome_project_link WHERE project_id='a'")).rows[0].count, 3);
+    assert.equal((await f.pg.query<{ snapshot: string }>("SELECT snapshot::text FROM scenario_revision WHERE id=$1", [revision.id])).rows[0].snapshot, publishedBefore);
+
+    const legacyId = randomUUID();
+    const legacy = structuredClone(captured);
+    for (const item of legacy.packages) {
+      delete item.effective_classification;
+      delete item.classification_provenance;
+      delete item.roadmap_label_ids;
+      delete item.ongoing_label_ids;
+      delete item.local_classification;
+      delete item.local_classification_updated_at;
+      delete item.local_classification_updated_by;
+    }
+    const serialized = JSON.stringify(legacy);
+    await f.pg.query("INSERT INTO scenario(id,workspace_id,name,draft_source_at,draft_source_snapshot,draft_snapshot) VALUES($1,1,'Legacy v5 classification','2026-10-20','{}',$2::jsonb)", [legacyId, serialized]);
+    const legacyStored = (await f.pg.query<{ value: string }>("SELECT draft_snapshot::text AS value FROM scenario WHERE id=$1", [legacyId])).rows[0].value;
+    await tx(f.client, () => activateScenario(legacyId, { expectedVersion: 1, confirmReplace: true }, f.client));
+    assert.equal((await f.board()).packages.find((item) => item.project_id === "a")!.effective_classification, "ongoing");
+    assert.equal((await f.pg.query<{ value: string }>("SELECT draft_snapshot::text AS value FROM scenario WHERE id=$1", [legacyId])).rows[0].value, legacyStored);
   } finally { await f.pg.close(); }
 });

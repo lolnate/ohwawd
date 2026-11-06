@@ -5,7 +5,7 @@ import { outcomeOwnershipSchemaSql, outcomeOwnershipMigrationSql } from "./outco
 import { roadmapSchemaSql } from "./roadmap-schema";
 import { activateRoadmapPlanning } from "./roadmap-store";
 import { includeExistingUnambiguousCandidates } from "./roadmap-mutations";
-import { projectClassificationMigrationSql } from "./project-classification";
+import { projectClassificationMigrationSql, projectClassificationSchemaSql } from "./project-classification";
 import { linearEvidenceMigrationSql } from "./linear-evidence-schema";
 import { completedWorkHistoryMigrationSql } from "./completed-work-history";
 
@@ -265,7 +265,7 @@ export const schemaSql = `
     DROP TRIGGER IF EXISTS immutable_scenario_revision ON scenario_revision;
     CREATE TRIGGER immutable_scenario_revision BEFORE UPDATE OR DELETE ON scenario_revision
       FOR EACH ROW EXECUTE FUNCTION reject_scenario_revision_change();
-   ` + assignmentSchemaSql + weeklyCapacitySchemaSql + outcomeOwnershipSchemaSql + roadmapSchemaSql;
+   ` + assignmentSchemaSql + weeklyCapacitySchemaSql + outcomeOwnershipSchemaSql + roadmapSchemaSql + projectClassificationSchemaSql;
 
 const upgradeSql = `
   ALTER TABLE scenario_revision DROP CONSTRAINT IF EXISTS scenario_revision_scenario_id_fkey;

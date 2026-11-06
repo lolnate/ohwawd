@@ -4,6 +4,7 @@ import type { ImportedCycle, ImportedProject, ImportedTeamIssueSource, LinearCyc
 import { HttpError } from "./security";
 import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
 import { snapshotEligibleCompletedIssues } from "./completed-work-history";
+import { reconcileProjectClassifications } from "./project-classification";
 
 export type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 export type ImportResult = {
@@ -48,28 +49,26 @@ export async function saveImport(
     ...(project.dependencies || []).filter((id) => importedIds.has(id) && id !== project.id).map((id) => [project.id, id] as const),
     ...(project.blockedBy || []).filter((id) => importedIds.has(id) && id !== project.id).map((id) => [id, project.id] as const),
   ]).map((edge) => [JSON.stringify(edge), edge])).values()];
-  const [savedProjects, savedIssues, savedEdges, savedLabels, savedBlockers] = await Promise.all([
-    client.query<{ linear_id: string; name: string; description: string; status: string; priority: number | null; remaining_scope: string | null; url: string; source_updated_at: Date; cross_team: boolean; external_blockers: string[] | null; needs_review: boolean }>(
-      "SELECT linear_id,name,description,status,priority,remaining_scope::text,url,source_updated_at,cross_team,external_blockers,needs_review FROM linear_project_cache WHERE team_id=$1", [input.team.id],
-    ),
-    expandedIssueSource
-      ? client.query<{ linear_id: string; project_id: string | null; team_id: string; identifier: string; title: string; url: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
-        "SELECT linear_id,project_id,team_id,identifier,title,url,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE team_id=$1", [input.team.id])
-      : client.query<{ linear_id: string; project_id: string | null; team_id: string; identifier: string; title: string; url: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
-        "SELECT linear_id,project_id,team_id,identifier,title,'' AS url,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE project_id IN (SELECT linear_id FROM linear_project_cache WHERE team_id=$1)", [input.team.id]),
-    client.query<{ predecessor_project_id: string; successor_project_id: string }>(`SELECT predecessor.project_id AS predecessor_project_id,successor.project_id AS successor_project_id
+  const savedProjects = await client.query<{ linear_id: string; name: string; description: string; status: string; priority: number | null; remaining_scope: string | null; url: string; source_updated_at: Date; cross_team: boolean; external_blockers: string[] | null; needs_review: boolean }>(
+    "SELECT linear_id,name,description,status,priority,remaining_scope::text,url,source_updated_at,cross_team,external_blockers,needs_review FROM linear_project_cache WHERE team_id=$1", [input.team.id],
+  );
+  const savedIssues = expandedIssueSource
+    ? await client.query<{ linear_id: string; project_id: string | null; team_id: string; identifier: string; title: string; url: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
+      "SELECT linear_id,project_id,team_id,identifier,title,url,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE team_id=$1", [input.team.id])
+    : await client.query<{ linear_id: string; project_id: string | null; team_id: string; identifier: string; title: string; url: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
+      "SELECT linear_id,project_id,team_id,identifier,title,'' AS url,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE project_id IN (SELECT linear_id FROM linear_project_cache WHERE team_id=$1)", [input.team.id]);
+  const savedEdges = await client.query<{ predecessor_project_id: string; successor_project_id: string }>(`SELECT predecessor.project_id AS predecessor_project_id,successor.project_id AS successor_project_id
       FROM package_dependency dependency
       JOIN work_package predecessor ON predecessor.id=dependency.predecessor_id
       JOIN work_package successor ON successor.id=dependency.successor_id
-      WHERE dependency.source='linear' AND predecessor.team_id=$1`, [input.team.id]),
-    hasProjectLabels
-      ? client.query<{ project_id: string; label_id: string; name: string }>("SELECT project_id,label_id,name FROM linear_project_label_cache WHERE project_id=ANY($1::text[])", [[...importedIds]])
-      : Promise.resolve({ rows: [] as { project_id: string; label_id: string; name: string }[] }),
-    expandedIssueSource
-      ? client.query<{ blocker_id: string; blocked_issue_id: string; project_id: string | null }>(`SELECT b.blocker_id,b.blocked_issue_id,i.project_id
-          FROM linear_issue_blocker_cache b JOIN linear_issue_cache i ON i.linear_id=b.blocked_issue_id WHERE b.team_id=$1`, [input.team.id])
-      : Promise.resolve({ rows: [] as { blocker_id: string; blocked_issue_id: string; project_id: string | null }[] }),
-  ]);
+      WHERE dependency.source='linear' AND predecessor.team_id=$1`, [input.team.id]);
+  const savedLabels = hasProjectLabels
+    ? await client.query<{ project_id: string; label_id: string; name: string }>("SELECT project_id,label_id,name FROM linear_project_label_cache WHERE project_id=ANY($1::text[])", [[...importedIds]])
+    : { rows: [] as { project_id: string; label_id: string; name: string }[] };
+  const savedBlockers = expandedIssueSource
+    ? await client.query<{ blocker_id: string; blocked_issue_id: string; project_id: string | null }>(`SELECT b.blocker_id,b.blocked_issue_id,i.project_id
+        FROM linear_issue_blocker_cache b JOIN linear_issue_cache i ON i.linear_id=b.blocked_issue_id WHERE b.team_id=$1`, [input.team.id])
+    : { rows: [] as { blocker_id: string; blocked_issue_id: string; project_id: string | null }[] };
   const projectById = new Map(savedProjects.rows.map((project) => [project.linear_id, project]));
   const issueSignatures = new Map<string, string[]>();
   for (const issue of savedIssues.rows) {
@@ -211,6 +210,7 @@ export async function saveImport(
       settings?.timezone ?? "America/New_York", settings?.cyclesEnabled ?? false, settings?.cycleDuration ?? null,
       settings?.cycleStartDay ?? null, settings?.cycleCooldownTime ?? null, settings?.upcomingCycleCount ?? null, saveCycles]);
   if (saveCycles && settings?.timezone) await client.query("UPDATE workspace SET timezone=$1 WHERE id=1", [settings.timezone]);
+  if (hasProjectLabels) await reconcileProjectClassifications(client, [...importedIds]);
   if (input.teamIssueSource) await snapshotEligibleCompletedIssues(client, input.team.id, seenAt);
   await reconcileOutcomeCompletions(client, "Linear sync");
   return { imported: input.projects.length, crossTeam: input.projects.filter((project) => project.crossTeam).length, report };

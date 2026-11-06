@@ -4,6 +4,7 @@ import { placeProjects, requireSequenceToken } from "./sequence-store";
 import { roadmapActive, requirePlanningToken, planningToken } from "./planning-token";
 import type { RoadmapState } from "./roadmap-planning";
 import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
+import { projectClassificationState } from "./project-classification";
 type Client = Pick<PoolClient, "query">;
 
 /** Internal helpers share the caller's workspace-locked transaction. */
@@ -87,6 +88,8 @@ export async function changeRoadmapMembership(client: Client, input: { packageId
   if (typeof input.packageId !== "string") throw new HttpError(400, "Choose a project.");
   const current = (await client.query("SELECT * FROM work_package WHERE id=$1", [input.packageId])).rows[0];
   if (!current) throw new HttpError(404, "Project not found.");
+  const classification = (await projectClassificationState(client, [current.project_id])).get(current.project_id);
+  if (classification?.classification !== "roadmap") throw new HttpError(409, "Only Roadmap projects can have roadmap membership.");
   const actions: Record<string, RoadmapState> = { include: "included", resume: "included", candidate: "candidate", defer: "deferred", dismiss: "dismissed", restore: "candidate" };
   const state = typeof input.action === "string" ? actions[input.action] : undefined;
   if (!state) throw new HttpError(400, "Choose include, resume, candidate, defer, dismiss or restore.");

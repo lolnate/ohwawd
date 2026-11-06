@@ -249,3 +249,24 @@ test("team issue generations reconcile moves, removals, labels and blocker edges
       [{ blocker_id: "i3", blocked_issue_id: "i1" }]);
   } finally { await database.close(); }
 });
+
+test("label transitions reconcile effective membership before completed attribution freezes", async () => {
+  const database = new PGlite();
+  try {
+    await applyMigrations(database);
+    const client = database as unknown as PoolClient;
+    const project = (labels: { id: string; name: string }[]) => ({ id: "p", teamId: "team", name: "Project", description: "", status: "completed",
+      url: "https://linear.app/project/p", updatedAt: new Date("2026-09-01"), crossTeam: false, issues: [], labels });
+    const issue = { id: "old", projectId: "p", teamId: "team", identifier: "ENG-1", title: "Old work", url: "https://linear.app/issue/old",
+      estimate: 3, stateType: "completed", completedAt: new Date("2026-09-01"), updatedAt: new Date("2026-09-01") };
+    const source = (labels: { id: string; name: string }[]) => ({ encryptedKey: "test", viewer: { id: "owner", name: "Owner" },
+      team: { id: "team", name: "Team" }, projects: [project(labels)], teamIssueSource: { issues: [issue], blockerEdges: [] } });
+    await saveImport(client, source([{ id: "roadmap", name: "Roadmap" }]), new Date("2026-09-10"));
+    await database.query("UPDATE work_package SET local_classification='ongoing',local_classification_updated_at=now(),local_classification_updated_by='Owner' WHERE project_id='p'");
+    await saveImport(client, source([]), new Date("2026-11-01"));
+    assert.deepEqual((await database.query("SELECT classification FROM completed_issue_attribution WHERE issue_id='old'")).rows,
+      [{ classification: "ongoing" }]);
+    assert.deepEqual((await database.query("SELECT roadmap_state,selected FROM work_package WHERE project_id='p'")).rows[0],
+      { roadmap_state: null, selected: false });
+  } finally { await database.close(); }
+});

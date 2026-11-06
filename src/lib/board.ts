@@ -11,11 +11,13 @@ import { ownershipToken } from "./outcome-ownership";
 import { roadmapConversionFeedback, type StoredRoadmapFields } from "./roadmap-planning";
 import { planningToken } from "./planning-token";
 import { getOutcomeLifecycles } from "./outcome-lifecycle";
+import { projectClassificationState, type ClassificationProvenance, type EffectiveProjectClassification, type ProjectClassification } from "./project-classification";
 
 type BoardPackage = StoredRoadmapFields & { id: string; project_id: string; team_id: string; stream_id: string | null; capacity_outcome_id: string | null;
   selected: boolean; sequence_position: number | null; pause_reason: string; name: string; description: string; status: string; linear_priority: number | null;
   url: string; cross_team: boolean; needs_review: boolean; in_scope: boolean; external_blockers: string[];
-  remaining_scope: number | null;
+  remaining_scope: number | null; local_classification: ProjectClassification | null; local_classification_updated_at: Date | null; local_classification_updated_by: string | null;
+  effective_classification?: EffectiveProjectClassification; classification_provenance?: ClassificationProvenance; roadmap_label_ids?: string[]; ongoing_label_ids?: string[];
   priority_rank?: number; must_include?: boolean; earliest_cycle?: number; preferred_cycle?: number; earliest_linear_cycle_id?: string; preferred_linear_cycle_id?: string };
 
 export async function assignPackagesToStream(client: Pick<PoolClient, "query">, streamId: string, packageIds: string[], outcomeId?: string): Promise<void> {
@@ -28,24 +30,29 @@ export async function getBoard(client?: Pick<PoolClient, "query">, cycleAnchor?:
 }
 
 async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date | undefined, evaluationTime: Date) {
-  const [workspace, connection, packages, streams, links, outcomes, capacity, adjustments, dependencies, extraScopes, issues, observations, linearCycles, legacyAdjustments, weeklyAdjustments] = await Promise.all([
-    database.query<{ created_at: Date; roadmap_planning_migrated: boolean }>("SELECT created_at,roadmap_planning_migrated FROM workspace WHERE id=1"),
-    database.query("SELECT last_imported_at,cycles_refreshed_at,GREATEST(last_imported_at,cycles_refreshed_at) AS source_at,team_id,team_name,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count FROM linear_connection WHERE workspace_id=1"),
-    database.query<BoardPackage>(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.capacity_outcome_id,w.selected,w.sequence_position,w.pause_reason,w.roadmap_state,w.roadmap_conversion,
-      p.name,p.description,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers,p.remaining_scope::float FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`),
-    database.query("SELECT id,name,position,wip_limit,allocation::float FROM stream WHERE active=true ORDER BY position"),
-    database.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link"),
-    database.query<{ id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null; stream_id: string | null; stream_position: number | null; created_at: Date }>("SELECT id,title,description,owner,success_signal,needed_by::text,stream_id,stream_position,created_at FROM outcome ORDER BY created_at DESC,id"),
-    database.query("SELECT cycle_anchor::text,cycle_days,baseline::float,baseline_reason,reserve::float,horizon,scoping_lead_days,holidays_enabled FROM capacity_profile WHERE workspace_id=1"),
-    database.query("SELECT a.linear_cycle_id,c.number,c.name,c.starts_at,c.ends_at,a.availability::float,a.reserve::float FROM linear_cycle_adjustment a JOIN linear_cycle_cache c ON c.linear_id=a.linear_cycle_id ORDER BY c.starts_at"),
-    database.query("SELECT predecessor_id,successor_id,source,waived,waiver_reason FROM package_dependency"),
-    database.query<ExtraScope>("SELECT package_id,points::float,notes,issue_ids,issue_baseline,legacy_review FROM package_extra_scope ORDER BY package_id"),
-    database.query("SELECT linear_id,project_id,identifier,estimate::float,state_type FROM linear_issue_cache"),
-    database.query("SELECT linear_id,starts_at,ends_at,completed_at,cycle_days,completed_points::float FROM cycle_observation ORDER BY completed_at DESC"),
-    database.query("SELECT linear_id,number,name,starts_at,ends_at,completed_at FROM linear_cycle_cache WHERE active=true ORDER BY starts_at"),
-    database.query("SELECT cycle_number,availability::float,reserve::float FROM cycle_adjustment ORDER BY cycle_number"),
-    database.query<WeeklyAvailability>('SELECT week_start::text AS "weekStart",availability::float,label FROM weekly_capacity_adjustment ORDER BY week_start'),
-  ]);
+  const workspace = await database.query<{ created_at: Date; roadmap_planning_migrated: boolean }>("SELECT created_at,roadmap_planning_migrated FROM workspace WHERE id=1");
+  const connection = await database.query("SELECT last_imported_at,cycles_refreshed_at,GREATEST(last_imported_at,cycles_refreshed_at) AS source_at,team_id,team_name,team_timezone,cycles_enabled,cycle_duration,cycle_start_day,cycle_cooldown_time,upcoming_cycle_count FROM linear_connection WHERE workspace_id=1");
+  const packages = await database.query<BoardPackage>(`SELECT w.id,w.project_id,w.team_id,w.stream_id,w.capacity_outcome_id,w.selected,w.sequence_position,w.pause_reason,w.roadmap_state,w.roadmap_conversion,
+    w.local_classification,w.local_classification_updated_at,w.local_classification_updated_by,
+    p.name,p.description,p.status,p.priority AS linear_priority,p.url,p.cross_team,p.needs_review,p.in_scope,p.external_blockers,p.remaining_scope::float FROM work_package w JOIN linear_project_cache p ON p.linear_id=w.project_id ORDER BY w.sequence_position NULLS LAST,p.name,w.id`);
+  const classifications = await projectClassificationState(database);
+  const streams = await database.query("SELECT id,name,position,wip_limit,allocation::float FROM stream WHERE active=true ORDER BY position");
+  const links = await database.query("SELECT outcome_id,project_id,requirement FROM outcome_project_link");
+  const outcomes = await database.query<{ id: string; title: string; description: string; owner: string; success_signal: string; needed_by: string | null; stream_id: string | null; stream_position: number | null; created_at: Date }>("SELECT id,title,description,owner,success_signal,needed_by::text,stream_id,stream_position,created_at FROM outcome ORDER BY created_at DESC,id");
+  const capacity = await database.query("SELECT cycle_anchor::text,cycle_days,baseline::float,baseline_reason,reserve::float,horizon,scoping_lead_days,holidays_enabled FROM capacity_profile WHERE workspace_id=1");
+  const adjustments = await database.query("SELECT a.linear_cycle_id,c.number,c.name,c.starts_at,c.ends_at,a.availability::float,a.reserve::float FROM linear_cycle_adjustment a JOIN linear_cycle_cache c ON c.linear_id=a.linear_cycle_id ORDER BY c.starts_at");
+  const dependencies = await database.query("SELECT predecessor_id,successor_id,source,waived,waiver_reason FROM package_dependency");
+  const extraScopes = await database.query<ExtraScope>("SELECT package_id,points::float,notes,issue_ids,issue_baseline,legacy_review FROM package_extra_scope ORDER BY package_id");
+  const issues = await database.query("SELECT linear_id,project_id,identifier,estimate::float,state_type FROM linear_issue_cache");
+  const observations = await database.query("SELECT linear_id,starts_at,ends_at,completed_at,cycle_days,completed_points::float FROM cycle_observation ORDER BY completed_at DESC");
+  const linearCycles = await database.query("SELECT linear_id,number,name,starts_at,ends_at,completed_at FROM linear_cycle_cache WHERE active=true ORDER BY starts_at");
+  const legacyAdjustments = await database.query("SELECT cycle_number,availability::float,reserve::float FROM cycle_adjustment ORDER BY cycle_number");
+  const weeklyAdjustments = await database.query<WeeklyAvailability>('SELECT week_start::text AS "weekStart",availability::float,label FROM weekly_capacity_adjustment ORDER BY week_start');
+  const classifiedPackages = packages.rows.map((item) => {
+    const classification = classifications.get(item.project_id)!;
+    return { ...item, effective_classification: classification.classification, classification_provenance: classification.provenance,
+      roadmap_label_ids: classification.roadmapLabelIds, ongoing_label_ids: classification.ongoingLabelIds };
+  });
   const sourceAt = (connection.rows[0]?.source_at ?? workspace.rows[0].created_at).toISOString();
   const cycleAnchorAt = cycleAnchor?.toISOString() ?? sourceAt;
   const cycleAnchorTime = Date.parse(cycleAnchorAt);
@@ -71,7 +78,7 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
   const holidayWeeks = holidaysEnabled ? holidayWeeksForRange(calendarStart, calendarEnd) : [];
   const input: ForecastInput = {
     schedulingMode: workspace.rows[0].roadmap_planning_migrated ? "outcome" : "project",
-    packages: packages.rows.map((row) => {
+    packages: classifiedPackages.map((row) => {
       const open = issues.rows.filter((issue) => issue.project_id === row.project_id && !["completed", "canceled"].includes(issue.state_type));
       const extra = extraScopes.rows.find((item) => item.package_id === row.id);
       return { id: row.id, projectId: row.project_id, name: row.name, status: row.status, streamId: row.stream_id,
@@ -94,7 +101,7 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
   const result = forecast(input);
   const evaluatedAt = evaluationTime.toISOString();
   const leadDays = capacity.rows[0]?.scoping_lead_days ?? 14;
-  const scoping = packages.rows.map((row) => {
+  const scoping = classifiedPackages.map((row) => {
     const extra = extraScopes.rows.find((item) => item.package_id === row.id);
     const projection = result.packages.find((item) => item.id === row.id)!;
     const startDate = projection.start ? result.cycles[projection.start - 1]?.start ?? null : null;
@@ -104,8 +111,8 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
   });
   const lifecycles = await getOutcomeLifecycles(database);
   return { calculationVersion: workspace.rows[0].roadmap_planning_migrated ? "v5" : "v4", evaluatedAt, scoping, extraScopes: extraScopes.rows, weeklyAdjustments: weeklyAdjustments.rows, holidayWeeks,
-    roadmapPlanningMigrated: workspace.rows[0].roadmap_planning_migrated, roadmapConversionFeedback: roadmapConversionFeedback(packages.rows),
-    connection: connection.rows[0] ?? null, packages: packages.rows, streams: streams.rows, links: links.rows, outcomes: outcomes.rows.map((item) => ({ ...item, lifecycle: lifecycles.get(item.id)! })),
+    roadmapPlanningMigrated: workspace.rows[0].roadmap_planning_migrated, roadmapConversionFeedback: roadmapConversionFeedback(classifiedPackages),
+    connection: connection.rows[0] ?? null, packages: classifiedPackages, streams: streams.rows, links: links.rows, outcomes: outcomes.rows.map((item) => ({ ...item, lifecycle: lifecycles.get(item.id)! })),
     capacity: capacity.rows[0] ?? { cycle_anchor: null, cycle_days: 14, baseline: null, baseline_reason: "", reserve: 0, horizon: 26, scoping_lead_days: 14, holidays_enabled: true },
     observations: comparable, observedBaseline, effectiveBaseline: input.baseline,
     linearCycles: importedCycles, planningCycles: calendar.cycles, calendarProjection: calendar.projection,

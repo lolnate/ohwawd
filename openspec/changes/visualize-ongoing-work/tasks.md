@@ -12,7 +12,7 @@
 
 ## 3. Classification Behavior
 
-- [ ] 3.1 Add token-protected local classification mutations and atomically reconcile Roadmap, Ongoing, and unresolved membership transitions while preserving links; update editable scenario handling as designed and verify stale writes, source-label authority, demand removal, candidate restoration, and published-history compatibility with `npm test`.
+- [x] 3.1 Add token-protected local classification mutations and atomically reconcile Roadmap, Ongoing, and unresolved membership transitions while preserving links; update editable scenario handling as designed and verify stale writes, source-label authority, demand removal, candidate restoration, and published-history compatibility with `npm test`.
 
 ## 4. Ongoing Work Read APIs
 
