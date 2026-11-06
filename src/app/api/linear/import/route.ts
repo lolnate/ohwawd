@@ -1,6 +1,6 @@
 import { db, ensureSchema, transaction } from "@/lib/db";
 import { saveImport } from "@/lib/import";
-import { createLinearSource, linearReadError } from "@/lib/linear";
+import { createLinearSource, linearReadError, mergeLinearTeamIssueEvidence } from "@/lib/linear";
 import { decryptKey, encryptKey, HttpError, requireOwner, requireSameOrigin } from "@/lib/security";
 
 export async function POST(request: Request): Promise<Response> {
@@ -25,11 +25,14 @@ export async function POST(request: Request): Promise<Response> {
     const team = teams.find((item) => item.id === body.teamId);
     if (!team) throw new HttpError(400, "Choose an available team.");
     // Fetch and validate the complete source before opening the write transaction.
-    const [projects, cycleSource] = await Promise.all([source.projects(team.id, true), source.cycles(team.id)]);
+    const [projectSource, teamIssueSource, cycleSource] = await Promise.all([
+      source.projects(team.id, false), source.teamIssues(team.id), source.cycles(team.id),
+    ]);
+    const projects = mergeLinearTeamIssueEvidence(projectSource, teamIssueSource);
     const seenAt = new Date();
     const result = await transaction((client) => saveImport(client, {
-      encryptedKey: encryptKey(apiKey.trim()), viewer, team, projects, cycles: cycleSource.cycles, cycleSettings: cycleSource.settings,
+      encryptedKey: encryptKey(apiKey.trim()), viewer, team, projects, teamIssueSource, cycles: cycleSource.cycles, cycleSettings: cycleSource.settings,
     }, seenAt, reservation.generation));
-    return Response.json(result);
+    return Response.json({ ...result, linearApiCalls: source.requestCount() });
   } catch (error) { return linearReadError(error, "import projects and issues"); }
 }

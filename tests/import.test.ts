@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
-import { schemaSql } from "../src/lib/db";
+import { migrations, schemaSql } from "../src/lib/db";
 import { saveCycleData, saveImport } from "../src/lib/import";
 import type { ImportedProject } from "../src/lib/linear";
 import type { PoolClient } from "pg";
 import { linearProjectDependencies } from "../src/lib/linear";
+
+async function applyMigrations(database: PGlite) {
+  for (const migration of migrations) {
+    if (migration.sql) await database.exec(migration.sql);
+    if ("up" in migration) await migration.up(database as unknown as PoolClient);
+  }
+}
 
 test("repeat import upserts by Linear ID and preserves shared outcome links", async () => {
   const db = new PGlite();
@@ -164,4 +171,81 @@ test("sync generations reject stale imports and preserve newer cycle data", asyn
   assert.equal((await database.query<{ starts_at: Date }>("SELECT starts_at FROM linear_cycle_cache WHERE linear_id='cycle'")).rows[0].starts_at.toISOString(), "2026-10-19T00:00:00.000Z");
   assert.equal((await database.query<{ team_timezone: string }>("SELECT team_timezone FROM linear_connection WHERE workspace_id=1")).rows[0].team_timezone, "UTC");
   await database.close();
+});
+
+test("team issue generations reconcile moves, removals, labels and blocker edges atomically", async () => {
+  const database = new PGlite();
+  try {
+    await applyMigrations(database);
+    const client = database as unknown as PoolClient;
+    const project = (id: string, labels: { id: string; name: string }[]): ImportedProject => ({
+      id, teamId: "team", name: id.toUpperCase(), description: "", status: "started", url: `https://linear.app/project/${id}`,
+      updatedAt: new Date("2026-11-01T12:00:00Z"), crossTeam: false, issues: [], labels,
+    });
+    const issue = (id: string, projectId: string | null, title = id) => ({
+      id, projectId, teamId: "team", identifier: `ENG-${id.slice(1)}`, title, url: `https://linear.app/issue/${id}`,
+      estimate: id === "i2" ? null : 3, stateType: "unstarted", completedAt: null, updatedAt: new Date("2026-11-01T13:00:00Z"),
+    });
+    const base = { encryptedKey: "test", viewer: { id: "viewer", name: "Owner" }, team: { id: "team", name: "Team" } };
+    const initial = {
+      ...base,
+      projects: [project("p1", [{ id: "roadmap", name: "Roadmap" }]), project("p2", [{ id: "similar", name: "Roadmap candidate" }])],
+      teamIssueSource: {
+        issues: [issue("i1", "p1"), issue("i2", null)],
+        blockerEdges: [{ blockerId: "external", blockedIssueId: "i1" }, { blockerId: "i1", blockedIssueId: "i2" }],
+      },
+    };
+    await saveImport(client, initial);
+    assert.deepEqual((await database.query("SELECT project_id,label_id,name FROM linear_project_label_cache ORDER BY project_id,label_id")).rows, [
+      { project_id: "p1", label_id: "roadmap", name: "Roadmap" },
+      { project_id: "p2", label_id: "similar", name: "Roadmap candidate" },
+    ]);
+    assert.deepEqual((await database.query("SELECT linear_id,project_id,url FROM linear_issue_cache ORDER BY linear_id")).rows, [
+      { linear_id: "i1", project_id: "p1", url: "https://linear.app/issue/i1" },
+      { linear_id: "i2", project_id: null, url: "https://linear.app/issue/i2" },
+    ]);
+    assert.deepEqual((await database.query("SELECT blocker_id,blocked_issue_id FROM linear_issue_blocker_cache ORDER BY blocker_id")).rows, [
+      { blocker_id: "external", blocked_issue_id: "i1" }, { blocker_id: "i1", blocked_issue_id: "i2" },
+    ]);
+
+    const movedIssue = { ...issue("i1", "p2", "Moved"), url: "https://linear.app/issue/ENG-1", stateType: "started" };
+    const current = {
+      ...base,
+      projects: [project("p1", [{ id: "ongoing", name: "Ongoing" }]), project("p2", [{ id: "similar", name: "Roadmap candidate" }])],
+      teamIssueSource: { issues: [movedIssue, issue("i3", "p1"), issue("i4", "external-project")], blockerEdges: [{ blockerId: "i3", blockedIssueId: "i1" }] },
+    };
+    const result = await saveImport(client, current);
+    assert.deepEqual(result.report.updatedProjects.map((item) => ({ id: item.id, changes: item.changes })), [
+      { id: "p1", changes: ["labels", "issues", "issue blockers"] },
+      { id: "p2", changes: ["issues", "issue blockers"] },
+    ]);
+    assert.deepEqual((await database.query("SELECT linear_id,project_id,title,url,state_type FROM linear_issue_cache ORDER BY linear_id")).rows, [
+      { linear_id: "i1", project_id: "p2", title: "Moved", url: "https://linear.app/issue/ENG-1", state_type: "started" },
+      { linear_id: "i3", project_id: "p1", title: "i3", url: "https://linear.app/issue/i3", state_type: "unstarted" },
+      { linear_id: "i4", project_id: "external-project", title: "i4", url: "https://linear.app/issue/i4", state_type: "unstarted" },
+    ]);
+    assert.deepEqual((await database.query("SELECT blocker_id,blocked_issue_id FROM linear_issue_blocker_cache")).rows,
+      [{ blocker_id: "i3", blocked_issue_id: "i1" }]);
+
+    await database.query("UPDATE workspace SET linear_sync_generation=2 WHERE id=1");
+    const stale = { ...current, projects: [project("p1", [{ id: "stale", name: "Stale" }]), current.projects[1]] };
+    await assert.rejects(saveImport(client, stale, new Date("2026-11-02T12:00:00Z"), { linear: 1, cycles: 0 }), /stale result was not saved/);
+    assert.equal((await database.query<{ name: string }>("SELECT name FROM linear_project_label_cache WHERE project_id='p1'")).rows[0].name, "Ongoing");
+
+    await database.exec("BEGIN");
+    let failed = false;
+    try {
+      await saveImport(client, { ...stale, teamIssueSource: { issues: [movedIssue], blockerEdges: [{ blockerId: "i1", blockedIssueId: "i1" }] } },
+        new Date("2026-11-02T13:00:00Z"), { linear: 2, cycles: 0 });
+    } catch {
+      failed = true;
+      await database.exec("ROLLBACK");
+    }
+    assert.equal(failed, true);
+    assert.equal((await database.query<{ name: string }>("SELECT name FROM linear_project_label_cache WHERE project_id='p1'")).rows[0].name, "Ongoing");
+    assert.deepEqual((await database.query<{ linear_id: string }>("SELECT linear_id FROM linear_issue_cache ORDER BY linear_id")).rows,
+      [{ linear_id: "i1" }, { linear_id: "i3" }, { linear_id: "i4" }]);
+    assert.deepEqual((await database.query("SELECT blocker_id,blocked_issue_id FROM linear_issue_blocker_cache")).rows,
+      [{ blocker_id: "i3", blocked_issue_id: "i1" }]);
+  } finally { await database.close(); }
 });

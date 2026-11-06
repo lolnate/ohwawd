@@ -24,15 +24,21 @@ type State = { connection: { viewer_name: string; team_id: string; team_name: st
   roadmapPlanningMigrated?: boolean; roadmapConversionFeedback?: (RoadmapConversion & { packageId: string })[]; planningToken?: string };
 type Preview = { id: string; name: string; status: string };
 type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
-type ImportResult = { imported: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
+type ImportResult = { imported: number; linearApiCalls: number; report: { newProjects: ProjectSyncItem[]; updatedProjects: ProjectSyncItem[]; newlyMissingProjects: ProjectSyncItem[]; unchangedProjects: number; stillMissingProjects: number } };
 
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   return apiRequest<T>(path, method, body);
 }
 
-function SyncReport({ report }: { report: ImportResult["report"] }) {
+function linearApiCallSummary(count: number) {
+  return `This sync used ${count} Linear API ${count === 1 ? "call" : "calls"}.`;
+}
+
+function SyncReport({ result }: { result: ImportResult }) {
+  const { report } = result;
   return <section className="sync-report" aria-label="Linear sync changes">
     <div className="sync-summary"><span><strong>{report.newProjects.length}</strong> new</span><span><strong>{report.updatedProjects.length}</strong> updated</span><span><strong>{report.unchangedProjects}</strong> unchanged</span><span><strong>{report.newlyMissingProjects.length}</strong> newly missing</span></div>
+    <p className="meta">{linearApiCallSummary(result.linearApiCalls)}</p>
     {report.newProjects.length > 0 && <details open><summary>New projects</summary><ul>{report.newProjects.map((project) => <li key={project.id}><span>{project.name}</span><code>{project.id}</code></li>)}</ul></details>}
     {report.updatedProjects.length > 0 && <details open><summary>Updated projects</summary><ul>{report.updatedProjects.map((project) => <li key={project.id}><span>{project.previousName ? `${project.previousName} → ${project.name}` : project.name}<small>{project.changes.join(", ")}</small></span><code>{project.id}</code></li>)}</ul></details>}
     {report.newlyMissingProjects.length > 0 && <details open><summary>Not found in this sync</summary><p>These projects were retained and marked for review, so their planning links remain intact.</p><ul>{report.newlyMissingProjects.map((project) => <li key={project.id}><span>{project.name}</span><code>{project.id}</code></li>)}</ul></details>}
@@ -71,7 +77,7 @@ export default function App() {
   const [projectPreset, setProjectPreset] = useState<"needs" | "active" | "completed" | "hidden" | "all" | "dismissed">("needs");
   const [projectSort, setProjectSort] = useState<"planning" | "name" | "status" | "points">("planning");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
-  const [syncReport, setSyncReport] = useState<ImportResult["report"] | null>(null);
+  const [syncReport, setSyncReport] = useState<ImportResult | null>(null);
   const reloadGeneration = useRef(0);
   const handleBoardStateChange = useCallback((board: BoardState | null, error: string) => {
     setDeliveryBoard(board); setDeliveryError(error);
@@ -263,11 +269,11 @@ export default function App() {
       {state?.connection && teams.length === 0 && <button className="secondary" disabled={busy} onClick={() => void run(() => inspect(teamId), "Loading the project list from Linear…", true)}>Preview saved team again</button>}
       {activity && <p className="notice" role="status" aria-live="polite">{activity}</p>}
       {sourceError && <p className="error" role="alert">{sourceError}</p>}
-      {preview && <div className="preview"><h3>Import preview · {preview.length} projects</h3><p>All project states are included. Issue estimates and cross-team work are checked during import.</p><div className="preview-list">{preview.map((project) => <div key={project.id}><span>{project.name}</span><small>{project.status}</small></div>)}</div><button disabled={busy} onClick={() => void run(async () => { setSyncReport(null); const result = await api<ImportResult>("/api/linear/import", "POST", { apiKey: key || undefined, teamId }); setKey(""); setPreview(null); setSyncReport(result.report); await reload(); setNotice(`${result.imported} projects imported. Existing outcome links were preserved.`); }, "Importing projects and issues from Linear…", true)}>Import these projects</button></div>}
+      {preview && <div className="preview"><h3>Import preview · {preview.length} projects</h3><p>All project states are included. Issue estimates and cross-team work are checked during import.</p><div className="preview-list">{preview.map((project) => <div key={project.id}><span>{project.name}</span><small>{project.status}</small></div>)}</div><button disabled={busy} onClick={() => void run(async () => { setSyncReport(null); const result = await api<ImportResult>("/api/linear/import", "POST", { apiKey: key || undefined, teamId }); setKey(""); setPreview(null); setSyncReport(result); await reload(); setNotice(`${result.imported} projects imported. Existing outcome links were preserved. ${linearApiCallSummary(result.linearApiCalls)}`); }, "Importing projects and issues from Linear…", true)}>Import these projects</button></div>}
     </details>
     <section className="panel projects-panel">
-      <div className="section-head"><div><h2>Imported projects</h2><p>Linear project IDs stay stable when names and other fields change, preserving planning assignments.</p></div><div className="actions"><span className="count">{state?.projects.length ?? 0}</span><button className="secondary" disabled={busy || !state?.connection} onClick={() => void run(async () => { setSyncReport(null); const result = await api<ImportResult>("/api/linear/import", "POST", { teamId: state!.connection!.team_id }); setSyncReport(result.report); await reload(); setNotice(`${result.imported} projects synced from Linear. Local planning choices and outcome links were preserved.`); }, "Syncing projects, issues, dependencies, and cycles from Linear…")}>Sync Linear</button></div></div>
-      {syncReport && <SyncReport report={syncReport} />}
+      <div className="section-head"><div><h2>Imported projects</h2><p>Linear project IDs stay stable when names and other fields change, preserving planning assignments.</p></div><div className="actions"><span className="count">{state?.projects.length ?? 0}</span><button className="secondary" disabled={busy || !state?.connection} onClick={() => void run(async () => { setSyncReport(null); const result = await api<ImportResult>("/api/linear/import", "POST", { teamId: state!.connection!.team_id }); setSyncReport(result); await reload(); setNotice(`${result.imported} projects synced from Linear. Local planning choices and outcome links were preserved. ${linearApiCallSummary(result.linearApiCalls)}`); }, "Syncing projects, issues, dependencies, and cycles from Linear…")}>Sync Linear</button></div></div>
+      {syncReport && <SyncReport result={syncReport} />}
       <div className="project-presets" role="group" aria-label="Project triage view">{([['needs','Needs planning'],['active','Active'],['completed','Completed'],['hidden','Hidden'],['all','All visible']] as const).map(([id, label]) => <button key={id} className={projectPreset === id ? "active" : ""} aria-pressed={projectPreset === id} onClick={() => { setProjectPreset(id); setSelectedProjectIds([]); }}>{label}<span>{presetCounts[id]}</span></button>)}{state?.roadmapPlanningMigrated && <button aria-pressed={projectPreset === "dismissed"} className={projectPreset === "dismissed" ? "active" : ""} onClick={() => { setProjectPreset("dismissed"); setSelectedProjectIds([]); }}>Dismissed<span>{presetCounts.dismissed}</span></button>}</div>
       <div className="project-filters">
         <label>Search<input type="search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Project name" /></label>

@@ -6,8 +6,8 @@
 
 ## 2. Linear Issue Evidence
 
-- [ ] 2.1 Extend the Linear adapter with paginated project-label and team-issue reads, including nullable current project, issue URL, workflow type, completion evidence, and blocking relations; verify pagination, exact source mapping, unattached issues, and relation direction with adapter tests in `npm test`.
-- [ ] 2.2 Reconcile the team issue cache and normalized blocker edges by successful import generation without per-project deletion, preserve prior complete state on stale or failed syncs, and verify issue moves, removals, blockers, labels, and source reports with import tests in `npm test`.
+- [x] 2.1 Extend the Linear adapter with paginated project-label and team-issue reads, including nullable current project, issue URL, workflow type, completion evidence, and blocking relations; verify pagination, exact source mapping, unattached issues, and relation direction with adapter tests in `npm test`.
+- [x] 2.2 Reconcile the team issue cache and normalized blocker edges by successful import generation without per-project deletion, preserve prior complete state on stale or failed syncs, and verify issue moves, removals, blockers, labels, and source reports with import tests in `npm test`.
 - [ ] 2.3 Add immutable 30-day completed-issue attribution snapshots and current-at-migration backfill, keeping cycle placement derived from actual cycle dates; verify live reattribution, cutoff freezing, later source moves, unresolved/no-project attribution, and missing-cycle coverage with focused history tests in `npm test`.
 
 ## 3. Classification Behavior

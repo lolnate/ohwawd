@@ -15,6 +15,10 @@ async function mockWorkspace(page: Page, scenarioReady = true) {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/session") return route.fulfill({ json: { authenticated: true } });
+    if (path === "/api/linear/import") return route.fulfill({ json: {
+      imported: 2, linearApiCalls: 104,
+      report: { newProjects: [], updatedProjects: [], newlyMissingProjects: [], unchangedProjects: 2, stillMissingProjects: 0 },
+    } });
     if (path === "/api/state") return route.fulfill({ json: {
       connection: { viewer_name: "Owner", team_id: "team-1", team_name: "Product", last_imported_at: "2026-10-20T10:00:00Z" },
       projects, outcomes: [{ id: "outcome-1", title: "Customers migrate identity", description: "", owner: "Owner", success_signal: "Migration completes", needed_by: "2026-11-30", stream_id: "stream-1", created_at: "2026-10-20T10:00:00Z" }],
@@ -98,6 +102,15 @@ test("outcome links open in a contained focused picker", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: "Customers migrate identity" })).toBeVisible();
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await expectContained(page);
+});
+
+test("Linear sync reports the API calls used", async ({ page }) => {
+  await mockWorkspace(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Linear projects/ }).click();
+  await page.getByRole("button", { name: "Sync Linear" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "2 projects synced from Linear" })).toContainText("This sync used 104 Linear API calls.");
+  await expect(page.getByRole("region", { name: "Linear sync changes" })).toContainText("This sync used 104 Linear API calls.");
 });
 
 test("scenario creation requires a name and a ready board", async ({ page }) => {

@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
-import type { ImportedCycle, ImportedProject, LinearCycleSettings } from "./linear";
+import type { ImportedCycle, ImportedProject, ImportedTeamIssueSource, LinearCycleSettings } from "./linear";
 import { HttpError } from "./security";
 import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
 
@@ -22,7 +22,7 @@ const timestamp = (value: Date | string | null) => value ? new Date(value).toISO
 
 export async function saveImport(
   client: PoolClient,
-  input: { encryptedKey: string; viewer: { id: string; name: string }; team: { id: string; name: string }; projects: ImportedProject[]; cycles?: ImportedCycle[]; cycleSettings?: LinearCycleSettings },
+  input: { encryptedKey: string; viewer: { id: string; name: string }; team: { id: string; name: string }; projects: ImportedProject[]; teamIssueSource?: ImportedTeamIssueSource; cycles?: ImportedCycle[]; cycleSettings?: LinearCycleSettings },
   seenAt = new Date(),
   generation?: { linear: number; cycles: number },
 ): Promise<ImportResult> {
@@ -39,29 +39,62 @@ export async function saveImport(
   }
   const importId = randomUUID();
   const importedIds = new Set(input.projects.map((project) => project.id));
+  const expandedIssueSource = input.teamIssueSource !== undefined;
+  const incomingIssues = input.teamIssueSource?.issues ?? input.projects.flatMap((project) => project.issues);
+  const incomingIssueIds = new Set(incomingIssues.map((issue) => issue.id));
+  const hasProjectLabels = input.projects.some((project) => project.labels !== undefined);
   const sourceEdges = [...new Map(input.projects.flatMap((project) => [
     ...(project.dependencies || []).filter((id) => importedIds.has(id) && id !== project.id).map((id) => [project.id, id] as const),
     ...(project.blockedBy || []).filter((id) => importedIds.has(id) && id !== project.id).map((id) => [id, project.id] as const),
   ]).map((edge) => [JSON.stringify(edge), edge])).values()];
-  const [savedProjects, savedIssues, savedEdges] = await Promise.all([
+  const [savedProjects, savedIssues, savedEdges, savedLabels, savedBlockers] = await Promise.all([
     client.query<{ linear_id: string; name: string; description: string; status: string; priority: number | null; remaining_scope: string | null; url: string; source_updated_at: Date; cross_team: boolean; external_blockers: string[] | null; needs_review: boolean }>(
       "SELECT linear_id,name,description,status,priority,remaining_scope::text,url,source_updated_at,cross_team,external_blockers,needs_review FROM linear_project_cache WHERE team_id=$1", [input.team.id],
     ),
-    client.query<{ linear_id: string; project_id: string; team_id: string; identifier: string; title: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
-      "SELECT linear_id,project_id,team_id,identifier,title,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE project_id IN (SELECT linear_id FROM linear_project_cache WHERE team_id=$1)", [input.team.id],
-    ),
+    expandedIssueSource
+      ? client.query<{ linear_id: string; project_id: string | null; team_id: string; identifier: string; title: string; url: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
+        "SELECT linear_id,project_id,team_id,identifier,title,url,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE team_id=$1", [input.team.id])
+      : client.query<{ linear_id: string; project_id: string | null; team_id: string; identifier: string; title: string; url: string; estimate: string | null; state_type: string; completed_at: Date | null; source_updated_at: Date }>(
+        "SELECT linear_id,project_id,team_id,identifier,title,'' AS url,estimate::text,state_type,completed_at,source_updated_at FROM linear_issue_cache WHERE project_id IN (SELECT linear_id FROM linear_project_cache WHERE team_id=$1)", [input.team.id]),
     client.query<{ predecessor_project_id: string; successor_project_id: string }>(`SELECT predecessor.project_id AS predecessor_project_id,successor.project_id AS successor_project_id
       FROM package_dependency dependency
       JOIN work_package predecessor ON predecessor.id=dependency.predecessor_id
       JOIN work_package successor ON successor.id=dependency.successor_id
       WHERE dependency.source='linear' AND predecessor.team_id=$1`, [input.team.id]),
+    hasProjectLabels
+      ? client.query<{ project_id: string; label_id: string; name: string }>("SELECT project_id,label_id,name FROM linear_project_label_cache WHERE project_id=ANY($1::text[])", [[...importedIds]])
+      : Promise.resolve({ rows: [] as { project_id: string; label_id: string; name: string }[] }),
+    expandedIssueSource
+      ? client.query<{ blocker_id: string; blocked_issue_id: string; project_id: string | null }>(`SELECT b.blocker_id,b.blocked_issue_id,i.project_id
+          FROM linear_issue_blocker_cache b JOIN linear_issue_cache i ON i.linear_id=b.blocked_issue_id WHERE b.team_id=$1`, [input.team.id])
+      : Promise.resolve({ rows: [] as { blocker_id: string; blocked_issue_id: string; project_id: string | null }[] }),
   ]);
   const projectById = new Map(savedProjects.rows.map((project) => [project.linear_id, project]));
   const issueSignatures = new Map<string, string[]>();
   for (const issue of savedIssues.rows) {
-    const signature = JSON.stringify([issue.linear_id, issue.team_id, issue.identifier, issue.title, issue.estimate === null ? null : Number(issue.estimate), issue.state_type,
+    if (!issue.project_id) continue;
+    const signature = JSON.stringify([issue.linear_id, issue.team_id, issue.identifier, issue.title, issue.url, issue.estimate === null ? null : Number(issue.estimate), issue.state_type,
       timestamp(issue.completed_at), timestamp(issue.source_updated_at)]);
     issueSignatures.set(issue.project_id, [...(issueSignatures.get(issue.project_id) || []), signature]);
+  }
+  const incomingIssueSignatures = new Map<string, string[]>();
+  for (const issue of incomingIssues) {
+    if (!issue.projectId) continue;
+    const signature = JSON.stringify([issue.id, issue.teamId, issue.identifier, issue.title, "url" in issue ? issue.url : "", issue.estimate, issue.stateType,
+      timestamp(issue.completedAt), timestamp(issue.updatedAt)]);
+    incomingIssueSignatures.set(issue.projectId, [...(incomingIssueSignatures.get(issue.projectId) || []), signature]);
+  }
+  const labelSignatures = new Map<string, string[]>();
+  for (const label of savedLabels.rows) labelSignatures.set(label.project_id, [...(labelSignatures.get(label.project_id) || []), JSON.stringify([label.label_id, label.name])]);
+  const blockerSignatures = new Map<string, string[]>();
+  for (const edge of savedBlockers.rows) if (edge.project_id) {
+    blockerSignatures.set(edge.project_id, [...(blockerSignatures.get(edge.project_id) || []), `${edge.blocker_id}\0${edge.blocked_issue_id}`]);
+  }
+  const incomingProjectByIssue = new Map(incomingIssues.map((issue) => [issue.id, issue.projectId]));
+  const incomingBlockerSignatures = new Map<string, string[]>();
+  for (const edge of input.teamIssueSource?.blockerEdges ?? []) {
+    const projectId = incomingProjectByIssue.get(edge.blockedIssueId);
+    if (projectId) incomingBlockerSignatures.set(projectId, [...(incomingBlockerSignatures.get(projectId) || []), `${edge.blockerId}\0${edge.blockedIssueId}`]);
   }
   const dependencyIds = new Map<string, string[]>();
   for (const edge of savedEdges.rows) dependencyIds.set(edge.predecessor_project_id, [...(dependencyIds.get(edge.predecessor_project_id) || []), edge.successor_project_id]);
@@ -82,9 +115,9 @@ export async function saveImport(
     if (timestamp(saved.source_updated_at) !== timestamp(project.updatedAt)) changes.push("updated timestamp");
     if (saved.cross_team !== project.crossTeam) changes.push("cross-team scope");
     if (!sameList(saved.external_blockers || [], (project.blockedBy || []).filter((id) => !importedIds.has(id)))) changes.push("external blockers");
-    const incomingIssues = project.issues.map((issue) => JSON.stringify([issue.id, issue.teamId, issue.identifier, issue.title, issue.estimate, issue.stateType,
-      timestamp(issue.completedAt), timestamp(issue.updatedAt)]));
-    if (!sameList(issueSignatures.get(project.id) || [], incomingIssues)) changes.push("issues");
+    if (project.labels !== undefined && !sameList(labelSignatures.get(project.id) || [], project.labels.map((label) => JSON.stringify([label.id, label.name])))) changes.push("labels");
+    if (!sameList(issueSignatures.get(project.id) || [], incomingIssueSignatures.get(project.id) || [])) changes.push("issues");
+    if (expandedIssueSource && !sameList(blockerSignatures.get(project.id) || [], incomingBlockerSignatures.get(project.id) || [])) changes.push("issue blockers");
     const incomingDependencies = sourceEdges.filter(([projectId]) => projectId === project.id).map(([, blockedId]) => blockedId);
     if (!sameList(dependencyIds.get(project.id) || [], incomingDependencies)) changes.push("dependencies");
     if (changes.length) report.updatedProjects.push({ id: project.id, name: project.name, previousName: saved.name !== project.name ? saved.name : undefined, changes });
@@ -110,7 +143,13 @@ export async function saveImport(
     // from acquiring two copies of its eventual demand.
     await client.query(`INSERT INTO work_package (id, project_id, team_id)
       VALUES ($1,$2,$3) ON CONFLICT (project_id) DO NOTHING`, [`linear:${project.id}`, project.id, input.team.id]);
-    for (const issue of project.issues) {
+    if (project.labels !== undefined) {
+      await client.query("DELETE FROM linear_project_label_cache WHERE project_id=$1", [project.id]);
+      for (const label of project.labels) await client.query(
+        "INSERT INTO linear_project_label_cache(project_id,label_id,name) VALUES($1,$2,$3)", [project.id, label.id, label.name],
+      );
+    }
+    if (!expandedIssueSource) for (const issue of project.issues) {
       await client.query(`
         INSERT INTO linear_issue_cache (linear_id, project_id, team_id, identifier, title, estimate, state_type, completed_at, source_updated_at, last_seen_at, last_seen_import_id)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -122,7 +161,25 @@ export async function saveImport(
         [issue.id, issue.projectId, issue.teamId, issue.identifier, issue.title, issue.estimate, issue.stateType, issue.completedAt, issue.updatedAt, seenAt, importId],
       );
     }
-    await client.query("DELETE FROM linear_issue_cache WHERE project_id=$1 AND last_seen_import_id <> $2", [project.id, importId]);
+    if (!expandedIssueSource) await client.query("DELETE FROM linear_issue_cache WHERE project_id=$1 AND last_seen_import_id <> $2", [project.id, importId]);
+  }
+  if (input.teamIssueSource) {
+    for (const issue of input.teamIssueSource.issues) {
+      if (issue.teamId !== input.team.id) throw new Error(`Issue ${issue.id} belongs to another Linear team.`);
+      await client.query(`INSERT INTO linear_issue_cache(linear_id,project_id,team_id,identifier,title,url,estimate,state_type,completed_at,source_updated_at,last_seen_at,last_seen_import_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(linear_id) DO UPDATE SET
+        project_id=EXCLUDED.project_id,team_id=EXCLUDED.team_id,identifier=EXCLUDED.identifier,title=EXCLUDED.title,url=EXCLUDED.url,
+        estimate=EXCLUDED.estimate,state_type=EXCLUDED.state_type,completed_at=EXCLUDED.completed_at,source_updated_at=EXCLUDED.source_updated_at,
+        last_seen_at=EXCLUDED.last_seen_at,last_seen_import_id=EXCLUDED.last_seen_import_id`,
+      [issue.id, issue.projectId, issue.teamId, issue.identifier, issue.title, issue.url, issue.estimate, issue.stateType, issue.completedAt, issue.updatedAt, seenAt, importId]);
+    }
+    await client.query("DELETE FROM linear_issue_cache WHERE team_id=$1 AND last_seen_import_id<>$2", [input.team.id, importId]);
+    for (const edge of input.teamIssueSource.blockerEdges) if (incomingIssueIds.has(edge.blockedIssueId)) {
+      await client.query(`INSERT INTO linear_issue_blocker_cache(blocker_id,blocked_issue_id,team_id,last_seen_import_id)
+        VALUES($1,$2,$3,$4) ON CONFLICT(blocker_id,blocked_issue_id) DO UPDATE SET team_id=EXCLUDED.team_id,last_seen_import_id=EXCLUDED.last_seen_import_id`,
+      [edge.blockerId, edge.blockedIssueId, input.team.id, importId]);
+    }
+    await client.query("DELETE FROM linear_issue_blocker_cache WHERE team_id=$1 AND last_seen_import_id<>$2", [input.team.id, importId]);
   }
   // Replace only Linear-sourced edges. Local planning dependencies are independent,
   // and a waiver on an unchanged source edge survives the import.

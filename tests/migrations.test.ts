@@ -20,6 +20,12 @@ test("versioned migrations build the current schema transactionally", async () =
   assert.equal((await database.query("SELECT id FROM stream WHERE active=true")).rows.length, 5);
   assert.equal((await database.query<{ roadmap_planning_migrated: boolean }>("SELECT roadmap_planning_migrated FROM workspace")).rows[0].roadmap_planning_migrated, true);
   assert.ok((await database.query("SELECT remaining_scope FROM linear_project_cache LIMIT 0")));
+  assert.ok((await database.query("SELECT url FROM linear_issue_cache LIMIT 0")));
+  assert.ok((await database.query("SELECT blocker_id,blocked_issue_id FROM linear_issue_blocker_cache LIMIT 0")));
+  await database.query(`INSERT INTO linear_issue_cache(linear_id,project_id,team_id,identifier,title,url,state_type,source_updated_at,last_seen_at,last_seen_import_id)
+    VALUES('unattached',NULL,'team','ENG-1','Unattached','https://linear.app/issue/ENG-1','unstarted',now(),now(),'00000000-0000-4000-8000-000000000001')`);
+  await database.query(`INSERT INTO linear_issue_blocker_cache(blocker_id,blocked_issue_id,team_id,last_seen_import_id)
+    VALUES('external','unattached','team','00000000-0000-4000-8000-000000000001')`);
   await database.exec("ALTER TABLE linear_project_cache DROP COLUMN remaining_scope");
   await database.exec(migrations[7].sql);
   await database.exec(migrations[7].sql);
@@ -57,5 +63,26 @@ test("assignment migration preserves effective scope, seeds dependency order onc
     assert.equal((await database.query<{ points: string }>("SELECT points FROM package_extra_scope")).rows[0].points, "8.000");
     assert.deepEqual((await database.query<{ draft_snapshot: unknown }>("SELECT draft_snapshot FROM scenario")).rows[0].draft_snapshot, { legacy: true });
     assert.equal((await database.query<{ priority: number | null }>("SELECT priority FROM linear_project_cache LIMIT 1")).rows[0].priority, null);
+  } finally { await database.close(); }
+});
+
+test("team issue migration preserves attached evidence and permits unavailable projects", async () => {
+  const database = new PGlite();
+  try {
+    for (const migration of migrations.slice(0, 10)) {
+      if (migration.sql) await database.exec(migration.sql);
+      if ("up" in migration) await migration.up(database as unknown as PoolClient);
+    }
+    await database.query(`INSERT INTO linear_project_cache(linear_id,team_id,name,status,url,source_updated_at,last_seen_at,last_seen_import_id)
+      VALUES('project','team','Project','started','https://linear.app/project',now(),now(),'00000000-0000-4000-8000-000000000001')`);
+    await database.query(`INSERT INTO linear_issue_cache(linear_id,project_id,team_id,identifier,title,state_type,source_updated_at,last_seen_at,last_seen_import_id)
+      VALUES('issue','project','team','ENG-1','Issue','started',now(),now(),'00000000-0000-4000-8000-000000000001')`);
+
+    await database.exec(migrations[10].sql);
+
+    assert.deepEqual((await database.query("SELECT project_id,url FROM linear_issue_cache WHERE linear_id='issue'")).rows,
+      [{ project_id: "project", url: "" }]);
+    await database.query("UPDATE linear_issue_cache SET project_id='unavailable' WHERE linear_id='issue'");
+    assert.equal((await database.query<{ project_id: string }>("SELECT project_id FROM linear_issue_cache WHERE linear_id='issue'")).rows[0].project_id, "unavailable");
   } finally { await database.close(); }
 });

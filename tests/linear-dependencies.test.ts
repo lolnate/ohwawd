@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LinearError, LinearErrorType } from "@linear/sdk";
-import { linearProjectDependencies, linearReadError, linearRemainingScope, retryLinearRead } from "../src/lib/linear";
+import { createLinearRequestCounter, linearProjectDependencies, linearReadError, linearRemainingScope, retryLinearRead } from "../src/lib/linear";
 
 test("Linear project dependency relations retain finish-to-start direction in either collection", () => {
   const relation = { type: "dependency", anchorType: "end", relatedAnchorType: "start", projectId: "identity", relatedProjectId: "self-service" };
@@ -21,14 +21,16 @@ test("Linear aggregate scope subtracts completed points without using weighted p
 
 test("Linear reads retry transient network failures", async () => {
   let attempts = 0;
-  const result = await retryLinearRead(async () => {
+  const requests = createLinearRequestCounter();
+  const result = await retryLinearRead(() => requests.attempt(async () => {
     attempts += 1;
     if (attempts < 3) throw new LinearError(undefined, undefined, LinearErrorType.NetworkError);
     return "loaded";
-  }, [0, 0]);
+  }), [0, 0]);
 
   assert.equal(result, "loaded");
   assert.equal(attempts, 3);
+  assert.equal(requests.count(), 3);
 });
 
 test("Linear reads do not retry non-network failures", async () => {

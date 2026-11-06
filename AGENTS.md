@@ -114,6 +114,16 @@ Use the installed CLI tools and their documented workflows rather than manually 
 
 Follow the project's installed OpenSpec workflow instructions when creating, modifying, verifying, or archiving changes.
 
+## External API Query Policy
+
+For synchronization and other large external API reads, minimize the total number of requests. Prefer bounded batch queries and explicit pagination over avoidable per-record or N+1 requests; when the API supports it, retrieve related evidence within the parent page. Fewer requests generally improve throughput and reduce rate-limit risk.
+
+When per-record follow-up requests are unavoidable:
+- Request only missing overflow or exceptional data rather than refetching every record.
+- Apply a documented concurrency bound and preserve the existing retry and failure-atomicity behavior.
+- Do not trade an N+1 pattern for an unbounded organization-wide query; keep scope and page size explicit.
+- Add tests that verify pagination, complete source mapping, and that request counts scale with pages or batches rather than record count.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 ## This is NOT the Next.js you know
