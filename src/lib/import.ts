@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ImportedCycle, ImportedProject, ImportedTeamIssueSource, LinearCycleSettings } from "./linear";
 import { HttpError } from "./security";
 import { reconcileOutcomeCompletions } from "./outcome-lifecycle";
+import { snapshotEligibleCompletedIssues } from "./completed-work-history";
 
 export type ProjectSyncItem = { id: string; name: string; previousName?: string; changes: string[] };
 export type ImportResult = {
@@ -210,6 +211,7 @@ export async function saveImport(
       settings?.timezone ?? "America/New_York", settings?.cyclesEnabled ?? false, settings?.cycleDuration ?? null,
       settings?.cycleStartDay ?? null, settings?.cycleCooldownTime ?? null, settings?.upcomingCycleCount ?? null, saveCycles]);
   if (saveCycles && settings?.timezone) await client.query("UPDATE workspace SET timezone=$1 WHERE id=1", [settings.timezone]);
+  if (input.teamIssueSource) await snapshotEligibleCompletedIssues(client, input.team.id, seenAt);
   await reconcileOutcomeCompletions(client, "Linear sync");
   return { imported: input.projects.length, crossTeam: input.projects.filter((project) => project.crossTeam).length, report };
 }

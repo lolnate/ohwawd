@@ -22,6 +22,10 @@ test("versioned migrations build the current schema transactionally", async () =
   assert.ok((await database.query("SELECT remaining_scope FROM linear_project_cache LIMIT 0")));
   assert.ok((await database.query("SELECT url FROM linear_issue_cache LIMIT 0")));
   assert.ok((await database.query("SELECT blocker_id,blocked_issue_id FROM linear_issue_blocker_cache LIMIT 0")));
+  assert.ok((await database.query("SELECT issue_id,classification,freeze_reason FROM completed_issue_attribution LIMIT 0")));
+  assert.equal((await database.query<{ completed_attribution_backfilled: boolean }>(
+    "SELECT completed_attribution_backfilled FROM workspace WHERE id=1",
+  )).rows[0].completed_attribution_backfilled, false);
   await database.query(`INSERT INTO linear_issue_cache(linear_id,project_id,team_id,identifier,title,url,state_type,source_updated_at,last_seen_at,last_seen_import_id)
     VALUES('unattached',NULL,'team','ENG-1','Unattached','https://linear.app/issue/ENG-1','unstarted',now(),now(),'00000000-0000-4000-8000-000000000001')`);
   await database.query(`INSERT INTO linear_issue_blocker_cache(blocker_id,blocked_issue_id,team_id,last_seen_import_id)

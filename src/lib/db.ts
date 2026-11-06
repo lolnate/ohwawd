@@ -7,6 +7,7 @@ import { activateRoadmapPlanning } from "./roadmap-store";
 import { includeExistingUnambiguousCandidates } from "./roadmap-mutations";
 import { projectClassificationMigrationSql } from "./project-classification";
 import { linearEvidenceMigrationSql } from "./linear-evidence-schema";
+import { completedWorkHistoryMigrationSql } from "./completed-work-history";
 
 declare global {
   // Reuse the pool across Next.js development reloads.
@@ -320,6 +321,7 @@ export const migrations = [
   { version: 9, name: "include-unique-required-candidates", sql: "", up: includeExistingUnambiguousCandidates },
   { version: 10, name: "project-classification-foundation", sql: projectClassificationMigrationSql },
   { version: 11, name: "linear-team-issue-evidence", sql: linearEvidenceMigrationSql },
+  { version: 12, name: "completed-issue-attribution", sql: completedWorkHistoryMigrationSql },
 ] as const;
 
 export const latestMigrationVersion = migrations.at(-1)!.version;
