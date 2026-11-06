@@ -1,6 +1,6 @@
 import { test, expect } from "./assignment-fixture";
 
-test("legacy configurable stream lanes immediately follow Planning attention, followed by stream management", async ({ page, assignment }) => {
+test("legacy configurable stream lanes immediately follow Planning attention, followed by Ongoing work and stream management", async ({ page, assignment }) => {
   await page.goto("/");
   const board = page.locator("#sequencing-board");
   const attention = board.locator(".action-center");
@@ -18,7 +18,8 @@ test("legacy configurable stream lanes immediately follow Planning attention, fo
   await expect(attention.getByText("Minimize", { exact: true })).toBeVisible();
   await expect(attention.locator(".action-item").first()).toBeVisible();
   expect(await attention.evaluate((element) => element.nextElementSibling?.id)).toBe("project-streams");
-  expect(await board.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
+  expect(await board.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("ongoing-work"))).toBe(true);
+  expect(await board.locator(".ongoing-work").evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
   await expect(board.getByRole("heading", { name: "Outcome delivery" })).toHaveCount(0);
   const manager = board.locator(".stream-manager");
   await manager.locator("summary").first().click();
@@ -30,7 +31,8 @@ test("legacy configurable stream lanes immediately follow Planning attention, fo
   await expect(board.getByRole("heading", { name: "New focus", exact: true })).toBeVisible();
   await expect(board.locator("#project-streams")).toContainText("1 project at a time");
   expect((await assignment.board()).streams).toHaveLength(3);
-  expect(await board.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
+  expect(await board.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("ongoing-work"))).toBe(true);
+  expect(await board.locator(".ongoing-work").evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
 });
 
 test("Outcome catalog combines editing, deletion and fresh compact forecast health", async ({ page, assignment }) => {

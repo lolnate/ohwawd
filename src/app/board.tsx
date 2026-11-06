@@ -24,6 +24,7 @@ import DismissibleMessage from "./dismissible-message";
 import { isCurrentOrFutureProjectStatus } from "@/lib/project-status";
 import type { OngoingWorkInsights } from "@/lib/ongoing-work-insights";
 import ProjectClassificationControl, { type ClassificationDraft } from "./project-classification-control";
+import OngoingAvailableWork from "./ongoing-available-work";
 
 type Stream = { id: string; name: string; allocation: number; wip_limit: number };
 type LinearCycle = PlanningCycle;
@@ -43,7 +44,7 @@ export type BoardState = {
   weeklyAdjustments: WeeklyAvailability[]; holidayWeeks: WeeklyAvailability[];
   roadmapPlanningMigrated?: boolean; roadmapConversionFeedback?: (RoadmapConversion & { packageId: string })[]; planningToken?: string;
   affectedCandidates?: { id: string; name: string }[];
-  ongoingWork: OngoingWorkInsights;
+  ongoingWork?: OngoingWorkInsights;
 };
 const fmt = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 const projectHome = (item: Package, active?: boolean) => active && item.roadmap_state !== "included" ? item.roadmap_state === "deferred" ? "deferred-work" : item.roadmap_state === "dismissed" ? "dismissed-work" : "board-roadmap-triage-title" : !item.selected ? "deferred-work" : item.stream_id ? `stream-work-${item.stream_id}` : "unassigned-work";
@@ -104,7 +105,7 @@ export default function Board({ refreshKey, updatedState, onChanged, onOpenOutco
     if (!classificationFocus || busy || !state) return;
     const surface = document.querySelector<HTMLElement>(`[data-classification-project="${CSS.escape(classificationFocus)}"]`);
     const control = surface?.querySelector<HTMLElement>(".classification-save:not(:disabled)") ?? surface?.querySelector<HTMLElement>("input:not(:disabled)");
-    (control ?? document.getElementById("needs-classification-title") ?? document.getElementById("board-roadmap-triage-title") ?? document.getElementById("sequencing-board"))?.focus({ preventScroll: true });
+    (control ?? document.getElementById("ongoing-needs-classification-title") ?? document.getElementById("ongoing-work-title") ?? document.getElementById("board-roadmap-triage-title") ?? document.getElementById("sequencing-board"))?.focus({ preventScroll: true });
     setClassificationFocus(null);
   }, [classificationFocus, busy, state]);
   useEffect(() => {
@@ -232,6 +233,7 @@ export default function Board({ refreshKey, updatedState, onChanged, onOpenOutco
     else onOpenOutcome(id, opener, fallback, section);
   };
   if (!state) return <section className="panel" id="sequencing-board"><h2>Sequencing board</h2><p>{error || "Loading board…"}</p></section>;
+  const ongoingAvailable = state.ongoingWork?.available ?? { rows: [], needsClassificationRows: [] };
   const result = state.forecast;
   const futureCycles = state.linearCycles.filter((cycle) => state.futureCycleIds.includes(cycle.id));
   const planningCycles = (state.planningCycles ?? state.linearCycles).filter((cycle) => !cycle.completedAt && Date.parse(cycle.startsAt) > Date.parse(state.cycleAnchorAt));
@@ -321,7 +323,6 @@ export default function Board({ refreshKey, updatedState, onChanged, onOpenOutco
   const unassignedAttention = state.roadmapPlanningMigrated ? unassigned.filter((item) => isCurrentOrFutureProjectStatus(item.status)) : unassigned;
   const unassignedOutcomes = state.outcomes.filter((outcome) => !outcome.stream_id);
   const deferred = planningPackages.filter((item) => !item.selected);
-  const needsClassification = state.packages.filter((item) => item.effective_classification === "unresolved").sort((a, b) => a.name.localeCompare(b.name));
   const totalAllocation = state.streams.reduce((sum, item) => sum + item.allocation, 0);
   const blockedOutcomes = result.outcomes.filter((outcome) => ["blocked", "setup_required", "beyond_horizon"].includes(outcome.status));
   const scopeAttention = state.scoping.filter((entry) => (entry.status === "needs_scoping" || !!entry.review) && selected.some((item) => item.id === entry.packageId));
@@ -387,13 +388,10 @@ export default function Board({ refreshKey, updatedState, onChanged, onOpenOutco
       </div>
     </details>
     {streamSection}
-    {!!needsClassification.length && <section className="needs-classification" aria-labelledby="needs-classification-title">
-      <div className="compact-section-head"><div><p className="eyebrow">Ongoing work attention</p><h3 id="needs-classification-title" tabIndex={-1}>Needs classification</h3><p>These projects remain outside Roadmap and Ongoing totals until their ambiguous Linear labels are resolved locally.</p></div><span className="count">{needsClassification.length}</span></div>
-      <div className="classification-list">{needsClassification.map((item) => { const evidence = state.ongoingWork.available.needsClassificationRows.find((row) => row.projectId === item.project_id); return <article key={item.id} className="classification-card">
-        <div className="classification-project"><div><h4>{item.name}</h4><p>{evidence ? `${evidence.ready.issueCount} ready · ${evidence.blocked.issueCount} blocked · ${evidence.backlog.issueCount} backlog${evidence.startedCount ? ` · ${evidence.startedCount} in progress` : ""}` : "No current available-work issues"}</p></div><button type="button" className="text-button" onClick={() => setDrawerProjectId(item.id)}>Inspect project</button></div>
-        <ProjectClassificationControl project={item} draft={classificationDraft(item)} busy={busy} onDraft={(value) => setClassificationDraft(item, value)} onSave={() => void saveClassification(item)} />
-      </article>; })}</div>
-    </section>}
+    <OngoingAvailableWork rows={ongoingAvailable.rows} needsClassificationRows={ongoingAvailable.needsClassificationRows} classificationControl={(row) => {
+      const item = state.packages.find((project) => project.project_id === row.projectId);
+      return item ? <ProjectClassificationControl project={item} draft={classificationDraft(item)} busy={busy} onDraft={(value) => setClassificationDraft(item, value)} onSave={() => void saveClassification(item)} /> : null;
+    }} />
     {(state.roadmapPlanningMigrated || unassignedOutcomes.length > 0) && <div className="unassigned-outcomes"><h3 id="board-unassigned-outcomes-title" tabIndex={-1}>Needs Assignment</h3><p>Outcomes listed here need a stream. Open an outcome to choose its placement; existing shared capacity owners are preserved.</p>{state.roadmapPlanningMigrated && <OutcomeDrop streamId={null} dragging={draggingOutcome} busy={busy} onMove={moveOutcome} onEnd={() => setDraggingOutcome(null)} />}{unassignedOutcomes.map((outcome) => state.roadmapPlanningMigrated ? <div className="unassigned-outcome-controls" key={outcome.id}><OutcomeBoardControls outcome={outcome} busy={busy} dragging={draggingOutcome} onDrag={(event, id) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData(outcomeDragType, id); setDraggingOutcome(id); }} onEnd={() => setDraggingOutcome(null)} onMove={moveOutcome} onOpen={onOpenOutcome} />{outcomeLifecycleSummary(outcome.lifecycle) && <small className="outcome-lifecycle-summary">{outcomeLifecycleSummary(outcome.lifecycle)}</small>}</div> : <label key={outcome.id}>{outcome.title}{outcomeLifecycleSummary(outcome.lifecycle) && <small className="outcome-lifecycle-summary">{outcomeLifecycleSummary(outcome.lifecycle)}</small>}<select disabled={busy} value="" aria-label={`Assign ${outcome.title} to stream`} onChange={(event) => void save({ type: "outcomeAssignment", outcomeId: outcome.id, streamId: event.target.value }, `${outcome.title} assigned to ${state.streams.find((stream) => stream.id === event.target.value)?.name}.`)}><option value="">Choose stream…</option>{state.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select></label>)}{!unassignedOutcomes.length && <p className="empty">All outcomes are assigned to streams.</p>}</div>}
     <StreamManager refreshKey={refreshKey} onChanged={() => { void load(); onChanged?.(); }} />
     {state.roadmapPlanningMigrated ? <RoadmapTriage state={state} card={card} drop={dropTarget} /> : <div className="board-shelves priority-shelf"><div>{dropTarget(null, true, null, "Drop into Needs assignment")}

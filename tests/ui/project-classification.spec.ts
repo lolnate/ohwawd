@@ -34,7 +34,7 @@ test("keyboard save refreshes classification, restores focus, persists, and cont
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status")).toContainText("API foundation local classification saved as Ongoing");
   await expect(needs).toHaveCount(0);
-  await expect(page.locator("#board-roadmap-triage-title")).toBeFocused();
+  await expect(page.locator("#ongoing-work-title")).toBeFocused();
   expect((await assignment.board()).packages.find((item) => item.project_id === "a")?.effective_classification).toBe("ongoing");
   await page.reload();
   expect((await assignment.board()).packages.find((item) => item.project_id === "a")?.local_classification).toBe("ongoing");

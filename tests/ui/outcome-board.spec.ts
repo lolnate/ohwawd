@@ -74,7 +74,8 @@ test("sidebar placement supports explicit order, stream append and an exact same
   const needsAssignment = page.locator(".unassigned-outcomes");
   await expect(needsAssignment.getByRole("heading", { name: "Needs Assignment", exact: true })).toBeVisible();
   await expect(needsAssignment).toContainText("Foundation");
-  expect(await page.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("unassigned-outcomes"))).toBe(true);
+  expect(await page.locator("#project-streams").evaluate((element) => element.nextElementSibling?.classList.contains("ongoing-work"))).toBe(true);
+  expect(await page.locator(".ongoing-work").evaluate((element) => element.nextElementSibling?.classList.contains("unassigned-outcomes"))).toBe(true);
   expect(await needsAssignment.evaluate((element) => element.nextElementSibling?.classList.contains("stream-manager"))).toBe(true);
 });
 
