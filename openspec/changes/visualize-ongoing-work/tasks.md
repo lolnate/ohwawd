@@ -16,7 +16,7 @@
 
 ## 4. Ongoing Work Read APIs
 
-- [ ] 4.1 Build server-side available-work and completed-history aggregates plus the validated lazy issue-detail endpoint; verify mutually exclusive Ready/Blocked/Backlog buckets, points and unestimated counts, default ordering, attention rows, six-cycle defaults, older history, and untrusted-filter rejection with API/domain tests in `npm test`.
+- [x] 4.1 Build server-side available-work and completed-history aggregates plus the validated lazy issue-detail endpoint; verify mutually exclusive Ready/Blocked/Backlog buckets, points and unestimated counts, default ordering, attention rows, six-cycle defaults, older history, and untrusted-filter rejection with API/domain tests in `npm test`.
 
 ## 5. Board Interaction And Visualization
 

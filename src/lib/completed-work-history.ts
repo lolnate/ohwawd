@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { resolveProjectClassification, type EffectiveProjectClassification, type ProjectClassification } from "./project-classification";
 
 const attributionCutoffMs = 30 * 24 * 60 * 60 * 1000;
+type Client = Pick<PoolClient, "query">;
 
 export const completedWorkHistoryMigrationSql = `
   ALTER TABLE workspace ADD COLUMN completed_attribution_backfilled boolean NOT NULL DEFAULT false;
@@ -68,7 +69,7 @@ export type CompletedWorkHistoryEvidence = {
   freezeReason: "current-at-migration" | "cutoff" | null;
 };
 
-async function labelsByProject(client: PoolClient, projectIds: string[]): Promise<Map<string, { id: string; name: string }[]>> {
+async function labelsByProject(client: Client, projectIds: string[]): Promise<Map<string, { id: string; name: string }[]>> {
   if (!projectIds.length) return new Map();
   const result = await client.query<{ project_id: string; label_id: string; name: string }>(
     "SELECT project_id,label_id,name FROM linear_project_label_cache WHERE project_id=ANY($1::text[])", [projectIds],
@@ -120,7 +121,7 @@ export async function snapshotEligibleCompletedIssues(client: PoolClient, teamId
   return inserted;
 }
 
-export async function readCompletedWorkHistoryEvidence(client: PoolClient, teamId: string): Promise<CompletedWorkHistoryEvidence[]> {
+export async function readCompletedWorkHistoryEvidence(client: Client, teamId: string): Promise<CompletedWorkHistoryEvidence[]> {
   const frozen = await client.query<FrozenAttributionRow>(`SELECT a.issue_id,a.identifier,a.title,a.url,a.estimate::text,a.state_type,a.completed_at,
       a.source_updated_at,a.project_id,COALESCE(CASE WHEN NOT p.needs_review THEN p.name END,a.project_name) AS project_name,
       a.classification,a.frozen_at,a.freeze_reason

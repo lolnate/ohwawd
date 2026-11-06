@@ -12,6 +12,7 @@ import { roadmapConversionFeedback, type StoredRoadmapFields } from "./roadmap-p
 import { planningToken } from "./planning-token";
 import { getOutcomeLifecycles } from "./outcome-lifecycle";
 import { projectClassificationState, type ClassificationProvenance, type EffectiveProjectClassification, type ProjectClassification } from "./project-classification";
+import { emptyOngoingWorkInsights, getOngoingWorkInsights } from "./ongoing-work-insights";
 
 type BoardPackage = StoredRoadmapFields & { id: string; project_id: string; team_id: string; stream_id: string | null; capacity_outcome_id: string | null;
   selected: boolean; sequence_position: number | null; pause_reason: string; name: string; description: string; status: string; linear_priority: number | null;
@@ -53,6 +54,13 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
     return { ...item, effective_classification: classification.classification, classification_provenance: classification.provenance,
       roadmap_label_ids: classification.roadmapLabelIds, ongoing_label_ids: classification.ongoingLabelIds };
   });
+  const ongoingWorkSchema = await database.query<{ available: boolean }>(
+    "SELECT to_regclass('completed_issue_attribution') IS NOT NULL AND to_regclass('linear_issue_blocker_cache') IS NOT NULL AS available",
+  );
+  const ongoingWork = connection.rows[0]?.team_id && ongoingWorkSchema.rows[0]?.available
+    ? await getOngoingWorkInsights(database, connection.rows[0].team_id)
+    : emptyOngoingWorkInsights();
+  const roadmapIssues = issues.rows.filter((issue) => issue.project_id && classifications.get(issue.project_id)?.classification === "roadmap");
   const sourceAt = (connection.rows[0]?.source_at ?? workspace.rows[0].created_at).toISOString();
   const cycleAnchorAt = cycleAnchor?.toISOString() ?? sourceAt;
   const cycleAnchorTime = Date.parse(cycleAnchorAt);
@@ -118,6 +126,6 @@ async function loadBoard(database: Pick<PoolClient, "query">, cycleAnchor: Date 
     linearCycles: importedCycles, planningCycles: calendar.cycles, calendarProjection: calendar.projection,
     currentCycleId: currentCycle?.linear_id ?? null, cycleAnchorAt, futureCycleIds: future.map((row) => row.linear_id),
     adjustments: adjustments.rows, legacyAdjustments: legacyAdjustments.rows,
-    dependencies: dependencies.rows, issues: issues.rows, reconciliationWarnings, timezone: input.timezone,
+    dependencies: dependencies.rows, issues: roadmapIssues, ongoingWork, reconciliationWarnings, timezone: input.timezone,
       sequencing, sequenceToken: sequenceToken(sequencing), ownershipToken: await ownershipToken(database), planningToken: await planningToken(database), sequenceConflicts, forecast: result };
 }

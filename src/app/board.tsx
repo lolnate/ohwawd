@@ -22,6 +22,7 @@ import { RoadmapOwnedWork, RoadmapTriage } from "./roadmap-board-work";
 import type { RoadmapState } from "@/lib/roadmap-planning";
 import DismissibleMessage from "./dismissible-message";
 import { isCurrentOrFutureProjectStatus } from "@/lib/project-status";
+import type { OngoingWorkInsights } from "@/lib/ongoing-work-insights";
 
 type Stream = { id: string; name: string; allocation: number; wip_limit: number };
 type LinearCycle = PlanningCycle;
@@ -41,6 +42,7 @@ export type BoardState = {
   weeklyAdjustments: WeeklyAvailability[]; holidayWeeks: WeeklyAvailability[];
   roadmapPlanningMigrated?: boolean; roadmapConversionFeedback?: (RoadmapConversion & { packageId: string })[]; planningToken?: string;
   affectedCandidates?: { id: string; name: string }[];
+  ongoingWork: OngoingWorkInsights;
 };
 const fmt = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 const projectHome = (item: Package, active?: boolean) => active && item.roadmap_state !== "included" ? item.roadmap_state === "deferred" ? "deferred-work" : item.roadmap_state === "dismissed" ? "dismissed-work" : "board-roadmap-triage-title" : !item.selected ? "deferred-work" : item.stream_id ? `stream-work-${item.stream_id}` : "unassigned-work";
