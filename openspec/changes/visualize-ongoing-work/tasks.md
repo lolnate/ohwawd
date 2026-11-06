@@ -26,4 +26,4 @@
 
 ## 6. Integrated Validation
 
-- [ ] 6.1 Run `npm run typecheck`, `npm test`, `npm run test:ui`, `npm run build`, and `openspec validate visualize-ongoing-work --strict`; resolve regressions and verify the existing five-stream forecast geometry and scheduling behavior remain unchanged.
+- [x] 6.1 Run `npm run typecheck`, `npm test`, `npm run test:ui`, `npm run build`, and `openspec validate visualize-ongoing-work --strict`; resolve regressions and verify the existing five-stream forecast geometry and scheduling behavior remain unchanged.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { forecast, historicalBaseline, type ForecastInput, type ForecastPackage } from "../src/lib/forecast";
+import { addCalendarDays, fractionalTimelineSpan } from "../src/lib/planning-calendar";
 
 const pkg = (id: string, streamId: string | null, known: number): ForecastPackage => ({
   id, projectId: id, name: id, status: "planned", streamId, selected: true,
@@ -39,6 +40,40 @@ test("streams run concurrently but projects in one stream execute sequentially a
   assert.equal(result.outcomes[0].finish, 2);
   assert.equal(result.outcomes[1].finish, 3);
   assert.ok(result.cycles.every((cycle) => cycle.streams.every((stream) => stream.active.length <= 1)));
+});
+
+test("five streams preserve concurrent scheduling and sequential timeline geometry", () => {
+  const streams = Array.from({ length: 5 }, (_, index) => ({ id: `stream-${index + 1}`, name: `Stream ${index + 1}`, allocation: 0.2, wip: 1 }));
+  const first = pkg("first", "stream-1", 5); first.sequence = 1;
+  const second = pkg("second", "stream-1", 5); second.sequence = 2;
+  const input = base([first, second, ...streams.slice(1).map((stream) => pkg(`work-${stream.id}`, stream.id, 5))]);
+  input.streams = streams;
+  input.baseline = 25;
+  input.reserve = 0;
+
+  const result = forecast(input);
+  const projections = new Map(result.packages.map((item) => [item.id, item]));
+  assert.deepEqual(result.cycles[0].streams.map((stream) => [stream.id, stream.budget, stream.active]), [
+    ["stream-1", 5, ["first"]],
+    ["stream-2", 5, ["work-stream-2"]],
+    ["stream-3", 5, ["work-stream-3"]],
+    ["stream-4", 5, ["work-stream-4"]],
+    ["stream-5", 5, ["work-stream-5"]],
+  ]);
+  assert.deepEqual([projections.get("first")?.start, projections.get("first")?.finish], [1, 1]);
+  assert.deepEqual([projections.get("second")?.start, projections.get("second")?.finish], [2, 2]);
+
+  const span = (id: string) => {
+    const projection = projections.get(id)!;
+    const start = result.cycles[projection.start! - 1].start;
+    const final = result.cycles[projection.finish! - 1];
+    return fractionalTimelineSpan(start, final.start, addCalendarDays(final.end, 1), 1, result.cycles[0].start, 8);
+  };
+  const firstSpan = span("first")!;
+  for (const stream of streams.slice(1)) assert.deepEqual(span(`work-${stream.id}`), firstSpan);
+  const secondSpan = span("second")!;
+  assert.ok(Math.abs(firstSpan.left + firstSpan.width - secondSpan.left) < 0.000001);
+  assert.equal(firstSpan.width, secondSpan.width);
 });
 
 test("legacy WIP two still follows queue order independently of source priority and retired start fields", () => {
