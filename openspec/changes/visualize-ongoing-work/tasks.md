@@ -20,7 +20,7 @@
 
 ## 5. Board Interaction And Visualization
 
-- [ ] 5.1 Expose classification, provenance, source-label conflicts, and local classification controls in project planning and Needs classification surfaces, retaining drafts and feedback on failures; verify pointer, keyboard, stale-conflict, focus, and narrow-screen behavior with targeted Playwright tests in `npm run test:ui`.
+- [x] 5.1 Expose classification, provenance, source-label conflicts, and local classification controls in project planning and Needs classification surfaces, retaining drafts and feedback on failures; verify pointer, keyboard, stale-conflict, focus, and narrow-screen behavior with targeted Playwright tests in `npm run test:ui`.
 - [ ] 5.2 Add the Ongoing available-work table below roadmap streams with issue-count geometry, Ready/Blocked/Backlog segments, estimates, unestimated and in-progress context, Needs classification grouping, and lazy issue inspection; verify sorting, exact values, Linear links, blocker evidence, empty states, keyboard use, and 390px containment with targeted Playwright tests in `npm run test:ui`.
 - [ ] 5.3 Add the semantic completed-cycle heatmap with sticky project rows, global intensity, numeric cells, Issues/Points switching, attention rows, six-cycle default, Show older cycles, coverage notice, and lazy issue inspection; verify cycle naming, frozen/recent placement, non-color interpretation, forced colors, reduced motion, focus restoration, and desktop/mobile layouts with targeted Playwright tests in `npm run test:ui`.
 

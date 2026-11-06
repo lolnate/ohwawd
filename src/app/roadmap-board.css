@@ -23,6 +23,24 @@
 .project-roadmap-controls { padding: 12px 0; min-width: 0; }
 .project-roadmap-controls .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .roadmap-link-guidance { margin-top: 12px; }
+.needs-classification { min-width: 0; margin-top: 20px; padding: 16px; border: 1px solid var(--color-warning); border-radius: 12px; background: var(--color-warning-bg); }
+.needs-classification .compact-section-head { align-items: flex-start; }
+.classification-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; margin-top: 12px; }
+.classification-card, .project-classification { min-width: 0; overflow-wrap: anywhere; }
+.classification-card { padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); }
+.classification-project, .classification-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.classification-project h4, .project-classification h4 { margin: 0; }
+.classification-project p, .classification-heading p { margin: 4px 0 0; color: var(--color-text-muted); }
+.project-classification { padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-raised); }
+.classification-card .project-classification { margin-top: 12px; }
+.classification-provenance { display: inline-block; margin-left: 6px; padding: 2px 5px; border-radius: 4px; color: var(--color-info); background: var(--color-info-bg); font-size: .75rem; font-weight: 700; }
+.classification-provenance.unresolved { color: var(--color-warning); background: var(--color-warning-bg); }
+.classification-source, .classification-override { margin: 8px 0; color: var(--color-text-muted); }
+.classification-source.conflict, .classification-override { padding: 8px; border-left: 3px solid var(--color-warning); background: var(--color-warning-bg); color: var(--color-warning); }
+.project-classification fieldset { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; margin: 12px 0; padding: 0; border: 0; }
+.project-classification legend { width: 100%; margin-bottom: 4px; color: var(--color-text-muted); font-size: .8rem; font-weight: 700; }
+.project-classification label { display: inline-flex; align-items: center; gap: 6px; }
+.classification-save { max-width: 100%; }
 .project-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .outcome-placement { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-border); }
 .outcome-placement fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
@@ -32,4 +50,6 @@
   .outcome-board-controls button { min-height: 44px; }
   .outcome-drag-handle { min-width: 44px; }
   .outcome-priority-head { gap: 4px; }
+  .needs-classification, .classification-card, .project-classification { max-width: 100%; }
+  .classification-project { flex-direction: column; }
 }

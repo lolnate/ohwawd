@@ -4,15 +4,17 @@ import { useEffect, useRef, type ReactNode } from "react";
 import type { BoardState } from "./board";
 import type { BoardProject } from "./project-plan-card";
 import { projectCodes } from "@/lib/outcome-planning";
+import ProjectClassificationControl, { type ClassificationDraft } from "./project-classification-control";
 
 function outsideDialog(dialog: HTMLDialogElement, x: number, y: number): boolean {
   const bounds = dialog.getBoundingClientRect();
   return x < bounds.left || x >= bounds.right || y < bounds.top || y >= bounds.bottom;
 }
 
-export default function ProjectDrawer({ project, state, busy, error, notice, children, onSave, onOpenProject, onClose, onOpenOutcome }: {
+export default function ProjectDrawer({ project, state, busy, error, notice, children, classificationDraft, onClassificationDraft, onSaveClassification, onSave, onOpenProject, onClose, onOpenOutcome }: {
   project: BoardProject; state: BoardState; busy: boolean; error: string; notice: string; children: ReactNode;
   onSave: (change: Record<string, unknown>, message: string) => Promise<boolean>;
+  classificationDraft: ClassificationDraft; onClassificationDraft: (value: ClassificationDraft) => void; onSaveClassification: () => void;
   onOpenProject: (project: BoardProject) => void; onClose: () => void;
   onOpenOutcome?: (id: string) => void;
 }) {
@@ -61,6 +63,7 @@ export default function ProjectDrawer({ project, state, busy, error, notice, chi
     <header className="project-drawer-header"><div><p className="eyebrow">Linear project · {codes.get(project.id)}</p><h2 id="project-drawer-title" ref={titleRef} tabIndex={-1}>{project.name}</h2><p>{project.status}{!project.in_scope ? " · hidden from source view" : ""}</p></div><button type="button" className="secondary" onClick={onClose} aria-label="Close project details">Close</button></header>
     <div className="project-drawer-body">
       {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
+      <ProjectClassificationControl project={project} draft={classificationDraft} busy={busy} onDraft={onClassificationDraft} onSave={onSaveClassification} />
       <section className="capacity-owner-panel"><h3>Capacity owner</h3>
         <p className="capacity-owner-location">{project.selected ? <><strong>{projection?.demand ?? 0} pts</strong> counted once in <strong>{owner?.title ?? (state.roadmapPlanningMigrated ? "Needs owning outcome" : "Other selected work")}</strong> · {stream?.name ?? "Needs assignment"}</> : `${state.roadmapPlanningMigrated ? project.roadmap_state : "Deferred"} · no future capacity counted`}</p>
         {!state.roadmapPlanningMigrated && <label>Count points toward outcome / stream<select disabled={busy || !project.selected} value={project.capacity_outcome_id ?? ""} onChange={(event) => void onSave({ type: "ownership", packageId: project.id, outcomeId: event.target.value || null }, `${project.name} capacity owner updated. All linked outcomes use the same project forecast.`)}>

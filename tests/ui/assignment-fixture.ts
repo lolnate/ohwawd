@@ -18,8 +18,10 @@ import { requirePlanningToken } from "../../src/lib/planning-token";
 import { activateRoadmapPlanning } from "../../src/lib/roadmap-store";
 import { saveOutcomeCompletion, reconcileOutcomeCompletions } from "../../src/lib/outcome-lifecycle";
 import { saveDependency } from "../../src/lib/dependency-store";
+import { projectClassificationMigrationSql, reconcileProjectClassifications, saveLocalProjectClassification, type ProjectClassification } from "../../src/lib/project-classification";
 
 type Controls = { board: () => ReturnType<typeof getBoard>; time: (value: string) => void; invalidateNextMove: () => void; addSourceConflict: () => Promise<void>;
+  invalidateNextClassification: () => void; setClassification: (projectId: string, labels: "roadmap" | "ongoing" | "both" | "neither", local?: ProjectClassification | null) => Promise<void>;
   seedDerivedChain: () => Promise<void>;
   seedOptionalDerived: () => Promise<void>;
   activateRoadmap: () => Promise<void>;
@@ -48,6 +50,7 @@ export const test = base.extend<{ assignment: Controls }>({
     const client = database as unknown as PoolClient;
     let evaluatedAt = new Date("2026-11-05T23:59:59Z");
     let invalidateNextMove = false;
+    let invalidateNextClassification = false;
     const board = () => getBoard(client, undefined, evaluatedAt);
     async function outcomeWrite<T>(write: () => Promise<T>) {
       await database.query("BEGIN");
@@ -88,6 +91,7 @@ export const test = base.extend<{ assignment: Controls }>({
             let affectedCandidates: { id: string; name: string }[] = [];
             if (request.method() === "PUT") {
               if (body.type === "package" && invalidateNextMove) { invalidateNextMove = false; await outcomeWrite(() => placeProjects(client, [{ packageId: "linear:b", streamId: "core", selected: true, beforeId: "linear:a" }])); }
+              if (body.type === "classification" && invalidateNextClassification) { invalidateNextClassification = false; await database.query("UPDATE work_package SET local_classification_updated_at=local_classification_updated_at + interval '1 second' WHERE project_id='b'"); }
               await outcomeWrite(async () => {
               if (body.type === "package") {
                 await requireSequenceToken(client, body.sequenceToken);
@@ -96,7 +100,8 @@ export const test = base.extend<{ assignment: Controls }>({
               } else if (body.type === "extraScope") await saveExtraScope(client, body);
               else if (body.type === "ownership") await transferProjectOwnership(client, body);
               else if (body.type === "outcomeAssignment") { const result = await assignOutcomeToStream(client, body); affectedCandidates = result?.affectedCandidates ?? []; }
-               else if (body.type === "roadmapMembership") await changeRoadmapMembership(client, body);
+                else if (body.type === "roadmapMembership") await changeRoadmapMembership(client, body);
+                else if (body.type === "classification") await saveLocalProjectClassification(client, body);
                else if (body.type === "stream") await database.query("UPDATE stream SET name=$2,allocation=$3,wip_limit=1 WHERE id=$1", [body.id, body.name, body.allocation]);
                else if (body.type === "assignment") { await requireSequenceToken(client, body.sequenceToken); await assignPackagesToStream(client, body.streamId, body.packageIds, body.outcomeId); }
               else if (body.type === "dependency") await saveDependency(client, body);
@@ -152,8 +157,17 @@ export const test = base.extend<{ assignment: Controls }>({
           await route.fulfill({ status: error instanceof HttpError ? error.status : 500, json: { error: error instanceof Error ? error.message : String(error), ...(error instanceof HttpError ? error.details : {}) } });
         }
       });
-      await use({ board, time: (value) => { evaluatedAt = new Date(value); }, invalidateNextMove: () => { invalidateNextMove = true; },
-        activateRoadmap: async () => { await outcomeWrite(() => activateRoadmapPlanning(client)); },
+      await use({ board, time: (value) => { evaluatedAt = new Date(value); }, invalidateNextMove: () => { invalidateNextMove = true; }, invalidateNextClassification: () => { invalidateNextClassification = true; },
+        setClassification: async (projectId, labels, local = null) => { await outcomeWrite(async () => {
+          await database.query("DELETE FROM linear_project_label_cache WHERE project_id=$1", [projectId]);
+          if (labels === "roadmap" || labels === "both") await database.query("INSERT INTO linear_project_label_cache(project_id,label_id,name) VALUES($1,$2,'Roadmap')", [projectId, `roadmap-${projectId}`]);
+          if (labels === "ongoing" || labels === "both") await database.query("INSERT INTO linear_project_label_cache(project_id,label_id,name) VALUES($1,$2,'Ongoing')", [projectId, `ongoing-${projectId}`]);
+          await database.query(`UPDATE work_package SET local_classification=$2,
+            local_classification_updated_at=CASE WHEN $2::text IS NULL THEN NULL ELSE now() END,
+            local_classification_updated_by=CASE WHEN $2::text IS NULL THEN NULL ELSE 'Fixture' END WHERE project_id=$1`, [projectId, local]);
+          await reconcileProjectClassifications(client, [projectId]);
+        }); },
+        activateRoadmap: async () => { await outcomeWrite(() => activateRoadmapPlanning(client)); await database.exec(projectClassificationMigrationSql); },
         seedOutcomeBoard: async () => {
           await database.query("UPDATE stream SET allocation=CASE WHEN id='core' THEN 1 ELSE 0 END");
           await database.query("UPDATE capacity_profile SET baseline=10,holidays_enabled=false WHERE workspace_id=1");

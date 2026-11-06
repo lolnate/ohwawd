@@ -7,11 +7,15 @@ import { placementError, type QueueState, type Placement } from "@/lib/sequencin
 import type { StoredRoadmapFields } from "@/lib/roadmap-planning";
 import type { BoardOutcome } from "./board";
 import ProjectRoadmapControls from "./project-roadmap-controls";
+import type { ClassificationProvenance, EffectiveProjectClassification, ProjectClassification } from "@/lib/project-classification";
 
 export type BoardProject = Partial<StoredRoadmapFields> & { id: string; project_id: string; name: string; status: string; url: string; stream_id: string | null;
   capacity_outcome_id?: string | null; description?: string;
   selected: boolean; sequence_position: number | null; linear_priority: number | null; pause_reason: string;
-  cross_team: boolean; needs_review: boolean; in_scope: boolean; remaining_scope?: number | null };
+  cross_team: boolean; needs_review: boolean; in_scope: boolean; remaining_scope?: number | null;
+  effective_classification?: EffectiveProjectClassification; classification_provenance?: ClassificationProvenance;
+  local_classification?: ProjectClassification | null; local_classification_updated_at?: string | null; local_classification_updated_by?: string | null;
+  roadmap_label_ids?: string[]; ongoing_label_ids?: string[] };
 
 type Props = { item: BoardProject; streams: { id: string; name: string }[]; sequencing: QueueState; projection?: PackageForecast;
   embedded?: boolean;
