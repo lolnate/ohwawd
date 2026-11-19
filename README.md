@@ -19,6 +19,14 @@ npm run db:migrate
 npm run dev
 ```
 
+For access from another computer on the private network, allow the hostname or IP address used in the browser URL and bind the dev server to all interfaces:
+
+```sh
+DEV_ALLOWED_ORIGINS=192.168.1.190 npm run dev -- --hostname 0.0.0.0
+```
+
+Replace the example IP with the dev machine's current address. `DEV_ALLOWED_ORIGINS` accepts comma-separated hostnames or IP addresses, without a scheme or port. Restart the dev server after changing it. Next.js checks development WebSocket origins as well as asset requests; a missing or outdated entry can leave the page stuck at **Opening workspace…** even when `/api/session` responds normally.
+
 Open `http://localhost:3000`, sign in, enter a Linear API key, check access, choose one team, preview its projects, and import. The preview includes all project states. You can create an outcome before importing, then link each imported project as minimum-required or optional. Search and status-filter the imported list, or hide irrelevant projects from planning lists; hiding is reversible and preserves existing outcome links. Completed projects remain available. Subsequent imports for the same team can use the saved server-side key, deduplicate projects, issues, and cycles by Linear ID, preserve outcome links and local visibility choices, and flag projects absent from the latest import for review. A different team requires a new workspace; this proof does not merge teams.
 
 The board places newly imported selected packages on **Needs assignment**. It reads the connected team's cycle names, dates, timezone, and cadence from Linear; there is no local cycle-date editor. Choose a provisional baseline with a reason (or use the median of at least three comparable completed Linear cycles), set reserve, and allocate at most 100% across the active streams. The visible calendar lets you select a date in one or several upcoming Linear cycles, then apply availability or reserve exceptions to those cycle IDs. You can refresh cycles with the saved Linear key without reimporting every project. The current partial cycle is context only. If Linear has not created a future cycle, the forecast stops at the last imported cycle instead of inventing dates; increase the team's upcoming cycle count in Linear and refresh to extend the calendar.
